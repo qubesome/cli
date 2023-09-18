@@ -33,8 +33,8 @@ func main() {
 		},
 		SingleInstance: true,
 		Path: []string{
-			"/Downloads",
-			"/.config/google-chrome",
+			"/Downloads:/home/chrome/Downloads",
+			"/.config/google-chrome:/home/chrome/.config/google-chrome",
 		},
 		NamedDevices: []string{
 			"YubiKey",
