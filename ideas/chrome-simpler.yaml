@@ -1,0 +1,22 @@
+workload:
+  command: /usr/bin/google-chrome
+  args: []
+  singleInstance: true
+
+  hostAccess:
+    x11: true
+    camera: true
+    microphone: true
+    speakers: true
+    smartcard: true
+    gpu: true
+    hostName: true
+    localTime: true # needed?
+
+  paths:
+  - ${HOMEDIR}/Downloads
+  - ${HOMEDIR}/.config/google-chrome
+
+  namedDevices:
+  - YubiKey
+  - Logitech USB Receiver

@@ -1,0 +1,30 @@
+profile:
+  name: personal
+
+  hostAccess:
+    x11: true
+    camera: true
+    microphone: true
+    speakers: true
+    smartcard: true
+    gpu: true
+    hostName: true
+    localTime: true # needed?
+
+  paths:
+  - ${HOMEDIR}/Downloads
+  - ${HOMEDIR}/.config/google-chrome
+
+  deviceMapping:
+    camera:
+      namedDevices:
+      - Logitech USB Receiver
+    
+    smartcard:
+      namedDevices:
+      - YubiKey
+  
+  namedDevices:
+  - Logitech USB Receiver
+  - YubiKey
+  - Bread in Powder form
