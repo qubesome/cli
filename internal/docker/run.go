@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +16,44 @@ var (
 	basePath = "/home/paulo/.qubesome/profiles"
 )
 
+func containerId(name string) (string, bool) {
+	args := fmt.Sprintf("ps -a -q -f name=%s", name)
+	cmd := execabs.Command(command,
+		strings.Split(args, " ")...)
+
+	out, err := cmd.Output()
+	id := string(bytes.TrimSuffix(out, []byte("\n")))
+
+	if err != nil || id == "" {
+		return "", false
+	}
+
+	return id, true
+}
+
+func exec(id string, wl workload.Effective) error {
+	args := []string{"exec", id, wl.Command}
+	args = append(args, wl.Args...)
+
+	fmt.Printf("docker exec %s %s\n", id, strings.Join(args, " "))
+
+	cmd := execabs.Command(command, args...)
+
+	return cmd.Run()
+}
+
 func Run(wl workload.Effective) error {
+	if err := wl.Validate(); err != nil {
+		return err
+	}
+
+	if wl.SingleInstance {
+		container := fmt.Sprintf("%s-%s", wl.Name, wl.Profile)
+		if id, ok := containerId(container); ok {
+			return exec(id, wl)
+		}
+	}
+
 	ndevs, err := namedDevices(wl.NamedDevices)
 	if err != nil {
 		return fmt.Errorf("failed to get named devices: %w", err)
@@ -32,13 +70,13 @@ func Run(wl workload.Effective) error {
 		"--rm",
 		"-d",
 		"--security-opt", "seccomp=unconfined",
-		"-v=/dev:/dev",         // required for camera, or named devices
 		"-v=/dev/shm:/dev/shm", // TODO: bind it with ipc?
 	}
 
 	args = append(args, paths...)
 
-	if wl.Audio {
+	// TODO: Split
+	if wl.Microphone || wl.Speakers {
 		args = append(args, audioParams()...)
 	}
 	if wl.Camera {
@@ -46,6 +84,19 @@ func Run(wl workload.Effective) error {
 	}
 	if wl.X11 {
 		args = append(args, x11Params()...)
+	}
+
+	if wl.VarRunUser {
+		args = append(args, "-v=/run/user/1000:/run/user/1000")
+	}
+
+	// TODO: Find a way to not use /dev:/dev
+	if wl.Camera || len(wl.NamedDevices) > 0 || wl.SmartCard {
+		args = append(args, "-v=/dev:/dev")
+	}
+
+	if wl.Network != "" {
+		args = append(args, fmt.Sprintf("--network=%s", wl.Network))
 	}
 
 	for _, ndev := range ndevs {

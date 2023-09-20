@@ -12,17 +12,17 @@ type Effective struct {
 	NamedDevices []string
 }
 
-type WorkloadDefault struct {
-	Opts
-}
-
-type WorkloadInstance struct {
-	Opts
+func (e *Effective) Validate() error {
+	//TODO: validation
+	return nil
 }
 
 type Opts struct {
-	Camera    bool
-	Audio     bool
-	X11       bool
-	SmartCard bool
+	Camera     bool
+	Speakers   bool
+	Microphone bool
+	X11        bool
+	SmartCard  bool
+	Network    string
+	VarRunUser bool // TODO: improve abstraction
 }

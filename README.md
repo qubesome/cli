@@ -3,13 +3,11 @@
 Image Storage
 
 
-qubesome import --profile="personal" ghcr.io/qubesome/chrome:latest
-qubesome import --profile="personal" --name="Qubesome Chrome" ghcr.io/qubesome/chrome:latest
+# Does other app maps the same paths?
+qubesome import -profile personal -image ghcr.io/qubesome/chrome:latest
+qubesome import -profile personal  -name "Qubesome Chrome" -image ghcr.io/qubesome/chrome:latest
 
-qubesome run 
-    --camera --audio --x11 --gpu
-    --network="bridge"
-    --profile="personal" ghcr.io/qubesome/chrome:latest chrome
+qubesome run -profile="personal" -name chrome
 
 
 profile

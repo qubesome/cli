@@ -24,6 +24,8 @@ profile:
       namedDevices:
       - YubiKey
   
+  keyring:
+
   namedDevices:
   - Logitech USB Receiver
   - YubiKey
