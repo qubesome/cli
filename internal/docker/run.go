@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,8 +36,7 @@ func exec(id string, wl workload.Effective) error {
 	args := []string{"exec", id, wl.Command}
 	args = append(args, wl.Args...)
 
-	fmt.Printf("docker exec %s %s\n", id, strings.Join(args, " "))
-
+	slog.Debug("docker exec", "container-id", id, "cmd", wl.Command, "args", wl.Args)
 	cmd := execabs.Command(command, args...)
 
 	return cmd.Run()
@@ -113,8 +113,7 @@ func Run(wl workload.Effective) error {
 	args = append(args, wl.Command)
 	args = append(args, wl.Args...)
 
-	fmt.Println(command, strings.Join(args, " "))
-
+	slog.Debug(command, "args", args)
 	cmd := execabs.Command(command, args...)
 
 	cmd.Stderr = os.Stderr
