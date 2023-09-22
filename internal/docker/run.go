@@ -152,6 +152,7 @@ func cameraParams() []string {
 
 func audioParams() []string {
 	return []string{
+		// TODO: For Bluetooth (Apple AirPods) you may require /run/user/1000 shared via VarRunUser
 		"-v=/run/user/1000/pipewire-0:/run/user/1000/pipewire-0",
 		"--device=/dev/snd",
 		"--group-add=audio",
