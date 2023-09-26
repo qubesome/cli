@@ -9,7 +9,11 @@ type Workload struct {
 	HostAccess     `yaml:"hostAccess"`
 	Paths          []string `yaml:"paths"`
 	MimeApps       []string `yaml:"mimeApps"`
-	NamedDevices   []string `yaml:"namedDevices"`
+
+	// TODO: Rename to USB Named Devices
+	// grep -R HID_NAME /sys/class/hidraw/*/device/uevent | cut -d'=' -f2
+	NamedDevices []string `yaml:"namedDevices"`
+	Runner       string   `yaml:"runner"`
 }
 
 type HostAccess struct {

@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	logLevel = "ERROR"
+	logLevel string
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	flag.StringVar(&in.Name, "name", "",
 		fmt.Sprintf("The name of the workload to be executed. For new workloads use %s import first.", os.Args[0]))
 	flag.StringVar(&in.Profile, "profile", "untrusted", "The profile name which will be used to run the workload.")
-	flag.StringVar(&logLevel, "log-level", "error", "The level of log information to be shown to the user. Options are: ERROR, INFO, DEBUG and WARN.")
+	flag.StringVar(&logLevel, "log-level", "ERROR", "The level of log information to be shown to the user. Options are: ERROR, INFO, DEBUG and WARN.")
 	flag.Parse()
 
 	h := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slogLevel()})

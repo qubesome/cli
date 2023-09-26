@@ -10,6 +10,7 @@ type Effective struct {
 	Opts
 	Path         []string
 	NamedDevices []string
+	Runner       string
 }
 
 func (e *Effective) Validate() error {

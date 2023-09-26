@@ -8,6 +8,7 @@ import (
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/qubesome-cli/internal/config"
 	"github.com/qubesome/qubesome-cli/internal/docker"
+	"github.com/qubesome/qubesome-cli/internal/firecracker"
 	"github.com/qubesome/qubesome-cli/internal/workload"
 	"gopkg.in/yaml.v3"
 )
@@ -120,7 +121,14 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		SingleInstance: wlDefault.SingleInstance,
 		Path:           wlDefault.Paths,
 		NamedDevices:   wlDefault.NamedDevices,
+		Runner:         wlDefault.Runner,
 	}
 
-	return docker.Run(wl)
+	switch wl.Runner {
+	case "microvm":
+		return firecracker.Run(wl)
+
+	default:
+		return docker.Run(wl)
+	}
 }
