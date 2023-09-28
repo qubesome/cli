@@ -28,11 +28,7 @@ func (q *Qubesome) HandleMime(args []string) error {
 			return fmt.Errorf("cannot handle schemeless mime type: default mime handler is not set")
 		}
 
-		return q.runner(WorkloadInfo{
-			Name:    q.Config.DefaultMimeHandler.Workload,
-			Profile: q.Config.DefaultMimeHandler.Profile,
-			Args:    args,
-		})
+		return q.runner(q.defaultWorkload(args))
 	}
 
 	if m, ok := q.Config.MimeHandlers[u.Scheme]; ok {
@@ -48,9 +44,13 @@ func (q *Qubesome) HandleMime(args []string) error {
 	}
 
 	// falls back to default
-	return q.runner(WorkloadInfo{
+	return q.runner(q.defaultWorkload(args))
+}
+
+func (q *Qubesome) defaultWorkload(args []string) WorkloadInfo {
+	return WorkloadInfo{
 		Name:    q.Config.DefaultMimeHandler.Workload,
 		Profile: q.Config.DefaultMimeHandler.Profile,
 		Args:    args,
-	})
+	}
 }

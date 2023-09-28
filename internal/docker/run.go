@@ -113,7 +113,7 @@ func Run(wl workload.Effective) error {
 	args = append(args, wl.Command)
 	args = append(args, wl.Args...)
 
-	slog.Debug(command, "args", args)
+	slog.Debug(fmt.Sprintf("exec: %s", command), "args", args)
 	cmd := execabs.Command(command, args...)
 
 	cmd.Stderr = os.Stderr
