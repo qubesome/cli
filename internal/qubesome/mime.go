@@ -31,6 +31,7 @@ func (q *Qubesome) HandleMime(args []string) error {
 		return q.runner(WorkloadInfo{
 			Name:    q.Config.DefaultMimeHandler.Workload,
 			Profile: q.Config.DefaultMimeHandler.Profile,
+			Args:    args,
 		})
 	}
 
@@ -38,6 +39,7 @@ func (q *Qubesome) HandleMime(args []string) error {
 		return q.runner(WorkloadInfo{
 			Name:    m.Workload,
 			Profile: m.Profile,
+			Args:    args,
 		})
 	}
 
@@ -49,5 +51,6 @@ func (q *Qubesome) HandleMime(args []string) error {
 	return q.runner(WorkloadInfo{
 		Name:    q.Config.DefaultMimeHandler.Workload,
 		Profile: q.Config.DefaultMimeHandler.Profile,
+		Args:    args,
 	})
 }

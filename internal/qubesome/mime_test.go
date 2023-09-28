@@ -28,6 +28,7 @@ func Test_HandleMime(t *testing.T) {
 			workload: &WorkloadInfo{
 				Name:    "w",
 				Profile: "c",
+				Args:    []string{"app://foo/bar"},
 			},
 		},
 		{
@@ -41,6 +42,7 @@ func Test_HandleMime(t *testing.T) {
 			workload: &WorkloadInfo{
 				Name:    "bar",
 				Profile: "foo",
+				Args:    []string{"app://foo/bar"},
 			},
 		},
 		{
@@ -58,6 +60,7 @@ func Test_HandleMime(t *testing.T) {
 			workload: &WorkloadInfo{
 				Name:    "bar",
 				Profile: "foo",
+				Args:    []string{"app://foo/bar"},
 			},
 		},
 		{

@@ -53,13 +53,16 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		return fmt.Errorf("cannot unmarshal workload config %q: %w", cfg, err)
 	}
 
+	args := wlDefault.Args
+	args = append(args, in.Args...)
+
 	wl := workload.Effective{
 		Profile: in.Profile,
 
 		Name:    in.Name,
 		Image:   wlDefault.Image,
 		Command: wlDefault.Command,
-		Args:    wlDefault.Args,
+		Args:    args,
 		Opts: workload.Opts{
 			Camera:     wlDefault.HostAccess.Camera,    // TODO: pick up from named device from profile
 			SmartCard:  wlDefault.HostAccess.Smartcard, // TODO: pick up from named device from profile

@@ -59,6 +59,9 @@ func qubesomeHome() (string, error) {
 type WorkloadInfo struct {
 	Name    string
 	Profile string
+
+	// Args provides additional args to the default command on the target workload
+	Args []string
 }
 
 func (w *WorkloadInfo) Validate() error {
