@@ -76,6 +76,8 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		Path:           wlDefault.Paths,
 		NamedDevices:   wlDefault.NamedDevices,
 		Runner:         wlDefault.Runner,
+
+		BasePath: profileDir,
 	}
 
 	switch wl.Runner {

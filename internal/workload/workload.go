@@ -11,6 +11,9 @@ type Effective struct {
 	Path         []string
 	NamedDevices []string
 	Runner       string
+
+	// BasePath is the profile base path.
+	BasePath string
 }
 
 func (e *Effective) Validate() error {

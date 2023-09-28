@@ -13,8 +13,7 @@ import (
 )
 
 var (
-	command  = "docker"
-	basePath = "/home/paulo/.qubesome/profiles"
+	command = "docker"
 )
 
 func containerId(name string) (string, bool) {
@@ -105,7 +104,7 @@ func Run(wl workload.Effective) error {
 
 	for _, p := range wl.Path {
 		// TODO: Path traversal
-		args = append(args, fmt.Sprintf("-v=%s", filepath.Join(basePath, wl.Profile, "homedir", p)))
+		args = append(args, fmt.Sprintf("-v=%s", filepath.Join(wl.BasePath, "homedir", p)))
 	}
 
 	args = append(args, fmt.Sprintf("--name=%s-%s", wl.Name, wl.Profile))
