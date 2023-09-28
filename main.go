@@ -4,10 +4,17 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"flag"
 
+	"github.com/qubesome/qubesome-cli/internal/config"
 	"github.com/qubesome/qubesome-cli/internal/qubesome"
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	configFile = ".qubesome/qubesome.config"
 )
 
 var (
@@ -26,8 +33,26 @@ func main() {
 	h := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slogLevel()})
 	slog.SetDefault(slog.New(h))
 
+	args := flag.CommandLine.Args()
+	if len(args) == 0 {
+		usage()
+	}
+
 	q := qubesome.New()
-	err := q.Run(in)
+	var err error
+
+	cfg, err := loadConfig()
+	checkNil(err)
+
+	q.Config = cfg
+
+	switch args[0] {
+	case "run":
+		err = q.Run(in)
+	case "xdg-open":
+		err = q.HandleMime(args[1:])
+	}
+
 	checkNil(err)
 }
 
@@ -52,4 +77,41 @@ func checkNil(err error) error {
 		os.Exit(1)
 	}
 	return nil
+}
+
+func usage() {
+	fmt.Printf(`usage: %s [flags] <command>
+
+Supported commands:
+  run: 	 	  Execute qubesome workloads
+  xdg-open:   opens a file or URL in the user's configured workload
+`, os.Args[0])
+	os.Exit(1)
+}
+
+func loadConfig() (*config.Config, error) {
+	d, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	path := filepath.Join(d, configFile)
+	cfg := &config.Config{}
+
+	if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
+		slog.Debug("qubesome config not found, falling back to default", "path", path)
+		return cfg, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	err = yaml.Unmarshal(data, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("cannot unmarshal qubesome config %q: %w", path, err)
+	}
+
+	return cfg, nil
 }
