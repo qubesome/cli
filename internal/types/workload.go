@@ -24,7 +24,6 @@ type HostAccess struct {
 	Microphone bool   `yaml:"microphone"`
 	Speakers   bool   `yaml:"speakers"`
 	Smartcard  bool   `yaml:"smartcard"`
-	HostName   bool   `yaml:"hostName"`
 	Network    string `yaml:"network"`
 	VarRunUser bool   `yaml:"varRunUser"`
 }
@@ -51,7 +50,6 @@ func (w Workload) ApplyProfile(p Profile) EffectiveWorkload {
 	e.Workload.Speakers = w.Speakers && p.HostAccess.Speakers
 	e.Workload.X11 = w.X11 && p.HostAccess.X11
 	e.Workload.VarRunUser = w.VarRunUser && p.HostAccess.VarRunUser
-	e.Workload.HostName = w.HostName && p.HostAccess.HostName
 
 	want := w.NamedDevices
 	var get []string
