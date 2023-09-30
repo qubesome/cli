@@ -35,7 +35,7 @@ func exec(id string, ew types.EffectiveWorkload) error {
 	args := []string{"exec", id, ew.Workload.Command}
 	args = append(args, ew.Workload.Args...)
 
-	slog.Debug("docker exec", "container-id", id, "cmd", ew.Workload.Command, "args", ew.Workload.Args)
+	slog.Debug(command+" exec", "container-id", id, "cmd", ew.Workload.Command, "args", ew.Workload.Args)
 	cmd := execabs.Command(command, args...)
 
 	return cmd.Run()
@@ -58,10 +58,13 @@ func Run(ew types.EffectiveWorkload) error {
 		return fmt.Errorf("failed to get named devices: %w", err)
 	}
 
-	//TODO: auto map profiles dir
-	paths := []string{
-		"-v=/etc/localtime:/etc/localtime:ro",
-		"-v=/etc/machine-id:/etc/machine-id:ro",
+	var paths []string
+	if wl.HostAccess.LocalTime {
+		paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
+	}
+
+	if wl.HostAccess.MachineId {
+		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
 	}
 
 	args := []string{

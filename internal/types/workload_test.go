@@ -493,6 +493,150 @@ func Test_ApplyProfile(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "MachineId ON: workload ON + profile ON",
+			workload: Workload{
+				HostAccess: HostAccess{MachineId: true},
+			},
+			profile: Profile{
+				HostAccess: HostAccess{MachineId: true},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{MachineId: true},
+				},
+				Profile: Profile{
+					HostAccess: HostAccess{MachineId: true},
+				},
+			},
+		},
+		{
+			name: "MachineId OFF: workload OFF + profile ON",
+			workload: Workload{
+				HostAccess: HostAccess{MachineId: false},
+			},
+			profile: Profile{
+				HostAccess: HostAccess{MachineId: true},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{MachineId: false},
+				},
+				Profile: Profile{
+					HostAccess: HostAccess{MachineId: true},
+				},
+			},
+		},
+		{
+			name: "MachineId OFF: workload ON + profile OFF",
+			workload: Workload{
+				HostAccess: HostAccess{MachineId: true},
+			},
+			profile: Profile{
+				HostAccess: HostAccess{MachineId: false},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{MachineId: false},
+				},
+				Profile: Profile{
+					HostAccess: HostAccess{MachineId: false},
+				},
+			},
+		},
+		{
+			name: "MachineId OFF: workload OFF + profile OFF",
+			workload: Workload{
+				HostAccess: HostAccess{MachineId: false},
+			},
+			profile: Profile{
+				HostAccess: HostAccess{MachineId: false},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{MachineId: false},
+				},
+				Profile: Profile{
+					HostAccess: HostAccess{MachineId: false},
+				},
+			},
+		},
+		{
+			name: "LocalTime ON: workload ON + profile ON",
+			workload: Workload{
+				HostAccess: HostAccess{LocalTime: true},
+			},
+			profile: Profile{
+				HostAccess: HostAccess{LocalTime: true},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{LocalTime: true},
+				},
+				Profile: Profile{
+					HostAccess: HostAccess{LocalTime: true},
+				},
+			},
+		},
+		{
+			name: "LocalTime OFF: workload OFF + profile ON",
+			workload: Workload{
+				HostAccess: HostAccess{LocalTime: false},
+			},
+			profile: Profile{
+				HostAccess: HostAccess{LocalTime: true},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{LocalTime: false},
+				},
+				Profile: Profile{
+					HostAccess: HostAccess{LocalTime: true},
+				},
+			},
+		},
+		{
+			name: "LocalTime OFF: workload ON + profile OFF",
+			workload: Workload{
+				HostAccess: HostAccess{LocalTime: true},
+			},
+			profile: Profile{
+				HostAccess: HostAccess{LocalTime: false},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{LocalTime: false},
+				},
+				Profile: Profile{
+					HostAccess: HostAccess{LocalTime: false},
+				},
+			},
+		},
+		{
+			name: "LocalTime OFF: workload OFF + profile OFF",
+			workload: Workload{
+				HostAccess: HostAccess{LocalTime: false},
+			},
+			profile: Profile{
+				HostAccess: HostAccess{LocalTime: false},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{LocalTime: false},
+				},
+				Profile: Profile{
+					HostAccess: HostAccess{LocalTime: false},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {

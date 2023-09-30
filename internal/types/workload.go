@@ -26,6 +26,14 @@ type HostAccess struct {
 	Smartcard  bool   `yaml:"smartcard"`
 	Network    string `yaml:"network"`
 	VarRunUser bool   `yaml:"varRunUser"`
+
+	// MachineId defines whether the workload should share the same
+	// machine id as the host.
+	MachineId bool `yaml:"machineId"`
+
+	// LocalTime defines whether the workload should share the same
+	// local time as the host.
+	LocalTime bool `yaml:"localTime"`
 }
 
 type EffectiveWorkload struct {
@@ -50,6 +58,8 @@ func (w Workload) ApplyProfile(p Profile) EffectiveWorkload {
 	e.Workload.Speakers = w.Speakers && p.HostAccess.Speakers
 	e.Workload.X11 = w.X11 && p.HostAccess.X11
 	e.Workload.VarRunUser = w.VarRunUser && p.HostAccess.VarRunUser
+	e.Workload.MachineId = w.MachineId && p.HostAccess.MachineId
+	e.Workload.LocalTime = w.LocalTime && p.HostAccess.LocalTime
 
 	want := w.NamedDevices
 	var get []string
