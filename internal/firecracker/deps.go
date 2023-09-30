@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"golang.org/x/sys/execabs"
 )
 
 const (
@@ -24,11 +26,10 @@ const (
 	MB              = 1024 * 1024
 	maxDownloadSize = 100 * MB
 
-	networkIName = "tap0"
-	networkCIDR  = "172.16.0.1/30"
+	networkDevName = "tap1"
 )
 
-func ensureDependencies() error {
+func ensureDependencies(img string) error {
 	if _, err := exec.LookPath(command); err != nil {
 		return err
 	}
@@ -60,18 +61,29 @@ func ensureDependencies() error {
 		}
 	}
 
-	_, err = net.InterfaceByName(networkIName)
+	_, err = net.InterfaceByName(networkDevName)
 	if err != nil {
-		fmt.Printf(`Tap device for firecracker does not exist.
-Create it using the commands below then try again:
+		return setupTaps(img)
+	}
 
-	sudo ip tuntap add dev %[1]s mode tap
-	sudo ip addr add %[2]s dev %[1]s
-	sudo ip link set dev %[1]s up
+	return nil
+}
 
-`,
-			networkIName, networkCIDR)
-		return fmt.Errorf("tap interface %q not found", networkIName)
+func setupTaps(img string) error {
+	slog.Info("setting up taps")
+	cmd := execabs.Command("docker",
+		"run", "--rm", "--privileged",
+		"--network", "host",
+		img,
+		"setup_taps",
+	)
+
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+
+	if err := cmd.Run(); err != nil {
+		return err
 	}
 
 	return nil

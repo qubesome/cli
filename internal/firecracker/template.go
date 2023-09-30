@@ -30,7 +30,7 @@ var configTmpl = `{
         {
             "iface_id": "net1",
             "guest_mac": "06:00:AC:10:00:02",
-            "host_dev_name": "tap0"
+            "host_dev_name": "{{.HostDeviceName}}"
         }
     ],
     "vsock": null,

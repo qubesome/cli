@@ -16,6 +16,7 @@ import (
 type configParams struct {
 	KernelImagePath string
 	RootFsPath      string
+	HostDeviceName  string
 }
 
 func createRootFs(dir, img string) (string, error) {
@@ -48,7 +49,7 @@ func Run(ew types.EffectiveWorkload) error {
 		return fmt.Errorf("firecracker does not support single instance")
 	}
 
-	if err := ensureDependencies(); err != nil {
+	if err := ensureDependencies(ew.Workload.Image); err != nil {
 		return err
 	}
 
@@ -69,6 +70,7 @@ func Run(ew types.EffectiveWorkload) error {
 	params := configParams{
 		KernelImagePath: kfile,
 		RootFsPath:      rootfs,
+		HostDeviceName:  networkDevName,
 	}
 
 	cfgPath := filepath.Join(d, "firecracker.cfg")
