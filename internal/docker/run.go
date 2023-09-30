@@ -85,6 +85,9 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, x11Params()...)
 	}
 
+	// Set hostname to be the same as the container name
+	args = append(args, "-h", ew.Name)
+
 	if wl.VarRunUser {
 		args = append(args, "-v=/run/user/1000:/run/user/1000")
 	}
