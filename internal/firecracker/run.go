@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"text/template"
 
-	"github.com/qubesome/qubesome-cli/internal/workload"
+	"github.com/qubesome/qubesome-cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
 
@@ -39,12 +39,12 @@ func createRootFs(dir, img string) (string, error) {
 	return rootfs, nil
 }
 
-func Run(wl workload.Effective) error {
-	if err := wl.Validate(); err != nil {
+func Run(ew types.EffectiveWorkload) error {
+	if err := ew.Validate(); err != nil {
 		return err
 	}
 
-	if wl.SingleInstance {
+	if ew.Workload.SingleInstance {
 		return fmt.Errorf("firecracker does not support single instance")
 	}
 
@@ -52,12 +52,12 @@ func Run(wl workload.Effective) error {
 		return err
 	}
 
-	d, err := os.MkdirTemp("", fmt.Sprintf("qubesome-%s-%s-", wl.Name, wl.Profile))
+	d, err := os.MkdirTemp("", fmt.Sprintf("qubesome-%s-", ew.Name))
 	if err != nil {
 		return err
 	}
 
-	rootfs, err := createRootFs(d, wl.Image)
+	rootfs, err := createRootFs(d, ew.Workload.Image)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func Run(wl workload.Effective) error {
 	cfgPath := filepath.Join(d, "firecracker.cfg")
 
 	slog.Debug("writing firecracker config file", "path", cfgPath)
-	t, err := template.New("config").Parse(config)
+	t, err := template.New("config").Parse(configTmpl)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,6 @@
 package firecracker
 
-var config = `{
+var configTmpl = `{
     "boot-source": {
       "kernel_image_path": "{{.KernelImagePath}}",
       "boot_args": "keep_bootcon console=ttyS0 reboot=k panic=1 pci=off",

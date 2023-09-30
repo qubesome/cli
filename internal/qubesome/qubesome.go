@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/qubesome/qubesome-cli/internal/config"
+	"github.com/qubesome/qubesome-cli/internal/types"
 )
 
 const (
@@ -22,7 +22,7 @@ var (
 )
 
 type Qubesome struct {
-	Config *config.Config
+	Config *types.Config
 
 	runner func(in WorkloadInfo) error
 }

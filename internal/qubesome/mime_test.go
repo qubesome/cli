@@ -3,7 +3,7 @@ package qubesome
 import (
 	"testing"
 
-	"github.com/qubesome/qubesome-cli/internal/config"
+	"github.com/qubesome/qubesome-cli/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -11,15 +11,15 @@ func Test_HandleMime(t *testing.T) {
 	tests := []struct {
 		name        string
 		args        []string
-		cfg         *config.Config
+		cfg         *types.Config
 		errContains string
 		workload    *WorkloadInfo
 	}{
 		{
 			name: "use default mime handler",
 			args: []string{"app://foo/bar"},
-			cfg: &config.Config{
-				DefaultMimeHandler: &config.MimeHandler{
+			cfg: &types.Config{
+				DefaultMimeHandler: &types.MimeHandler{
 					Workload: "w",
 					Profile:  "c",
 				},
@@ -34,8 +34,8 @@ func Test_HandleMime(t *testing.T) {
 		{
 			name: "use specific mime handler",
 			args: []string{"app://foo/bar"},
-			cfg: &config.Config{
-				MimeHandlers: map[string]config.MimeHandler{
+			cfg: &types.Config{
+				MimeHandlers: map[string]types.MimeHandler{
 					"app": {Workload: "bar", Profile: "foo"},
 				},
 			},
@@ -48,12 +48,12 @@ func Test_HandleMime(t *testing.T) {
 		{
 			name: "prefer specific mime handler over default",
 			args: []string{"app://foo/bar"},
-			cfg: &config.Config{
-				DefaultMimeHandler: &config.MimeHandler{
+			cfg: &types.Config{
+				DefaultMimeHandler: &types.MimeHandler{
 					Workload: "other",
 					Profile:  "handler",
 				},
-				MimeHandlers: map[string]config.MimeHandler{
+				MimeHandlers: map[string]types.MimeHandler{
 					"app": {Workload: "bar", Profile: "foo"},
 				},
 			},
@@ -66,8 +66,8 @@ func Test_HandleMime(t *testing.T) {
 		{
 			name: "error: mismatch specific handler no default mime handler",
 			args: []string{"app://foo/bar"},
-			cfg: &config.Config{
-				MimeHandlers: map[string]config.MimeHandler{
+			cfg: &types.Config{
+				MimeHandlers: map[string]types.MimeHandler{
 					"foo-bar": {Workload: "foo", Profile: "bar"},
 				},
 			},
@@ -76,7 +76,7 @@ func Test_HandleMime(t *testing.T) {
 		{
 			name:        "error: no specific nor default mime handler",
 			args:        []string{"app://foo/bar"},
-			cfg:         &config.Config{},
+			cfg:         &types.Config{},
 			errContains: "the mime type is not configured nor is a default mime",
 		},
 		{

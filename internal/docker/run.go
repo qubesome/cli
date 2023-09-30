@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/qubesome/qubesome-cli/internal/workload"
+	"github.com/qubesome/qubesome-cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
 
@@ -31,25 +31,25 @@ func containerId(name string) (string, bool) {
 	return id, true
 }
 
-func exec(id string, wl workload.Effective) error {
-	args := []string{"exec", id, wl.Command}
-	args = append(args, wl.Args...)
+func exec(id string, ew types.EffectiveWorkload) error {
+	args := []string{"exec", id, ew.Workload.Command}
+	args = append(args, ew.Workload.Args...)
 
-	slog.Debug("docker exec", "container-id", id, "cmd", wl.Command, "args", wl.Args)
+	slog.Debug("docker exec", "container-id", id, "cmd", ew.Workload.Command, "args", ew.Workload.Args)
 	cmd := execabs.Command(command, args...)
 
 	return cmd.Run()
 }
 
-func Run(wl workload.Effective) error {
-	if err := wl.Validate(); err != nil {
+func Run(ew types.EffectiveWorkload) error {
+	if err := ew.Validate(); err != nil {
 		return err
 	}
 
+	wl := ew.Workload
 	if wl.SingleInstance {
-		container := fmt.Sprintf("%s-%s", wl.Name, wl.Profile)
-		if id, ok := containerId(container); ok {
-			return exec(id, wl)
+		if id, ok := containerId(ew.Name); ok {
+			return exec(id, ew)
 		}
 	}
 
@@ -90,7 +90,7 @@ func Run(wl workload.Effective) error {
 	}
 
 	// TODO: Find a way to not use /dev:/dev
-	if wl.Camera || len(wl.NamedDevices) > 0 || wl.SmartCard {
+	if wl.Camera || len(wl.NamedDevices) > 0 || wl.Smartcard {
 		args = append(args, "-v=/dev:/dev")
 	}
 
@@ -102,12 +102,12 @@ func Run(wl workload.Effective) error {
 		args = append(args, fmt.Sprintf("--device=%s", ndev))
 	}
 
-	for _, p := range wl.Path {
+	for _, p := range wl.Paths {
 		// TODO: Path traversal
-		args = append(args, fmt.Sprintf("-v=%s", filepath.Join(wl.BasePath, "homedir", p)))
+		args = append(args, fmt.Sprintf("-v=%s", filepath.Join(ew.Profile.Path, "homedir", p)))
 	}
 
-	args = append(args, fmt.Sprintf("--name=%s-%s", wl.Name, wl.Profile))
+	args = append(args, fmt.Sprintf("--name=%s", ew.Name))
 	args = append(args, wl.Image)
 	args = append(args, wl.Command)
 	args = append(args, wl.Args...)

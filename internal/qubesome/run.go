@@ -6,10 +6,9 @@ import (
 	"path/filepath"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
-	"github.com/qubesome/qubesome-cli/internal/config"
 	"github.com/qubesome/qubesome-cli/internal/docker"
 	"github.com/qubesome/qubesome-cli/internal/firecracker"
-	"github.com/qubesome/qubesome-cli/internal/workload"
+	"github.com/qubesome/qubesome-cli/internal/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,13 +22,13 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		return err
 	}
 
-	profileDir, err := securejoin.SecureJoin(qh, filepath.Join(profilesDir, in.Profile))
-	if err != nil {
-		return err
+	profile, exists := q.Config.Profiles[in.Profile]
+	if !exists {
+		return fmt.Errorf("profile %q does not exist", in.Profile)
 	}
 
-	if fi, err := os.Stat(profileDir); err != nil || !fi.IsDir() {
-		return fmt.Errorf("%w: %s", ErrProfileDirNotExist, profileDir)
+	if fi, err := os.Stat(profile.Path); err != nil || !fi.IsDir() {
+		return fmt.Errorf("%w: %s", ErrProfileDirNotExist, profile.Path)
 	}
 
 	cfg, err := securejoin.SecureJoin(qh, filepath.Join(workloadsDir, fmt.Sprintf("%s-%s.%s", in.Name, in.Profile, configExtension)))
@@ -47,44 +46,24 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		return fmt.Errorf("cannot read file %q: %w", cfg, err)
 	}
 
-	wlDefault := config.Workload{}
-	err = yaml.Unmarshal(data, &wlDefault)
+	w := types.Workload{}
+	err = yaml.Unmarshal(data, &w)
 	if err != nil {
 		return fmt.Errorf("cannot unmarshal workload config %q: %w", cfg, err)
 	}
 
-	args := wlDefault.Args
-	args = append(args, in.Args...)
+	// TODO: find more elegant manner to auto populate profile name
+	profile.Name = in.Profile
+	w.Name = in.Name
 
-	wl := workload.Effective{
-		Profile: in.Profile,
+	ew := w.ApplyProfile(profile)
+	ew.Workload.Args = append(ew.Workload.Args, in.Args...)
 
-		Name:    in.Name,
-		Image:   wlDefault.Image,
-		Command: wlDefault.Command,
-		Args:    args,
-		Opts: workload.Opts{
-			Camera:     wlDefault.HostAccess.Camera,    // TODO: pick up from named device from profile
-			SmartCard:  wlDefault.HostAccess.Smartcard, // TODO: pick up from named device from profile
-			Microphone: wlDefault.HostAccess.Microphone,
-			Speakers:   wlDefault.HostAccess.Speakers,
-			X11:        wlDefault.HostAccess.X11,
-			Network:    wlDefault.HostAccess.Network,
-			VarRunUser: wlDefault.HostAccess.VarRunUser,
-		},
-		SingleInstance: wlDefault.SingleInstance,
-		Path:           wlDefault.Paths,
-		NamedDevices:   wlDefault.NamedDevices,
-		Runner:         wlDefault.Runner,
-
-		BasePath: profileDir,
-	}
-
-	switch wl.Runner {
+	switch ew.Workload.Runner {
 	case "microvm":
-		return firecracker.Run(wl)
+		return firecracker.Run(ew)
 
 	default:
-		return docker.Run(wl)
+		return docker.Run(ew)
 	}
 }

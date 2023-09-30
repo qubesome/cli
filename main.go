@@ -7,9 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/qubesome/qubesome-cli/internal/types"
+
 	"flag"
 
-	"github.com/qubesome/qubesome-cli/internal/config"
 	"github.com/qubesome/qubesome-cli/internal/qubesome"
 	"gopkg.in/yaml.v3"
 )
@@ -111,9 +112,9 @@ Supported commands:
 	os.Exit(1)
 }
 
-func loadConfig() (*config.Config, error) {
+func loadConfig() (*types.Config, error) {
 	path := filepath.Join(homedir, configFile)
-	cfg := &config.Config{}
+	cfg := &types.Config{}
 
 	if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
 		slog.Debug("qubesome config not found, falling back to default", "path", path)
