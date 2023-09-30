@@ -53,6 +53,19 @@ func (w Workload) ApplyProfile(p Profile) EffectiveWorkload {
 	e.Workload.VarRunUser = w.VarRunUser && p.HostAccess.VarRunUser
 	e.Workload.HostName = w.HostName && p.HostAccess.HostName
 
+	want := w.NamedDevices
+	var get []string
+
+	for _, in := range p.NamedDevices {
+		for _, nd := range want {
+			if in == nd {
+				get = append(get, nd)
+			}
+		}
+	}
+
+	e.Workload.NamedDevices = get
+
 	return e
 }
 

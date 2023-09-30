@@ -518,6 +518,54 @@ func Test_ApplyProfile(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "NamedDevices: drop named devices not in profile",
+			workload: Workload{
+				NamedDevices: []string{"Foo and Bar"},
+			},
+			profile: Profile{
+				NamedDevices: []string{},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					NamedDevices: nil,
+				},
+				Profile: Profile{
+					NamedDevices: []string{},
+				},
+			},
+		},
+		{
+			name: "NamedDevices: add allowed named devices",
+			workload: Workload{
+				NamedDevices: []string{
+					"Foo and Bar",
+					"Foo",
+					"Bar",
+				},
+			},
+			profile: Profile{
+				NamedDevices: []string{
+					"Foo",
+					"FooBar",
+				},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					NamedDevices: []string{
+						"Foo",
+					},
+				},
+				Profile: Profile{
+					NamedDevices: []string{
+						"Foo",
+						"FooBar",
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
