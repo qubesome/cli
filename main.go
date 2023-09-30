@@ -73,6 +73,8 @@ func main() {
 
 	switch args[0] {
 	case "run":
+		in.Args = args[1:]
+
 		err = q.Run(in)
 	case "xdg-open":
 		err = q.HandleMime(args[1:])
