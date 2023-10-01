@@ -91,8 +91,12 @@ func Run(ew types.EffectiveWorkload) error {
 	// Set hostname to be the same as the container name
 	args = append(args, "-h", ew.Name)
 
-	if wl.VarRunUser {
+	if wl.Bluetooth || wl.VarRunUser {
 		args = append(args, "-v=/run/user/1000:/run/user/1000")
+	}
+
+	if wl.Bluetooth {
+		args = append(args, "-v=/sys/class/bluetooth:/sys/class/bluetooth:ro")
 	}
 
 	// TODO: Find a way to not use /dev:/dev
@@ -106,6 +110,9 @@ func Run(ew types.EffectiveWorkload) error {
 
 	for _, ndev := range ndevs {
 		args = append(args, fmt.Sprintf("--device=%s", ndev))
+	}
+	if len(ndevs) > 0 {
+		args = append(args, "-v=/sys/class/usbmisc:/sys/class/usbmisc")
 	}
 
 	for _, p := range wl.Paths {
@@ -139,6 +146,7 @@ func x11Params() []string {
 		"-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket",
 		"-v=/run/user/1000/bus:/run/user/1000/bus",
 		"-v=/var/lib/dbus:/var/lib/dbus",
+		"-v=/usr/share/dbus-1:/usr/share/dbus-1",
 		"-v=/run/user/1000/dbus-1:/run/user/1000/dbus-1",
 
 		"-e=DISPLAY",

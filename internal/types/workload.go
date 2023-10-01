@@ -27,6 +27,8 @@ type HostAccess struct {
 	Network    string `yaml:"network"`
 	VarRunUser bool   `yaml:"varRunUser"`
 
+	Bluetooth bool `yaml:"bluetooth"`
+
 	// MachineId defines whether the workload should share the same
 	// machine id as the host.
 	MachineId bool `yaml:"machineId"`
@@ -60,6 +62,7 @@ func (w Workload) ApplyProfile(p Profile) EffectiveWorkload {
 	e.Workload.VarRunUser = w.VarRunUser && p.HostAccess.VarRunUser
 	e.Workload.MachineId = w.MachineId && p.HostAccess.MachineId
 	e.Workload.LocalTime = w.LocalTime && p.HostAccess.LocalTime
+	e.Workload.Bluetooth = w.Bluetooth && p.HostAccess.Bluetooth
 
 	want := w.NamedDevices
 	var get []string
