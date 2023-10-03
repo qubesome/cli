@@ -53,7 +53,7 @@ func Run(ew types.EffectiveWorkload) error {
 		return err
 	}
 
-	d, err := os.MkdirTemp("", fmt.Sprintf("qubesome-%s-", ew.Name))
+	d, err := os.MkdirTemp("", "qubesome-")
 	if err != nil {
 		return err
 	}

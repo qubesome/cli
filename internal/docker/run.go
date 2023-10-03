@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/qubesome-cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
@@ -116,8 +117,20 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	for _, p := range wl.Paths {
-		// TODO: Path traversal
-		args = append(args, fmt.Sprintf("-v=%s", filepath.Join(ew.Profile.Path, "homedir", p)))
+		ps := strings.SplitN(p, ":", 2)
+		if len(ps) != 2 {
+			slog.Warn("failed to mount path", "path", p)
+			continue
+		}
+
+		src, err := securejoin.SecureJoin(ew.Profile.Path, filepath.Join("homedir", ps[0]))
+		if err != nil {
+			slog.Warn("failed to mount path", "path", p, "error", err)
+			continue
+		}
+
+		dst := ps[1]
+		args = append(args, fmt.Sprintf("-v=%s:%s", src, dst))
 	}
 
 	args = append(args, fmt.Sprintf("--name=%s", ew.Name))

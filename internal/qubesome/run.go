@@ -40,7 +40,6 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		return fmt.Errorf("%w: %w", ErrWorkloadConfigNotFound, err)
 	}
 
-	//TODO: limit reader
 	data, err := os.ReadFile(cfg)
 	if err != nil {
 		return fmt.Errorf("cannot read file %q: %w", cfg, err)
