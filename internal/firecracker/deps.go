@@ -1,8 +1,10 @@
 package firecracker
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -50,7 +52,7 @@ func ensureDependencies(img string) error {
 	kfile := filepath.Join(d, kernelFile)
 	_, err = os.Stat(kfile)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		if !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 

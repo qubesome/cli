@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -112,7 +114,7 @@ func loadConfig() (*types.Config, error) {
 	path := filepath.Join(homedir, configFile)
 	cfg := &types.Config{}
 
-	if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
+	if _, err := os.Stat(path); err != nil && errors.Is(err, fs.ErrNotExist) {
 		slog.Debug("qubesome config not found, falling back to default", "path", path)
 		return cfg, nil
 	}
