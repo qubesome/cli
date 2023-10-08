@@ -28,7 +28,7 @@ var configTmpl = `{
     "balloon": null,
     "network-interfaces": [
         {
-            "iface_id": "net1",
+            "iface_id": "eth0",
             "guest_mac": "06:00:AC:10:00:02",
             "host_dev_name": "{{.HostDeviceName}}"
         }
