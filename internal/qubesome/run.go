@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
+	"github.com/qubesome/qubesome-cli/internal/cloudhypervisor"
 	"github.com/qubesome/qubesome-cli/internal/docker"
 	"github.com/qubesome/qubesome-cli/internal/firecracker"
 	"github.com/qubesome/qubesome-cli/internal/types"
@@ -59,8 +60,10 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 	ew.Workload.Args = append(ew.Workload.Args, in.Args...)
 
 	switch ew.Workload.Runner {
-	case "microvm":
+	case "fire-cracker":
 		return firecracker.Run(ew)
+	case "cloud-hypervisor":
+		return cloudhypervisor.Run(ew)
 
 	default:
 		return docker.Run(ew)
