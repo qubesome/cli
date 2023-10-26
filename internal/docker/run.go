@@ -170,10 +170,16 @@ func x11Params() []string {
 }
 
 func cameraParams() []string {
-	return []string{
-		"--device=/dev/video0",
+	params := []string{
 		"--group-add=video",
 	}
+
+	vds, _ := filepath.Glob("/dev/video*")
+	for _, dev := range vds {
+		params = append(params, fmt.Sprintf("--device=%s", dev))
+	}
+
+	return params
 }
 
 func audioParams() []string {
