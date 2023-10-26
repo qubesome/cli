@@ -40,6 +40,8 @@ func createRootFs(dir, img string) (string, error) {
 }
 
 func Run(ew types.EffectiveWorkload) error {
+	slog.Warn("use of cloud hypervisor is experimental")
+
 	if err := ew.Validate(); err != nil {
 		return err
 	}
