@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 
@@ -33,9 +34,9 @@ func runCmd(args []string, cfg *types.Config) error {
 	// Wait for any background operation that is in-flight.
 	defer wg.Wait()
 
-	extraArgs := flag.Args()
-	if len(extraArgs) > 1 {
-		in.Args = extraArgs[1:]
+	if fs.NArg() > 0 {
+		in.Args = args[len(args)-fs.NArg():]
+		slog.Debug("extra args", "args", in.Args)
 	}
 
 	return q.Run(in)
