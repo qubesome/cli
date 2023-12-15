@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	"flag"
 
@@ -24,6 +25,13 @@ func runCmd(args []string, cfg *types.Config) error {
 
 	q := qubesome.New()
 	q.Config = cfg
+
+	wg := sync.WaitGroup{}
+	if err := cfg.WorkloadPullMode.Pull(&wg); err != nil {
+		return err
+	}
+	// Wait for any background operation that is in-flight.
+	defer wg.Wait()
 
 	extraArgs := flag.Args()
 	if len(extraArgs) > 1 {

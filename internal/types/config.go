@@ -9,6 +9,9 @@ type Config struct {
 	MimeHandlers map[string]MimeHandler `yaml:"mimeHandlers"`
 
 	DefaultMimeHandler *MimeHandler `yaml:"defaultMimeHandler"`
+
+	// WorkloadPullMode defines how workload images should be pulled.
+	WorkloadPullMode WorkloadPullMode `yaml:"workloadPullMode"`
 }
 
 type Logging struct {
