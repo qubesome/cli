@@ -29,6 +29,7 @@ var (
 	commands = map[string]func([]string, *types.Config) error{
 		"run":      runCmd,
 		"xdg-open": xdgOpenCmd,
+		"images":   imagesCmd,
 	}
 )
 
@@ -105,7 +106,8 @@ func rootUsage() {
 
 Supported commands:
   run: 	 	  Execute qubesome workloads
-  xdg-open:   opens a file or URL in the user's configured workload
+  xdg-open:   Opens a file or URL in the user's configured workload
+  images:	  Manage workload images
 `, execName)
 	os.Exit(1)
 }

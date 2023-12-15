@@ -1,24 +1,18 @@
 package qubesome
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
+	"errors"
 
 	"github.com/qubesome/qubesome-cli/internal/types"
 )
 
 const (
-	qubesomeDir     = ".qubesome"
-	workloadsDir    = "workloads"
-	profilesDir     = "profiles"
 	configExtension = "yaml"
 )
 
 var (
-	ErrQubesomeHomeNotDir     = fmt.Errorf("qubesome home path must be a dir")
-	ErrWorkloadConfigNotFound = fmt.Errorf("workload config file not found")
-	ErrProfileDirNotExist     = fmt.Errorf("profile dir does not exist")
+	ErrWorkloadConfigNotFound = errors.New("workload config file not found")
+	ErrProfileDirNotExist     = errors.New("profile dir does not exist")
 )
 
 type Qubesome struct {
@@ -36,25 +30,6 @@ func New() *Qubesome {
 }
 
 var runner func(in WorkloadInfo) error
-
-func qubesomeHome() (string, error) {
-	d, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-
-	qd := filepath.Join(d, qubesomeDir)
-	fs, err := os.Stat(qd)
-	if err != nil {
-		return "", err
-	}
-
-	if !fs.IsDir() {
-		return "", ErrQubesomeHomeNotDir
-	}
-
-	return qd, nil
-}
 
 type WorkloadInfo struct {
 	Name    string

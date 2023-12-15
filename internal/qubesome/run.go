@@ -3,13 +3,13 @@ package qubesome
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/qubesome-cli/internal/cloudhypervisor"
 	"github.com/qubesome/qubesome-cli/internal/docker"
 	"github.com/qubesome/qubesome-cli/internal/firecracker"
 	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/qubesome-cli/internal/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,7 +18,7 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		return err
 	}
 
-	qh, err := qubesomeHome()
+	workloadsDir, err := util.Path(util.WorkloadsDir)
 	if err != nil {
 		return err
 	}
@@ -32,7 +32,7 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		return fmt.Errorf("%w: %s", ErrProfileDirNotExist, profile.Path)
 	}
 
-	cfg, err := securejoin.SecureJoin(qh, filepath.Join(workloadsDir, fmt.Sprintf("%s-%s.%s", in.Name, in.Profile, configExtension)))
+	cfg, err := securejoin.SecureJoin(workloadsDir, fmt.Sprintf("%s-%s.%s", in.Name, in.Profile, configExtension))
 	if err != nil {
 		return err
 	}
