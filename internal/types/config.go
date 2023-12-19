@@ -33,4 +33,6 @@ type Profile struct {
 
 	// TODO: Rename to USB named devices
 	NamedDevices []string `yaml:"namedDevices"`
+
+	Display uint8 `yaml:"display"`
 }
