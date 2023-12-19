@@ -86,7 +86,15 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, cameraParams()...)
 	}
 	if wl.X11 {
-		args = append(args, x11Params(ew.Profile.Display)...)
+		args = append(args, x11Params()...)
+		args = append(args, fmt.Sprintf("-e=DISPLAY=:%d", ew.Profile.Display))
+
+		pp, err := securejoin.SecureJoin(ew.Profile.Path, ".Xclient-cookie")
+		if err != nil {
+			return err
+		}
+		args = append(args, fmt.Sprintf("-v=%s:/tmp/.Xauthority", pp))
+		args = append(args, "-e=XAUTHORITY=/tmp/.Xauthority")
 	}
 
 	// Set hostname to be the same as the container name
@@ -151,7 +159,7 @@ func Run(ew types.EffectiveWorkload) error {
 // Map capability vs Env, device, maps required.
 // This should enable easier support for podman, docker and microVM
 
-func x11Params(display uint8) []string {
+func x11Params() []string {
 	return []string{
 		"--device=/dev/dri",
 
@@ -161,8 +169,6 @@ func x11Params(display uint8) []string {
 		"-v=/var/lib/dbus:/var/lib/dbus",
 		"-v=/usr/share/dbus-1:/usr/share/dbus-1",
 		"-v=/run/user/1000/dbus-1:/run/user/1000/dbus-1",
-
-		fmt.Sprintf("-e=DISPLAY=:%d", display),
 		"-e=DBUS_SESSION_BUS_ADDRESS",
 		"-e=XDG_RUNTIME_DIR",
 		"-e=XDG_SESSION_ID",
