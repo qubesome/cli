@@ -95,6 +95,7 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 		args = append(args, fmt.Sprintf("-v=%s:/tmp/.Xauthority", pp))
 		args = append(args, "-e=XAUTHORITY=/tmp/.Xauthority")
+		args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", ew.Profile.Display))
 	}
 
 	// Set hostname to be the same as the container name
@@ -163,7 +164,6 @@ func x11Params() []string {
 	return []string{
 		"--device=/dev/dri",
 
-		"-v=/tmp/.X11-unix:/tmp/.X11-unix",
 		"-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket",
 		"-v=/run/user/1000/bus:/run/user/1000/bus",
 		"-v=/var/lib/dbus:/var/lib/dbus",
