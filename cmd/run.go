@@ -3,7 +3,9 @@ package cmd
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"flag"
@@ -12,7 +14,24 @@ import (
 	"github.com/qubesome/qubesome-cli/internal/types"
 )
 
+const socketAddress = "/tmp/qube.sock"
+
 func runCmd(args []string, cfg *types.Config) error {
+	slog.Debug("check whether running inside container")
+	if _, err := os.Stat(socketAddress); err == nil {
+		fmt.Println("dialing host qubesome", "socket", socketAddress)
+		c, err := net.Dial("unix", socketAddress)
+		if err != nil {
+			return err
+		}
+		args = append([]string{"run"}, args...)
+		_, err = c.Write([]byte(strings.Join(args, " ")))
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
 	in := qubesome.WorkloadInfo{}
 
 	fs := flag.NewFlagSet("", flag.ExitOnError)
