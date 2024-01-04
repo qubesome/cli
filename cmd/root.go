@@ -30,6 +30,7 @@ var (
 		"run":      runCmd,
 		"xdg-open": xdgOpenCmd,
 		"images":   imagesCmd,
+		"profiles": profilesCmd,
 	}
 )
 
@@ -42,8 +43,8 @@ const (
 func Exec(args []string) {
 	execName = args[0]
 
-	cfg, err := loadConfig()
-	checkNil(err)
+	cfg, _ := loadConfig()
+	//checkNil(err)
 
 	configureLogging(cfg)
 
@@ -108,6 +109,7 @@ Supported commands:
   run: 	 	  Execute qubesome workloads
   xdg-open:   Opens a file or URL in the user's configured workload
   images:	  Manage workload images
+  profiles:	  Manage profiles
 `, execName)
 	os.Exit(1)
 }
