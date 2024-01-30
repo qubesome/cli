@@ -23,7 +23,7 @@ func xdgOpenCmd(args []string, cfg *types.Config) error {
 	q := qubesome.New()
 	q.Config = cfg
 
-	return q.HandleMime(flag.Args())
+	return q.HandleMime(f.Args())
 }
 
 func xdgOpenUsage() {
