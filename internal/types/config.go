@@ -15,8 +15,10 @@ type Config struct {
 }
 
 type Logging struct {
-	LogToFile bool   `yaml:"logToFile"`
-	Level     string `yaml:"level"`
+	LogToFile   bool   `yaml:"logToFile"`
+	LogToStdout bool   `yaml:"logToStdout"`
+	LogToSyslog bool   `yaml:"logToSyslog"`
+	Level       string `yaml:"level"`
 }
 
 type MimeHandler struct {

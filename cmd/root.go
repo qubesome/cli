@@ -3,13 +3,13 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 
 	"log/slog"
 
+	"github.com/qubesome/qubesome-cli/internal/log"
 	"github.com/qubesome/qubesome-cli/internal/types"
 	"gopkg.in/yaml.v3"
 )
@@ -35,18 +35,18 @@ var (
 )
 
 const (
-	configFile  = ".qubesome/qubesome.config"
-	logFile     = ".qubesome/qubesome.log"
-	logFileMode = 0o600
+	configFile = ".qubesome/qubesome.config"
 )
 
 func Exec(args []string) {
 	execName = args[0]
 
 	cfg, _ := loadConfig()
-	//checkNil(err)
 
-	configureLogging(cfg)
+	log.Configure(cfg.Logging.Level,
+		cfg.Logging.LogToStdout,
+		cfg.Logging.LogToFile,
+		cfg.Logging.LogToSyslog)
 
 	slog.Debug("qubesome called", "args", args, "config", cfg)
 	if len(args) < 2 {
@@ -61,37 +61,6 @@ func Exec(args []string) {
 
 	slog.Debug("exec subcommand", args[1], args[2:])
 	checkNil(cmd(args[2:], cfg))
-}
-
-func configureLogging(cfg *types.Config) {
-	mw := io.MultiWriter(os.Stdout)
-	if cfg.Logging.LogToFile {
-		f, err := os.OpenFile(
-			filepath.Join(homedir, logFile),
-			os.O_RDWR|os.O_CREATE|os.O_APPEND, logFileMode)
-
-		checkNil(err)
-
-		mw = io.MultiWriter(mw, f)
-	}
-
-	slog.SetDefault(slog.New(
-		slog.NewTextHandler(mw,
-			&slog.HandlerOptions{Level: slogLevel(cfg.Logging.Level)}),
-	))
-}
-
-func slogLevel(logLevel string) slog.Level {
-	switch logLevel {
-	case "ERROR":
-		return slog.LevelError
-	case "DEBUG":
-		return slog.LevelDebug
-	case "INFO":
-		fallthrough
-	default:
-		return slog.LevelInfo
-	}
 }
 
 func checkNil(err error) error {
