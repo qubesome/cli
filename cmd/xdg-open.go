@@ -14,7 +14,7 @@ func xdgOpenCmd(args []string, cfg *types.Config) error {
 	f := flag.NewFlagSet("", flag.ExitOnError)
 	f.Parse(args)
 
-	slog.Error("cmd", "args", args)
+	slog.Debug("cmd", "args", args)
 
 	if len(f.Args()) != 1 {
 		xdgOpenUsage()

@@ -18,7 +18,7 @@ import (
 )
 
 func profilesCmd(args []string, cfg *types.Config) error {
-	slog.Error("cmd", "args", args)
+	slog.Debug("cmd", "args", args)
 	if len(args) < 1 || args[0] != "run" {
 		profilesUsage()
 	}
@@ -65,11 +65,10 @@ func listenSocket(p types.Profile, cfg *types.Config) error {
 		return fmt.Errorf("failed to listen to socket: %w", err)
 	}
 
-    err = os.Chown(fn, 1000, 1000)
-    if err != nil {
-        return err
-    }
-
+	err = os.Chown(fn, 1000, 1000)
+	if err != nil {
+		return err
+	}
 
 	// Remove the sock file if the process is terminated.
 	c := make(chan os.Signal, 1)
