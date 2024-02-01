@@ -142,6 +142,17 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, fmt.Sprintf("-v=%s:%s", src, dst))
 	}
 
+	for _, p := range wl.Volumes {
+		ps := strings.SplitN(p, ":", 2)
+		if len(ps) != 2 {
+			slog.Warn("failed to mount path", "path", p)
+			continue
+		}
+
+		// TODO: Create volume if not exist
+		args = append(args, "--mount", fmt.Sprintf("source=%s,target=%s", ps[0], ps[1]))
+	}
+
 	args = append(args, fmt.Sprintf("--name=%s", ew.Name))
 	args = append(args, wl.Image)
 	args = append(args, wl.Command)

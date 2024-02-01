@@ -10,6 +10,7 @@ type Workload struct {
 	SingleInstance bool     `yaml:"singleInstance"`
 	HostAccess     `yaml:"hostAccess"`
 	Paths          []string `yaml:"paths"`
+	Volumes        []string `yaml:"volumes"`
 	MimeApps       []string `yaml:"mimeApps"`
 
 	// TODO: Rename to USB Named Devices
