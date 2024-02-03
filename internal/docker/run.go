@@ -118,6 +118,11 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, fmt.Sprintf("--network=%s", wl.Network))
 	}
 
+	// TODO: Block by profile
+	if wl.Privileged {
+		args = append(args, "--privileged")
+	}
+
 	for _, ndev := range ndevs {
 		args = append(args, fmt.Sprintf("--device=%s", ndev))
 	}
@@ -142,6 +147,7 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, fmt.Sprintf("-v=%s:%s", src, dst))
 	}
 
+	// TODO: Block by profile
 	for _, p := range wl.Volumes {
 		ps := strings.SplitN(p, ":", 2)
 		if len(ps) != 2 {

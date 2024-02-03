@@ -27,6 +27,7 @@ type HostAccess struct {
 	Smartcard  bool   `yaml:"smartcard"`
 	Network    string `yaml:"network"`
 	VarRunUser bool   `yaml:"varRunUser"`
+	Privileged bool   `yaml:"privileged"`
 
 	Bluetooth bool `yaml:"bluetooth"`
 
