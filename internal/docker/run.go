@@ -78,6 +78,12 @@ func Run(ew types.EffectiveWorkload) error {
 
 	args = append(args, paths...)
 
+	// Single instance workloads share the name of the workload, which
+	// must be unique. Otherwise, let docker assign a new name.
+	if wl.SingleInstance {
+		args = append(args, fmt.Sprintf("--name=%s", ew.Name))
+	}
+
 	// TODO: Split
 	if wl.Microphone || wl.Speakers {
 		args = append(args, audioParams()...)
@@ -159,7 +165,6 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, "--mount", fmt.Sprintf("source=%s,target=%s", ps[0], ps[1]))
 	}
 
-	args = append(args, fmt.Sprintf("--name=%s", ew.Name))
 	args = append(args, wl.Image)
 	args = append(args, wl.Command)
 	args = append(args, wl.Args...)
