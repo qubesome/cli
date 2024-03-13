@@ -41,6 +41,10 @@ func profilesCmd(args []string, cfg *types.Config) error {
 	}
 	profile.Name = name
 
+	// createMagicCookie
+	// createNewDisplay
+	// startWindowManager
+
 	// wg := &sync.WaitGroup{}
 	// wg.Add(2)
 	// profile := f.Arg(1)
@@ -55,10 +59,6 @@ func profilesCmd(args []string, cfg *types.Config) error {
 }
 
 func listenSocket(p types.Profile, cfg *types.Config) error {
-	// f, err := os.CreateTemp("", "qube-*.sock")
-	// if err != nil {
-	// 	return "", fmt.Errorf("failed to create tmp file: %w", err)
-	// }
 	fn := fmt.Sprintf("/tmp/qube-%d.sock", p.Display)
 	socket, err := net.Listen("unix", fn)
 	if err != nil {
@@ -66,6 +66,10 @@ func listenSocket(p types.Profile, cfg *types.Config) error {
 	}
 
 	err = os.Chown(fn, 1000, 1000)
+	if err != nil {
+		return err
+	}
+	err = os.Chmod(fn, 0o700)
 	if err != nil {
 		return err
 	}
@@ -126,36 +130,32 @@ func listenSocket(p types.Profile, cfg *types.Config) error {
 			if err != nil {
 				slog.Error("failed to run workload: %v", err)
 			}
-
-			// ACK?
-			// _, err = conn.Write([]byte("ACK"))
-			// if err != nil {
-			// 	log.Fatal(err)
-			// }
 		}(conn)
 	}
 }
 
-func exec(id string, wg *sync.WaitGroup) error {
+func startWindowManager(containerId, display string, wg *sync.WaitGroup) error {
 	defer wg.Done()
-	args := []string{"exec", id, "bash", "-c", "DISPLAY=:1 exec awesome"}
+	args := []string{"exec", containerId, "bash", "-c", fmt.Sprintf("DISPLAY=%s exec awesome", display)}
 
-	slog.Debug("docker exec", "container-id", id, "args", args)
+	slog.Debug("docker exec", "container-id", containerId, "args", args)
 	cmd := execabs.Command("docker", args...)
 
 	return cmd.Run()
 }
 
-func runProfile(profile string, wg *sync.WaitGroup) error {
+func createNewDisplay(profile, display string, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
-	image := "docker.io/paulinhu/xorg:latest"
+	image := "ghcr.io/qubesome/xorg:latest"
 	command := "Xephyr"
 	cArgs := []string{
-		":1",
-		"-auth", "/tmp/.Xauthority",
+		"display",
+		"-title", fmt.Sprintf("%s %s", profile, display),
+		"-auth", "/home/xorg-user/.Xserver",
 		"-extension", "MIT-SHM",
 		"-extension", "XTEST",
+		"-nopn",
 		"-nolisten", "tcp",
 		"-screen", "3440x1440",
 		"-resizeable",
@@ -173,6 +173,7 @@ func runProfile(profile string, wg *sync.WaitGroup) error {
 		"--rm",
 		"-d",
 		"-e", "DISPLAY",
+		"--network=none",
 		"--security-opt=no-new-privileges",
 		"--cap-drop=ALL",
 	}
@@ -181,7 +182,6 @@ func runProfile(profile string, wg *sync.WaitGroup) error {
 
 	// Set hostname to be the same as the container name
 	dockerArgs = append(dockerArgs, "-h", profile)
-	dockerArgs = append(dockerArgs, fmt.Sprintf("--network=%s", "none"))
 
 	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", profile))
 	dockerArgs = append(dockerArgs, image)
