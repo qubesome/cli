@@ -15,6 +15,38 @@ import (
 
 var (
 	command = "docker"
+
+	defaultMimeHandler = `[Desktop Entry]
+Version=1.0
+Type=Application
+Name=qubesome Mime Handler
+Exec=/usr/local/bin/qubesome xdg-open %u
+StartupNotify=false
+`
+	mimesList = `[Default Applications]
+x-scheme-handler/slack=qubesome-default-handler.desktop;
+
+application/x-yaml=qubesome-default-handler.desktop;
+text/english=qubesome-default-handler.desktop;
+text/html=qubesome-default-handler.desktop;
+text/plain=qubesome-default-handler.desktop;
+text/x-c=qubesome-default-handler.desktop;
+text/x-c++=qubesome-default-handler.desktop;
+text/x-makefile=qubesome-default-handler.desktop;
+text/xml=qubesome-default-handler.desktop;
+x-www-browser=qubesome-default-handler.desktop;
+
+x-scheme-handler/http=qubesome-default-handler.desktop;
+x-scheme-handler/https=qubesome-default-handler.desktop;
+x-scheme-handler/about=qubesome-default-handler.desktop;
+x-scheme-handler/unknown=qubesome-default-handler.desktop;
+
+[Removed Associations]
+x-scheme-handler/slack=slack.desktop;
+x-scheme-handler/http=firefox.desktop;
+x-scheme-handler/https=firefox.desktop;
+x-scheme-handler/snap=snap-handle-link.desktop;
+`
 )
 
 func containerId(name string) (string, bool) {
@@ -104,6 +136,43 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", ew.Profile.Display))
 	}
 
+	if wl.Mime {
+		uid := os.Getuid()
+		pdir := fmt.Sprintf("/var/run/user/%d/qubesome/%s", uid, ew.Profile.Name)
+
+		homedir, err := getHomeDir(wl.Image)
+		if err != nil {
+			return err
+		}
+
+		srcMimeList := filepath.Join(pdir, "mimeapps.list")
+		dstMimeList := filepath.Join(homedir, ".local", "share", "applications", "mimeapps.list")
+		err = os.WriteFile(srcMimeList, []byte(mimesList), 0o700)
+		if err != nil {
+			return fmt.Errorf("failed to write mimeapps.list: %w", err)
+		}
+
+		args = append(args, fmt.Sprintf("-v=%s:%s:ro", srcMimeList, dstMimeList))
+
+		srcHandler := filepath.Join(pdir, "mime-handler.desktop")
+		dstHandler := filepath.Join(homedir, ".local", "share", "applications", "qubesome-default-handler.desktop")
+		os.WriteFile(srcHandler, []byte(defaultMimeHandler), 0o700)
+		if err != nil {
+			return fmt.Errorf("failed to write mime-handler.desktop: %w", err)
+		}
+		args = append(args, fmt.Sprintf("-v=%s:%s:ro", srcHandler, dstHandler))
+
+		qubesomeBin, err := os.Executable()
+		if err != nil {
+			return err
+		}
+
+		// Mount access to the qubesome binary.
+		args = append(args, fmt.Sprintf("-v=%s:%s:ro", qubesomeBin, "/usr/local/bin/qubesome"))
+		// Mount qube socket so that it can send commands from container to host.
+		args = append(args, fmt.Sprintf("-v=/tmp/qube-%d.sock:/tmp/qube.sock:ro", ew.Profile.Display))
+	}
+
 	// Set hostname to be the same as the container name
 	args = append(args, "-h", ew.Name)
 
@@ -177,6 +246,20 @@ func Run(ew types.EffectiveWorkload) error {
 	cmd.Stdout = os.Stdout
 
 	return cmd.Run()
+}
+
+func getHomeDir(image string) (string, error) {
+	args := []string{"run", "--rm", image, "ls", "/home"}
+
+	slog.Debug(command + strings.Join(args, " "))
+	cmd := execabs.Command(command, args...)
+
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home dir: %w", err)
+	}
+
+	return filepath.Join("/home", string(bytes.TrimSpace(out))), nil
 }
 
 // Map capability vs Env, device, maps required.

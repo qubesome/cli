@@ -28,6 +28,7 @@ type HostAccess struct {
 	Network    string `yaml:"network"`
 	VarRunUser bool   `yaml:"varRunUser"`
 	Privileged bool   `yaml:"privileged"`
+	Mime       bool   `yaml:"mime"`
 
 	Bluetooth bool `yaml:"bluetooth"`
 
@@ -65,6 +66,7 @@ func (w Workload) ApplyProfile(p Profile) EffectiveWorkload {
 	e.Workload.MachineId = w.MachineId && p.HostAccess.MachineId
 	e.Workload.LocalTime = w.LocalTime && p.HostAccess.LocalTime
 	e.Workload.Bluetooth = w.Bluetooth && p.HostAccess.Bluetooth
+	e.Workload.Mime = w.Mime && p.HostAccess.Mime
 
 	want := w.NamedDevices
 	var get []string

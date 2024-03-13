@@ -65,11 +65,28 @@ func listenSocket(p types.Profile, cfg *types.Config) error {
 		return fmt.Errorf("failed to listen to socket: %w", err)
 	}
 
-	err = os.Chown(fn, 1000, 1000)
+	uid := os.Getuid()
+
+	err = os.Chown(fn, uid, uid)
 	if err != nil {
 		return err
 	}
 	err = os.Chmod(fn, 0o700)
+	if err != nil {
+		return err
+	}
+
+	pdir := fmt.Sprintf("/var/run/user/%d/qubesome/%s", uid, p.Name)
+	err = os.MkdirAll(pdir, 0o700)
+	if err != nil {
+		return fmt.Errorf("failed to create profile dir: %w", err)
+	}
+
+	err = os.Chown(pdir, uid, uid)
+	if err != nil {
+		return err
+	}
+	err = os.Chmod(pdir, 0o700)
 	if err != nil {
 		return err
 	}
@@ -104,31 +121,51 @@ func listenSocket(p types.Profile, cfg *types.Config) error {
 			}
 
 			fields := strings.Fields(string(buf[:n]))
-			if len(fields) < 1 || fields[0] != "run" {
+			slog.Debug("remote command", "fields", fields)
+
+			if len(fields) < 1 {
 				return
 			}
 
-			// TODO: Refactor to avoid code duplication from root.go
 			in := qubesome.WorkloadInfo{}
+			switch fields[0] {
+			case "run":
+				// TODO: Refactor to avoid code duplication from root.go
+				fs := flag.NewFlagSet("", flag.ExitOnError)
+				fs.StringVar(&in.Name, "name", "", "")
+				fs.String("profile", "", "")
+				fs.Parse(fields[1:]) // ignore command
 
-			fs := flag.NewFlagSet("", flag.ExitOnError)
-			fs.StringVar(&in.Name, "name", "", "")
-			fs.String("profile", "", "")
-			fs.Parse(fields[1:]) // ignore "run"
+				q := qubesome.New()
+				q.Config = cfg
+				in.Profile = p.Name
 
-			q := qubesome.New()
-			q.Config = cfg
-			in.Profile = p.Name
+				if fs.NArg() > 0 {
+					in.Args = fields[len(fields)-fs.NArg():]
+					slog.Debug("extra args", "args", in.Args)
+				}
 
-			if fs.NArg() > 0 {
-				in.Args = fields[len(fields)-fs.NArg():]
-				slog.Debug("extra args", "args", in.Args)
-			}
+				err = q.Run(in)
+				if err != nil {
+					slog.Error("failed to run workload: %v", err)
+				}
+			case "xdg-open":
+				fs := flag.NewFlagSet("", flag.ExitOnError)
+				fs.Parse(fields[1:]) // ignore command
 
-			fmt.Println(fields)
-			err = q.Run(in)
-			if err != nil {
-				slog.Error("failed to run workload: %v", err)
+				if len(fs.Args()) != 1 {
+					slog.Error("xdg-open failed: should have single argument")
+				}
+
+				q := qubesome.New()
+				q.Config = cfg
+
+				err = q.HandleMime(fs.Args())
+				if err != nil {
+					slog.Error("failed to run workload: %v", err)
+				}
+			default:
+				slog.Error("unsupported command: %s", "fields", strings.Join(fields, " "))
 			}
 		}(conn)
 	}
