@@ -1,0 +1,39 @@
+project_name: qubesome
+builds:
+  - id: qubesome
+    binary: qubesome
+    main: main.go
+    flags:
+    - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - riscv64
+    env:
+      - CGO_ENABLED=0
+
+signs:
+  - cmd: cosign
+    certificate: '${artifact}.pem'
+    args:
+      - sign-blob
+      - '--yes'
+      - '--output-signature=${signature}'
+      - '--output-certificate=${certificate}'
+      - '${artifact}'
+    artifacts: checksum
+    output: true
+
+source:
+  enabled: true
+  name_template: '{{ .ProjectName }}_{{ .Version }}_source'
+
+sboms:
+  - id: source
+    artifacts: source
+    documents:
+      - '{{ .ProjectName }}_{{ .Version }}_sbom.spdx.json'

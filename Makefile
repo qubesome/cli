@@ -1,6 +1,4 @@
-
-# TODO: move to build/bin
-TARGET_BIN ?= ~/.local/bin/qubesome
+TARGET_BIN ?= build/bin/qubesome
 
 .PHONY: build
 build:
