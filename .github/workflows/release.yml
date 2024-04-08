@@ -23,6 +23,8 @@ jobs:
         with:
           go-version: stable
 
+      - uses: anchore/sbom-action/download-syft@v0.15.0
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
         with:
