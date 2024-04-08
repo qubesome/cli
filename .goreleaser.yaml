@@ -28,6 +28,7 @@ signs:
       - '--yes'
       - '--output-signature=${signature}'
       - '--output-certificate=${certificate}'
+      - '--bundle=${artifact}.bundle'
       - '${artifact}'
     artifacts: checksum
     output: true
@@ -41,3 +42,7 @@ sboms:
     artifacts: source
     documents:
       - '{{ .ProjectName }}_{{ .Version }}_sbom.spdx.json'
+
+release:
+  extra_files:
+    - glob: ./**/*.bundle
