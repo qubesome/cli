@@ -32,6 +32,7 @@ var (
 		"images":    imagesCmd,
 		"profiles":  profilesCmd,
 		"clipboard": clipboardCmd,
+		"deps":      depsCmd,
 	}
 )
 

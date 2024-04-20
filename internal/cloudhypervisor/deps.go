@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	command             = "cloud-hypervisor"
+	command             = "/usr/bin/cloud-hypervisor"
 	runUserDir          = "/run/user/%d"
 	qubesomeDir         = "qubesome"
 	qubesomeFilemode    = 0o700
@@ -78,7 +78,7 @@ func ensureDependencies(img string) error {
 
 func setupTaps(img string) error {
 	slog.Info("setting up taps")
-	cmd := execabs.Command("docker",
+	cmd := execabs.Command("/usr/bin/docker",
 		"run", "--rm", "--privileged",
 		"--network", "host",
 		img,

@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	command = "docker"
+	command = "/usr/bin/docker"
 
 	defaultMimeHandler = `[Desktop Entry]
 Version=1.0

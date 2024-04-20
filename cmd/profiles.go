@@ -176,7 +176,7 @@ func startWindowManager(containerId, display string, wg *sync.WaitGroup) error {
 	args := []string{"exec", containerId, "bash", "-c", fmt.Sprintf("DISPLAY=%s exec awesome", display)}
 
 	slog.Debug("docker exec", "container-id", containerId, "args", args)
-	cmd := execabs.Command("docker", args...)
+	cmd := execabs.Command("/usr/bin/docker", args...)
 
 	return cmd.Run()
 }
@@ -226,7 +226,7 @@ func createNewDisplay(profile, display string, wg *sync.WaitGroup) error {
 	dockerArgs = append(dockerArgs, cArgs...)
 
 	slog.Debug("exec: docker", "args", dockerArgs)
-	cmd := execabs.Command("docker", dockerArgs...)
+	cmd := execabs.Command("/usr/bin/docker", dockerArgs...)
 
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

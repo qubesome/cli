@@ -20,13 +20,13 @@ func imagesCmd(args []string, cfg *types.Config) error {
 	}
 
 	if cfg == nil {
-		return fmt.Errorf(`err: could not load config`)
+		return fmt.Errorf("err: could not load config")
 	}
 
 	return types.PullAll()
 }
 
 func imagesUsage() {
-	fmt.Printf(`usage: %s images pull`, execName)
+	fmt.Printf("usage: %s images pull", execName)
 	os.Exit(1)
 }
