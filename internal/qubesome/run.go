@@ -5,11 +5,11 @@ import (
 	"os"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
-	"github.com/qubesome/qubesome-cli/internal/cloudhypervisor"
-	"github.com/qubesome/qubesome-cli/internal/docker"
-	"github.com/qubesome/qubesome-cli/internal/firecracker"
-	"github.com/qubesome/qubesome-cli/internal/types"
-	"github.com/qubesome/qubesome-cli/internal/util"
+	"github.com/qubesome/cli/internal/cloudhypervisor"
+	"github.com/qubesome/cli/internal/docker"
+	"github.com/qubesome/cli/internal/firecracker"
+	"github.com/qubesome/cli/internal/types"
+	"github.com/qubesome/cli/internal/util"
 	"gopkg.in/yaml.v3"
 )
 

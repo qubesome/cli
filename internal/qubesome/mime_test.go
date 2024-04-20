@@ -3,7 +3,7 @@ package qubesome
 import (
 	"testing"
 
-	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 

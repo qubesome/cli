@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/qubesome/qubesome-cli/internal/qubesome"
-	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/cli/internal/qubesome"
+	"github.com/qubesome/cli/internal/types"
 )
 
 func xdgOpenCmd(args []string, cfg *types.Config) error {

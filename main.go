@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/qubesome/qubesome-cli/cmd"
+	"github.com/qubesome/cli/cmd"
 )
 
 func main() {

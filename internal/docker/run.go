@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
-	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
 

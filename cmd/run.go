@@ -10,8 +10,8 @@ import (
 
 	"flag"
 
-	"github.com/qubesome/qubesome-cli/internal/qubesome"
-	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/cli/internal/qubesome"
+	"github.com/qubesome/cli/internal/types"
 )
 
 const socketAddress = "/tmp/qube.sock"

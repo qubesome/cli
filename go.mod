@@ -1,4 +1,4 @@
-module github.com/qubesome/qubesome-cli
+module github.com/qubesome/cli
 
 go 1.21.0
 

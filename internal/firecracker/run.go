@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"text/template"
 
-	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
 

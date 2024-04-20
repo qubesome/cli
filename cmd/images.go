@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/cli/internal/types"
 )
 
 func imagesCmd(args []string, cfg *types.Config) error {

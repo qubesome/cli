@@ -3,7 +3,7 @@ package qubesome
 import (
 	"errors"
 
-	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/cli/internal/types"
 )
 
 const (

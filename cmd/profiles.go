@@ -12,8 +12,8 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/qubesome/qubesome-cli/internal/qubesome"
-	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/cli/internal/qubesome"
+	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
 

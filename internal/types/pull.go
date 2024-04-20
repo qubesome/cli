@@ -10,7 +10,7 @@ import (
 	"time"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
-	"github.com/qubesome/qubesome-cli/internal/util"
+	"github.com/qubesome/cli/internal/util"
 	"golang.org/x/sys/execabs"
 	"gopkg.in/yaml.v3"
 )

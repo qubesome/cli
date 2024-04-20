@@ -9,8 +9,8 @@ import (
 
 	"log/slog"
 
-	"github.com/qubesome/qubesome-cli/internal/log"
-	"github.com/qubesome/qubesome-cli/internal/types"
+	"github.com/qubesome/cli/internal/log"
+	"github.com/qubesome/cli/internal/types"
 	"gopkg.in/yaml.v3"
 )
 
