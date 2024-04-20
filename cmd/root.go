@@ -27,10 +27,11 @@ var (
 	homedir  string
 
 	commands = map[string]func([]string, *types.Config) error{
-		"run":      runCmd,
-		"xdg-open": xdgOpenCmd,
-		"images":   imagesCmd,
-		"profiles": profilesCmd,
+		"run":       runCmd,
+		"xdg-open":  xdgOpenCmd,
+		"images":    imagesCmd,
+		"profiles":  profilesCmd,
+		"clipboard": clipboardCmd,
 	}
 )
 
