@@ -49,7 +49,7 @@ x-scheme-handler/snap=snap-handle-link.desktop;
 `
 )
 
-func containerId(name string) (string, bool) {
+func ContainerID(name string) (string, bool) {
 	args := fmt.Sprintf("ps -a -q -f name=%s", name)
 	cmd := execabs.Command(command,
 		strings.Split(args, " ")...)
@@ -81,7 +81,7 @@ func Run(ew types.EffectiveWorkload) error {
 
 	wl := ew.Workload
 	if wl.SingleInstance {
-		if id, ok := containerId(ew.Name); ok {
+		if id, ok := ContainerID(ew.Name); ok {
 			return exec(id, ew)
 		}
 	}
@@ -96,7 +96,7 @@ func Run(ew types.EffectiveWorkload) error {
 		paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
 	}
 
-	if wl.HostAccess.MachineId {
+	if wl.HostAccess.MachineID {
 		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
 	}
 
@@ -147,7 +147,7 @@ func Run(ew types.EffectiveWorkload) error {
 
 		srcMimeList := filepath.Join(pdir, "mimeapps.list")
 		dstMimeList := filepath.Join(homedir, ".local", "share", "applications", "mimeapps.list")
-		err = os.WriteFile(srcMimeList, []byte(mimesList), 0o700)
+		err = os.WriteFile(srcMimeList, []byte(mimesList), 0o600)
 		if err != nil {
 			return fmt.Errorf("failed to write mimeapps.list: %w", err)
 		}
@@ -156,7 +156,8 @@ func Run(ew types.EffectiveWorkload) error {
 
 		srcHandler := filepath.Join(pdir, "mime-handler.desktop")
 		dstHandler := filepath.Join(homedir, ".local", "share", "applications", "qubesome-default-handler.desktop")
-		os.WriteFile(srcHandler, []byte(defaultMimeHandler), 0o700)
+
+		err = os.WriteFile(srcHandler, []byte(defaultMimeHandler), 0o600)
 		if err != nil {
 			return fmt.Errorf("failed to write mime-handler.desktop: %w", err)
 		}

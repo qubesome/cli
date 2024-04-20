@@ -171,11 +171,11 @@ func listenSocket(p types.Profile, cfg *types.Config) error {
 	}
 }
 
-func startWindowManager(containerId, display string, wg *sync.WaitGroup) error {
+func startWindowManager(ContainerID, display string, wg *sync.WaitGroup) error {
 	defer wg.Done()
-	args := []string{"exec", containerId, "bash", "-c", fmt.Sprintf("DISPLAY=%s exec awesome", display)}
+	args := []string{"exec", ContainerID, "bash", "-c", fmt.Sprintf("DISPLAY=%s exec awesome", display)}
 
-	slog.Debug("docker exec", "container-id", containerId, "args", args)
+	slog.Debug("docker exec", "container-id", ContainerID, "args", args)
 	cmd := execabs.Command("/usr/bin/docker", args...)
 
 	return cmd.Run()

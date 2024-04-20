@@ -29,8 +29,6 @@ func New() *Qubesome {
 	return q
 }
 
-var runner func(in WorkloadInfo) error
-
 type WorkloadInfo struct {
 	Name    string
 	Profile string

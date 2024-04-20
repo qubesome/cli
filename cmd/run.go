@@ -37,7 +37,10 @@ func runCmd(args []string, cfg *types.Config) error {
 	fs := flag.NewFlagSet("", flag.ExitOnError)
 	fs.StringVar(&in.Name, "name", "", fmt.Sprintf("The name of the workload to be executed. For new workloads use %s import first.", execName))
 	fs.StringVar(&in.Profile, "profile", "untrusted", "The profile name which will be used to run the workload.")
-	fs.Parse(args)
+	err := fs.Parse(args)
+	if err != nil {
+		return fmt.Errorf("failed to parse args: %w", err)
+	}
 
 	if in.Name == "" || in.Profile == "" {
 		runUsage()

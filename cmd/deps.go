@@ -50,7 +50,10 @@ var optionalDeps map[string][]string = map[string][]string{
 
 func depsCmd(args []string, _ *types.Config) error {
 	f := flag.NewFlagSet("", flag.ExitOnError)
-	f.Parse(args)
+	err := f.Parse(args)
+	if err != nil {
+		return fmt.Errorf("failed to parse args: %w", err)
+	}
 
 	slog.Debug("cmd", "args", args)
 

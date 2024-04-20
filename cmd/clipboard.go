@@ -23,7 +23,10 @@ func clipboardCmd(args []string, cfg *types.Config) error {
 	f.StringVar(&t, "type", "", "The target type for xclip.")
 	f.StringVar(&fromProfile, "from-profile", "", "The profile to copy the clipboard from. Cannot be used with --from-host.")
 	f.BoolVar(&fromHost, "from-host", false, "Use the host clipboard as source. Cannot be used with --from-profile.")
-	f.Parse(args)
+	err := f.Parse(args)
+	if err != nil {
+		return fmt.Errorf("failed to parse args: %w", err)
+	}
 
 	slog.Debug("cmd", "args", args)
 

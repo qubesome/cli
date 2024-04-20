@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+//nolint:gochecknoinits
 func init() {
 	d, err := os.UserHomeDir()
 	if err != nil {
@@ -45,10 +46,11 @@ func Exec(args []string) {
 
 	cfg, _ := loadConfig()
 
-	log.Configure(cfg.Logging.Level,
+	err := log.Configure(cfg.Logging.Level,
 		cfg.Logging.LogToStdout,
 		cfg.Logging.LogToFile,
 		cfg.Logging.LogToSyslog)
+	checkNil(err)
 
 	slog.Debug("qubesome called", "args", args, "config", cfg)
 	if len(args) < 2 {
@@ -65,12 +67,11 @@ func Exec(args []string) {
 	checkNil(cmd(args[2:], cfg))
 }
 
-func checkNil(err error) error {
+func checkNil(err error) {
 	if err != nil {
 		slog.Error(err.Error())
 		os.Exit(1)
 	}
-	return nil
 }
 
 func rootUsage() {

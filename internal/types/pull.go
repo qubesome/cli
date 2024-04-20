@@ -30,13 +30,18 @@ const (
 func (o WorkloadPullMode) Pull(wg *sync.WaitGroup) error {
 	switch o {
 	case Background:
+		wg.Add(1)
 		go func() {
-			wg.Add(1)
 			if exp, _ := pullExpired(); exp {
-				PullAll()
+				err := PullAll()
+				if err != nil {
+					slog.Error("error pulling images", "error", err)
+				}
 			}
 			wg.Done()
 		}()
+	case OnDemand:
+		// no-op as images will be pull when needed.
 	}
 
 	return nil
@@ -67,7 +72,7 @@ func pullExpired() (bool, error) {
 		if err := os.WriteFile(fn, []byte{}, pullFileMode); err != nil {
 			return false, fmt.Errorf("cannot create file %q: %w", fn, err)
 		}
-		fi, err = os.Stat(fn)
+		_, err = os.Stat(fn)
 		if err != nil {
 			return false, fmt.Errorf("cannot stat %q post-creation: %w", fn, err)
 		}

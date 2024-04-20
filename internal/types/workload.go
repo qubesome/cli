@@ -32,9 +32,9 @@ type HostAccess struct {
 
 	Bluetooth bool `yaml:"bluetooth"`
 
-	// MachineId defines whether the workload should share the same
+	// MachineID defines whether the workload should share the same
 	// machine id as the host.
-	MachineId bool `yaml:"machineId"`
+	MachineID bool `yaml:"machineId"`
 
 	// LocalTime defines whether the workload should share the same
 	// local time as the host.
@@ -63,7 +63,7 @@ func (w Workload) ApplyProfile(p Profile) EffectiveWorkload {
 	e.Workload.Speakers = w.Speakers && p.HostAccess.Speakers
 	e.Workload.X11 = w.X11 && p.HostAccess.X11
 	e.Workload.VarRunUser = w.VarRunUser && p.HostAccess.VarRunUser
-	e.Workload.MachineId = w.MachineId && p.HostAccess.MachineId
+	e.Workload.MachineID = w.MachineID && p.HostAccess.MachineID
 	e.Workload.LocalTime = w.LocalTime && p.HostAccess.LocalTime
 	e.Workload.Bluetooth = w.Bluetooth && p.HostAccess.Bluetooth
 	e.Workload.Mime = w.Mime && p.HostAccess.Mime

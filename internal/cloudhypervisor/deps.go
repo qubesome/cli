@@ -22,12 +22,12 @@ const (
 	qubesomeFilemode    = 0o700
 	qubesomeCfgFilemode = 0o600
 
-	// kernelUrl  = "https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.4.2/hypervisor-fw"
+	// kernelURL  = "https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.4.2/hypervisor-fw"
 	// kernelFile = "hypervisor-fw"
 
 	// Used MicroOS:
 	// https://download.opensuse.org/tumbleweed/appliances/openSUSE-MicroOS.x86_64-16.0.0-ContainerHost-kvm-and-xen-Snapshot20231006.qcow2
-	kernelUrl  = "https://github.com/cloud-hypervisor/edk2/releases/download/ch-92c79b2901/CLOUDHV.fd"
+	kernelURL  = "https://github.com/cloud-hypervisor/edk2/releases/download/ch-92c79b2901/CLOUDHV.fd"
 	kernelFile = "CLOUDHV.fd"
 
 	MB              = 1024 * 1024
@@ -51,7 +51,7 @@ func ensureDependencies(img string) error {
 
 	d := filepath.Join(baseDir, qubesomeDir)
 	if err = os.MkdirAll(d, qubesomeFilemode); err != nil {
-		return nil
+		return err
 	}
 
 	kfile := filepath.Join(d, kernelFile)
@@ -62,7 +62,7 @@ func ensureDependencies(img string) error {
 		}
 
 		slog.Info("cached kernel image not found")
-		err = download(kernelUrl, kfile)
+		err = download(kernelURL, kfile)
 		if err != nil {
 			return fmt.Errorf("failed to download kernel image: %w", err)
 		}
@@ -105,6 +105,7 @@ func download(url, target string) error {
 	}
 	defer f.Close()
 
+	//nolint:gosec // ignore lint error below as the url is not controlled by user input.
 	r, err := http.Get(url)
 	if err != nil {
 		return err

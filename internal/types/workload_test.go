@@ -494,74 +494,74 @@ func Test_ApplyProfile(t *testing.T) {
 			},
 		},
 		{
-			name: "MachineId ON: workload ON + profile ON",
+			name: "MachineID ON: workload ON + profile ON",
 			workload: Workload{
-				HostAccess: HostAccess{MachineId: true},
+				HostAccess: HostAccess{MachineID: true},
 			},
 			profile: Profile{
-				HostAccess: HostAccess{MachineId: true},
+				HostAccess: HostAccess{MachineID: true},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{MachineId: true},
+					HostAccess: HostAccess{MachineID: true},
 				},
 				Profile: Profile{
-					HostAccess: HostAccess{MachineId: true},
+					HostAccess: HostAccess{MachineID: true},
 				},
 			},
 		},
 		{
-			name: "MachineId OFF: workload OFF + profile ON",
+			name: "MachineID OFF: workload OFF + profile ON",
 			workload: Workload{
-				HostAccess: HostAccess{MachineId: false},
+				HostAccess: HostAccess{MachineID: false},
 			},
 			profile: Profile{
-				HostAccess: HostAccess{MachineId: true},
+				HostAccess: HostAccess{MachineID: true},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{MachineId: false},
+					HostAccess: HostAccess{MachineID: false},
 				},
 				Profile: Profile{
-					HostAccess: HostAccess{MachineId: true},
+					HostAccess: HostAccess{MachineID: true},
 				},
 			},
 		},
 		{
-			name: "MachineId OFF: workload ON + profile OFF",
+			name: "MachineID OFF: workload ON + profile OFF",
 			workload: Workload{
-				HostAccess: HostAccess{MachineId: true},
+				HostAccess: HostAccess{MachineID: true},
 			},
 			profile: Profile{
-				HostAccess: HostAccess{MachineId: false},
+				HostAccess: HostAccess{MachineID: false},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{MachineId: false},
+					HostAccess: HostAccess{MachineID: false},
 				},
 				Profile: Profile{
-					HostAccess: HostAccess{MachineId: false},
+					HostAccess: HostAccess{MachineID: false},
 				},
 			},
 		},
 		{
-			name: "MachineId OFF: workload OFF + profile OFF",
+			name: "MachineID OFF: workload OFF + profile OFF",
 			workload: Workload{
-				HostAccess: HostAccess{MachineId: false},
+				HostAccess: HostAccess{MachineID: false},
 			},
 			profile: Profile{
-				HostAccess: HostAccess{MachineId: false},
+				HostAccess: HostAccess{MachineID: false},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{MachineId: false},
+					HostAccess: HostAccess{MachineID: false},
 				},
 				Profile: Profile{
-					HostAccess: HostAccess{MachineId: false},
+					HostAccess: HostAccess{MachineID: false},
 				},
 			},
 		},

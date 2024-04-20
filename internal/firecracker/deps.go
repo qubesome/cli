@@ -22,7 +22,7 @@ const (
 	qubesomeFilemode    = 0o700
 	qubesomeCfgFilemode = 0o600
 
-	kernelUrl  = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.5/x86_64/vmlinux-5.10.186"
+	kernelURL  = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.5/x86_64/vmlinux-5.10.186"
 	kernelFile = "vmlinux"
 
 	MB              = 1024 * 1024
@@ -46,7 +46,7 @@ func ensureDependencies(img string) error {
 
 	d := filepath.Join(baseDir, qubesomeDir)
 	if err = os.MkdirAll(d, qubesomeFilemode); err != nil {
-		return nil
+		return err
 	}
 
 	kfile := filepath.Join(d, kernelFile)
@@ -57,7 +57,7 @@ func ensureDependencies(img string) error {
 		}
 
 		slog.Info("cached kernel image not found")
-		err = download(kernelUrl, kfile)
+		err = download(kernelURL, kfile)
 		if err != nil {
 			return fmt.Errorf("failed to download kernel image: %w", err)
 		}
@@ -100,6 +100,7 @@ func download(url, target string) error {
 	}
 	defer f.Close()
 
+	//nolint:gosec // ignore lint error below as the url is not controlled by user input.
 	r, err := http.Get(url)
 	if err != nil {
 		return err

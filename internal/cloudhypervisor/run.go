@@ -12,12 +12,6 @@ import (
 	"golang.org/x/sys/execabs"
 )
 
-type configParams struct {
-	KernelImagePath string
-	RootFsPath      string
-	HostDeviceName  string
-}
-
 func createRootFs(dir, img string) (string, error) {
 	slog.Info("creating root fs")
 	rootfs := filepath.Join(dir, "roofs.ext4")
