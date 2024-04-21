@@ -26,6 +26,8 @@ var deps map[string][]string = map[string][]string{
 	"profiles": {
 		"/usr/bin/docker",
 		"/usr/bin/xauth",
+		"/usr/bin/mcookie",
+		"/usr/bin/sed",
 	},
 }
 
