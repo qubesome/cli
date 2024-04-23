@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/profiles/socket"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
@@ -161,10 +162,15 @@ func createNewDisplay(profile, display string) error {
 		slog.Debug("profile won't be able to open applications")
 	}
 
+	socket, err := files.SocketPath(profile)
+	if err != nil {
+		return err
+	}
+
 	var paths []string
 	paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
 	paths = append(paths, "-v=/tmp/.X11-unix:/tmp/.X11-unix:rw")
-	paths = append(paths, fmt.Sprintf("-v=/tmp/qube-%s.sock:/tmp/qube.sock:ro", display))
+	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver", server))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority", workload))
 	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))

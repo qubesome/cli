@@ -3,7 +3,6 @@ package socket
 import (
 	"flag"
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"os"
@@ -11,19 +10,28 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/qubesome"
 	"github.com/qubesome/cli/internal/types"
 )
 
 const (
-	sockPathFormat = "/tmp/qube-%d.sock"
-	bufferSize     = 1024
-	sockFileMode   = 0o600
-	dirFileMode    = 0o700
+	bufferSize   = 1024
+	sockFileMode = 0o600
+	dirFileMode  = 0o700
 )
 
 func Listen(p types.Profile, cfg *types.Config) error {
-	fn := fmt.Sprintf(sockPathFormat, p.Display)
+	fn, err := files.SocketPath(p.Name)
+	if err != nil {
+		return err
+	}
+
+	// Removes previous versions of the socket that were not cleaned up.
+	if _, err := os.Stat(fn); err == nil {
+		_ = os.Remove(fn)
+	}
+
 	socket, err := net.Listen("unix", fn)
 	if err != nil {
 		return fmt.Errorf("failed to listen to socket: %w", err)
@@ -72,7 +80,8 @@ func Listen(p types.Profile, cfg *types.Config) error {
 		// Accept an incoming connection.
 		conn, err := socket.Accept()
 		if err != nil {
-			log.Fatal(err)
+			slog.Error("cannot accept connection", "error", err)
+			continue
 		}
 
 		// Handle the connection in a separate goroutine.
@@ -84,7 +93,8 @@ func Listen(p types.Profile, cfg *types.Config) error {
 			// Read data from the connection.
 			n, err := conn.Read(buf)
 			if err != nil {
-				log.Fatal(err)
+				slog.Error("cannot read from socket", "error", err)
+				return
 			}
 
 			fields := strings.Fields(string(buf[:n]))
@@ -104,6 +114,7 @@ func Listen(p types.Profile, cfg *types.Config) error {
 				err := fs.Parse(fields[1:]) // ignore command
 				if err != nil {
 					slog.Error("failed to parse", "fields", fields, "error", err)
+					return
 				}
 
 				q := qubesome.New()
@@ -118,16 +129,19 @@ func Listen(p types.Profile, cfg *types.Config) error {
 				err = q.Run(in)
 				if err != nil {
 					slog.Error("failed to run workload: %v", err)
+					return
 				}
 			case "xdg-open":
 				fs := flag.NewFlagSet("", flag.ExitOnError)
 				err := fs.Parse(fields[1:]) // ignore command
 				if err != nil {
 					slog.Error("failed to parse", "fields", fields, "error", err)
+					return
 				}
 
 				if len(fs.Args()) != 1 {
 					slog.Error("xdg-open failed: should have single argument")
+					return
 				}
 
 				q := qubesome.New()

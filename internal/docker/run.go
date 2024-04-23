@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
@@ -51,7 +52,7 @@ x-scheme-handler/snap=snap-handle-link.desktop;
 
 func ContainerID(name string) (string, bool) {
 	args := fmt.Sprintf("ps -a -q -f name=%s", name)
-	cmd := execabs.Command(command,
+	cmd := execabs.Command(command, //nolint:gosec
 		strings.Split(args, " ")...)
 
 	out, err := cmd.Output()
@@ -170,8 +171,14 @@ func Run(ew types.EffectiveWorkload) error {
 
 		// Mount access to the qubesome binary.
 		args = append(args, fmt.Sprintf("-v=%s:%s:ro", qubesomeBin, "/usr/local/bin/qubesome"))
+
+		socket, err := files.SocketPath(ew.Profile.Name)
+		if err != nil {
+			return err
+		}
+
 		// Mount qube socket so that it can send commands from container to host.
-		args = append(args, fmt.Sprintf("-v=/tmp/qube-%d.sock:/tmp/qube.sock:ro", ew.Profile.Display))
+		args = append(args, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
 	}
 
 	// Set hostname to be the same as the container name
