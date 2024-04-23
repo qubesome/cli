@@ -44,9 +44,10 @@ const (
 func Exec(args []string) {
 	execName = args[0]
 
-	cfg, _ := loadConfig()
+	cfg, err := loadConfig()
+	checkNil(err)
 
-	err := log.Configure(cfg.Logging.Level,
+	err = log.Configure(cfg.Logging.Level,
 		cfg.Logging.LogToStdout,
 		cfg.Logging.LogToFile,
 		cfg.Logging.LogToSyslog)
@@ -82,6 +83,8 @@ Supported commands:
   xdg-open:   Opens a file or URL in the user's configured workload
   images:	  Manage workload images
   profiles:	  Manage profiles
+  clipboard:  Enable copying of clipboard from host and between profiles
+  deps: 	  Shows status of all dependencies
 `, execName)
 	os.Exit(1)
 }
@@ -103,6 +106,14 @@ func loadConfig() (*types.Config, error) {
 	err = yaml.Unmarshal(data, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("cannot unmarshal qubesome config %q: %w", path, err)
+	}
+
+	// To avoid names being defined twice on the profiles, the name
+	// is only defined when referring to a profile which results
+	// on the .name field of Profiles not being populated.
+	for k := range cfg.Profiles {
+		p := cfg.Profiles[k]
+		p.Name = k
 	}
 
 	return cfg, nil

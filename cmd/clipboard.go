@@ -55,8 +55,6 @@ func clipboardCmd(args []string, cfg *types.Config) error {
 		if !ok {
 			return fmt.Errorf("profile %s not found", toProfile)
 		}
-
-		p.Name = toProfile
 		to = p
 	}
 

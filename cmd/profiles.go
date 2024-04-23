@@ -32,7 +32,6 @@ func profilesCmd(args []string, cfg *types.Config) error {
 	if !ok {
 		return fmt.Errorf("profile %q not found", name)
 	}
-	profile.Name = name
 
 	return profiles.Start(profile, cfg)
 }
