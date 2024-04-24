@@ -19,10 +19,8 @@ import (
 )
 
 var (
-	ProfileDirFormat     = ".qubesome/profiles/%s"
-	ServerCookieFormat   = fmt.Sprintf("%s/.Xserver-cookie", ProfileDirFormat)
-	WorkloadCookieFormat = fmt.Sprintf("%s/.Xclient-cookie", ProfileDirFormat)
-	ContainerNameFormat  = "qubesome-%s"
+	ProfileDirFormat    = ".qubesome/profiles/%s"
+	ContainerNameFormat = "qubesome-%s"
 
 	profileImage = "ghcr.io/qubesome/xorg:latest"
 )
@@ -130,13 +128,14 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 }
 
 func createMagicCookie(profile *types.Profile) error {
-	home, err := os.UserHomeDir()
+	server, err := files.ServerCookiePath(profile.Name)
 	if err != nil {
 		return err
 	}
-
-	server := filepath.Join(home, fmt.Sprintf(ServerCookieFormat, profile.Name))
-	workload := filepath.Join(home, fmt.Sprintf(WorkloadCookieFormat, profile.Name))
+	workload, err := files.ClientCookiePath(profile.Name)
+	if err != nil {
+		return err
+	}
 
 	err = os.MkdirAll(filepath.Dir(server), dirFileMode)
 	if err != nil {
@@ -213,13 +212,15 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"-resizeable",
 	}
 
-	home, err := os.UserHomeDir()
+	server, err := files.ServerCookiePath(profile.Name)
+	if err != nil {
+		return err
+	}
+	workload, err := files.ClientCookiePath(profile.Name)
 	if err != nil {
 		return err
 	}
 
-	server := filepath.Join(home, fmt.Sprintf(ServerCookieFormat, profile.Name))
-	workload := filepath.Join(home, fmt.Sprintf(WorkloadCookieFormat, profile.Name))
 	binPath, err := os.Executable()
 	if err != nil {
 		slog.Debug("failed to get exec path", "error", err)

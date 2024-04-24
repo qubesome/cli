@@ -110,7 +110,13 @@ func Listen(p *types.Profile, cfg *types.Config) error {
 				return
 			}
 
-			in := qubesome.WorkloadInfo{}
+			q := qubesome.New()
+			q.Config = cfg
+			in := qubesome.WorkloadInfo{
+				Profile: p.Name,
+				Path:    p.Path,
+			}
+
 			switch fields[0] {
 			case "run":
 				// TODO: Refactor to avoid code duplication from root.go
@@ -122,10 +128,6 @@ func Listen(p *types.Profile, cfg *types.Config) error {
 					slog.Error("failed to parse", "fields", fields, "error", err)
 					return
 				}
-
-				q := qubesome.New()
-				q.Config = cfg
-				in.Profile = p.Name
 
 				if fs.NArg() > 0 {
 					in.Args = fields[len(fields)-fs.NArg():]
@@ -149,9 +151,6 @@ func Listen(p *types.Profile, cfg *types.Config) error {
 					slog.Error("xdg-open failed: should have single argument")
 					return
 				}
-
-				q := qubesome.New()
-				q.Config = cfg
 
 				err = q.HandleMime(fs.Args())
 				if err != nil {

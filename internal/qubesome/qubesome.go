@@ -32,6 +32,7 @@ func New() *Qubesome {
 type WorkloadInfo struct {
 	Name    string
 	Profile string
+	Path    string
 
 	// Args provides additional args to the default command on the target workload
 	Args []string

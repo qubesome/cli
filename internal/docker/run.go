@@ -128,7 +128,7 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, x11Params()...)
 		args = append(args, fmt.Sprintf("-e=DISPLAY=:%d", ew.Profile.Display))
 
-		pp, err := securejoin.SecureJoin(ew.Profile.Path, ".Xclient-cookie")
+		pp, err := files.ClientCookiePath(ew.Profile.Name)
 		if err != nil {
 			return err
 		}
@@ -229,6 +229,10 @@ func Run(ew types.EffectiveWorkload) error {
 
 		dst := ps[1]
 		args = append(args, fmt.Sprintf("-v=%s:%s", src, dst))
+	}
+
+	for _, p := range wl.HomePaths {
+		args = append(args, "-v="+os.ExpandEnv(filepath.Join("${HOME}", p)))
 	}
 
 	// TODO: Block by profile

@@ -3,6 +3,7 @@ package qubesome
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/cloudhypervisor"
@@ -13,26 +14,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func (q *Qubesome) workloadDir(in WorkloadInfo) (string, error) {
+	if in.Path != "" {
+		return filepath.Join(in.Path, "workloads"), nil
+	}
+
+	workloadsDir, err := util.Path(util.WorkloadsDir)
+	if err != nil {
+		return "", err
+	}
+
+	return workloadsDir, nil
+}
+
 func (q *Qubesome) Run(in WorkloadInfo) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
 
-	workloadsDir, err := util.Path(util.WorkloadsDir)
+	workloadsDir, err := q.workloadDir(in)
 	if err != nil {
 		return err
 	}
 
-	profile, exists := q.Config.Profiles[in.Profile]
-	if !exists {
-		return fmt.Errorf("profile %q does not exist", in.Profile)
-	}
-
-	if fi, err := os.Stat(profile.Path); err != nil || !fi.IsDir() {
-		return fmt.Errorf("%w: %s", ErrProfileDirNotExist, profile.Path)
-	}
-
-	cfg, err := securejoin.SecureJoin(workloadsDir, fmt.Sprintf("%s-%s.%s", in.Name, in.Profile, configExtension))
+	cfg, err := securejoin.SecureJoin(workloadsDir, fmt.Sprintf("%s.%s", in.Name, configExtension))
 	if err != nil {
 		return err
 	}
@@ -50,6 +55,15 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 	err = yaml.Unmarshal(data, &w)
 	if err != nil {
 		return fmt.Errorf("cannot unmarshal workload config %q: %w", cfg, err)
+	}
+
+	profile, exists := q.Config.Profiles[in.Profile]
+	if !exists {
+		return fmt.Errorf("profile %q does not exist", in.Profile)
+	}
+
+	if fi, err := os.Stat(profile.Path); err != nil || !fi.IsDir() {
+		return fmt.Errorf("%w: %s", ErrProfileDirNotExist, profile.Path)
 	}
 
 	// TODO: find more elegant manner to auto populate profile name

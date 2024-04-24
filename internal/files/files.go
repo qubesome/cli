@@ -12,6 +12,16 @@ var (
 	ErrUnableGetSocketPath = errors.New("unable to get socket path for profile")
 )
 
+func ClientCookiePath(profile string) (string, error) {
+	base := fmt.Sprintf("/run/user/%d/qubesome", os.Getuid())
+	return securejoin.SecureJoin(base, fmt.Sprintf("%s/.Xclient-cookie", profile))
+}
+
+func ServerCookiePath(profile string) (string, error) {
+	base := fmt.Sprintf("/run/user/%d/qubesome", os.Getuid())
+	return securejoin.SecureJoin(base, fmt.Sprintf("%s/.Xserver-cookie", profile))
+}
+
 func SocketPath(profile string) (string, error) {
 	return fmt.Sprintf("/run/user/%d/qubesome/%s/qube.sock", os.Getuid(), profile), nil
 }
