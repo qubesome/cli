@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
+	"github.com/go-git/go-git/v5"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/profiles/socket"
 	"github.com/qubesome/cli/internal/types"
@@ -31,13 +34,76 @@ const (
 	sleepTime       = 150 * time.Millisecond
 )
 
-func Start(profile types.Profile, cfg *types.Config) (err error) {
+func StartFromGit(name, gitURL, path string) error {
+	dir, err := files.GitDirPath(gitURL)
+	if err != nil {
+		return err
+	}
+
+	fi, err := os.Stat(dir)
+	//nolint
+	if err == nil {
+		if !fi.IsDir() {
+			return fmt.Errorf("found file instead of git dir")
+		}
+
+		r, err := git.PlainOpen(dir)
+		if err != nil {
+			return err
+		}
+
+		wt, err := r.Worktree()
+		if err != nil {
+			return err
+		}
+
+		err = wt.Pull(&git.PullOptions{
+			Force: true,
+		})
+		if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+			return fmt.Errorf("failed to pull latest: %w", err)
+		}
+	} else {
+		_, err = git.PlainClone(dir, false, &git.CloneOptions{URL: gitURL})
+		if err != nil {
+			return err
+		}
+	}
+
+	cfgPath, err := securejoin.SecureJoin(dir, filepath.Join(path, "qubesome.config"))
+	if err != nil {
+		return err
+	}
+
+	cfg, err := types.LoadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	p, ok := cfg.Profiles[name]
+	if !ok {
+		return fmt.Errorf("cannot file profile %q in config %q", name, cfgPath)
+	}
+
+	// When sourcing from git, ensure profile path is relative to the git repository.
+	pp, err := securejoin.SecureJoin(filepath.Dir(cfgPath), p.Path)
+	if err != nil {
+		return err
+	}
+	p.Path = pp
+
+	slog.Debug("start from git", "profile", p.Name, "p", path, "path", p.Path, "config", cfgPath)
+
+	return Start(p, cfg)
+}
+
+func Start(profile *types.Profile, cfg *types.Config) (err error) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
 	go func() {
 		err1 := socket.Listen(profile, cfg)
-		if err1 != nil && err == nil {
+		if err != nil && err == nil {
 			err = err1
 		}
 		wg.Done()
@@ -48,9 +114,7 @@ func Start(profile types.Profile, cfg *types.Config) (err error) {
 		return err
 	}
 
-	// Quick sleep which socket is being created.
-	time.Sleep(100 * time.Millisecond)
-	err = createNewDisplay(profile.Name, strconv.Itoa(int(profile.Display)))
+	err = createNewDisplay(profile, strconv.Itoa(int(profile.Display)))
 	if err != nil {
 		return err
 	}
@@ -65,7 +129,7 @@ func Start(profile types.Profile, cfg *types.Config) (err error) {
 	return nil
 }
 
-func createMagicCookie(profile types.Profile) error {
+func createMagicCookie(profile *types.Profile) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -135,11 +199,11 @@ func startWindowManager(name, display string) error {
 	return cmd.Run()
 }
 
-func createNewDisplay(profile, display string) error {
+func createNewDisplay(profile *types.Profile, display string) error {
 	command := "Xephyr"
 	cArgs := []string{
 		":" + display,
-		"-title", fmt.Sprintf("qubesome-%s :%s", profile, display),
+		"-title", fmt.Sprintf("qubesome-%s :%s", profile.Name, display),
 		"-auth", "/home/xorg-user/.Xserver",
 		"-extension", "MIT-SHM",
 		"-extension", "XTEST",
@@ -154,19 +218,36 @@ func createNewDisplay(profile, display string) error {
 		return err
 	}
 
-	server := filepath.Join(home, fmt.Sprintf(ServerCookieFormat, profile))
-	workload := filepath.Join(home, fmt.Sprintf(WorkloadCookieFormat, profile))
+	server := filepath.Join(home, fmt.Sprintf(ServerCookieFormat, profile.Name))
+	workload := filepath.Join(home, fmt.Sprintf(WorkloadCookieFormat, profile.Name))
 	binPath, err := os.Executable()
 	if err != nil {
 		slog.Debug("failed to get exec path", "error", err)
 		slog.Debug("profile won't be able to open applications")
 	}
 
-	socket, err := files.SocketPath(profile)
+	socket, err := files.SocketPath(profile.Name)
 	if err != nil {
 		return err
 	}
 
+	t := time.Now().Add(3 * time.Second)
+	for {
+		if t.Before(time.Now()) {
+			return fmt.Errorf("time out waiting for socket to be created")
+		}
+
+		fi, err := os.Stat(socket)
+		if err != nil {
+			continue
+		}
+		if fi.IsDir() {
+			return fmt.Errorf("socket %q cannot be a dir", socket)
+		}
+		break
+	}
+
+	//nolint
 	var paths []string
 	paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
 	paths = append(paths, "-v=/tmp/.X11-unix:/tmp/.X11-unix:rw")
@@ -175,8 +256,9 @@ func createNewDisplay(profile, display string) error {
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority", workload))
 	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
 
-	paths = append(paths, os.ExpandEnv(fmt.Sprintf("-v=${HOME}/.qubesome/profiles/%s/homedir/.config:/home/xorg-user/.config:ro", profile)))
-	paths = append(paths, os.ExpandEnv(fmt.Sprintf("-v=${HOME}/.qubesome/profiles/%s/homedir/.local:/home/xorg-user/.local:ro", profile)))
+	for _, p := range profile.Paths {
+		paths = append(paths, "-v="+filepath.Join(profile.Path, p))
+	}
 
 	dockerArgs := []string{
 		"run",
@@ -190,7 +272,7 @@ func createNewDisplay(profile, display string) error {
 
 	dockerArgs = append(dockerArgs, paths...)
 
-	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(ContainerNameFormat, profile)))
+	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(ContainerNameFormat, profile.Name)))
 	dockerArgs = append(dockerArgs, profileImage)
 	dockerArgs = append(dockerArgs, command)
 	dockerArgs = append(dockerArgs, cArgs...)

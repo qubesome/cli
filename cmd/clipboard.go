@@ -48,7 +48,7 @@ func clipboardCmd(args []string, cfg *types.Config) error {
 	}
 
 	toProfile := f.Arg(0)
-	var to types.Profile
+	var to *types.Profile
 
 	if len(toProfile) > 0 {
 		p, ok := cfg.Profiles[toProfile]

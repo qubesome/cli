@@ -137,6 +137,7 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", ew.Profile.Display))
 	}
 
+	//nolint
 	if wl.Mime {
 		uid := os.Getuid()
 		pdir := fmt.Sprintf("/var/run/user/%d/qubesome/%s", uid, ew.Profile.Name)

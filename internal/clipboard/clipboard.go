@@ -12,7 +12,7 @@ import (
 var ErrUnsupportedCopyType = errors.New("unsupported copy type")
 var ErrCannotCopyClipboardWithinSameDisplay = errors.New("cannot copy clipboard within the same display")
 
-func Copy(from uint8, to types.Profile, target string) error {
+func Copy(from uint8, to *types.Profile, target string) error {
 	if !validTarget(target) {
 		return fmt.Errorf("%w: %s", ErrUnsupportedCopyType, target)
 	}

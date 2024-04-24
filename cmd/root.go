@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -11,7 +9,6 @@ import (
 
 	"github.com/qubesome/cli/internal/log"
 	"github.com/qubesome/cli/internal/types"
-	"gopkg.in/yaml.v3"
 )
 
 //nolint:gochecknoinits
@@ -31,7 +28,7 @@ var (
 		"run":       runCmd,
 		"xdg-open":  xdgOpenCmd,
 		"images":    imagesCmd,
-		"profiles":  profilesCmd,
+		"start":     startCmd,
 		"clipboard": clipboardCmd,
 		"deps":      depsCmd,
 	}
@@ -44,7 +41,8 @@ const (
 func Exec(args []string) {
 	execName = args[0]
 
-	cfg, err := loadConfig()
+	path := filepath.Join(homedir, configFile)
+	cfg, err := types.LoadConfig(path)
 	checkNil(err)
 
 	err = log.Configure(cfg.Logging.Level,
@@ -82,39 +80,9 @@ Supported commands:
   run: 	 	  Execute qubesome workloads
   xdg-open:   Opens a file or URL in the user's configured workload
   images:	  Manage workload images
-  profiles:	  Manage profiles
+  start:	  Start qubesome profiles.
   clipboard:  Enable copying of clipboard from host and between profiles
   deps: 	  Shows status of all dependencies
 `, execName)
 	os.Exit(1)
-}
-
-func loadConfig() (*types.Config, error) {
-	path := filepath.Join(homedir, configFile)
-	cfg := &types.Config{}
-
-	if _, err := os.Stat(path); err != nil && errors.Is(err, fs.ErrNotExist) {
-		slog.Debug("qubesome config not found, falling back to default", "path", path)
-		return cfg, nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	err = yaml.Unmarshal(data, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("cannot unmarshal qubesome config %q: %w", path, err)
-	}
-
-	// To avoid names being defined twice on the profiles, the name
-	// is only defined when referring to a profile which results
-	// on the .name field of Profiles not being populated.
-	for k := range cfg.Profiles {
-		p := cfg.Profiles[k]
-		p.Name = k
-	}
-
-	return cfg, nil
 }

@@ -45,11 +45,11 @@ type EffectiveWorkload struct {
 	// Name combines the name of both the workload and the profile
 	// in which it will be executed under.
 	Name     string
-	Profile  Profile
+	Profile  *Profile
 	Workload Workload
 }
 
-func (w Workload) ApplyProfile(p Profile) EffectiveWorkload {
+func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e := EffectiveWorkload{
 		Profile:  p,
 		Workload: w,

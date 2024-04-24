@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -21,7 +22,7 @@ const (
 	dirFileMode  = 0o700
 )
 
-func Listen(p types.Profile, cfg *types.Config) error {
+func Listen(p *types.Profile, cfg *types.Config) error {
 	fn, err := files.SocketPath(p.Name)
 	if err != nil {
 		return err
@@ -30,6 +31,11 @@ func Listen(p types.Profile, cfg *types.Config) error {
 	// Removes previous versions of the socket that were not cleaned up.
 	if _, err := os.Stat(fn); err == nil {
 		_ = os.Remove(fn)
+	}
+
+	err = os.MkdirAll(filepath.Dir(fn), dirFileMode)
+	if err != nil {
+		return err
 	}
 
 	socket, err := net.Listen("unix", fn)
