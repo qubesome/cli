@@ -221,7 +221,7 @@ func Run(ew types.EffectiveWorkload) error {
 			continue
 		}
 
-		src, err := securejoin.SecureJoin(ew.Profile.Path, filepath.Join("homedir", ps[0]))
+		src, err := securejoin.SecureJoin(ew.Profile.Path, ps[0])
 		if err != nil {
 			slog.Warn("failed to mount path", "path", p, "error", err)
 			continue

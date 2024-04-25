@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 )
@@ -28,6 +29,10 @@ func SocketPath(profile string) (string, error) {
 
 func GitDirPath(url string) (string, error) {
 	base := fmt.Sprintf("/run/user/%d/qubesome/git", os.Getuid())
+
+	url = strings.ReplaceAll(url, ":", "/")
+	url = strings.ReplaceAll(url, "git@", "")
+
 	p, err := securejoin.SecureJoin(base, url)
 	if err != nil {
 		return "", fmt.Errorf("cannot get git dir path for %q: %w", url, err)

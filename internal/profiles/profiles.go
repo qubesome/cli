@@ -7,11 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/profiles/socket"
 	"github.com/qubesome/cli/internal/types"
@@ -62,7 +65,20 @@ func StartFromGit(name, gitURL, path string) error {
 			return fmt.Errorf("failed to pull latest: %w", err)
 		}
 	} else {
-		_, err = git.PlainClone(dir, false, &git.CloneOptions{URL: gitURL})
+
+		var auth transport.AuthMethod
+		if strings.HasPrefix(gitURL, "git@") {
+			a, err := ssh.NewSSHAgentAuth("git")
+			if err != nil {
+				return err
+			}
+			auth = a
+		}
+
+		_, err = git.PlainClone(dir, false, &git.CloneOptions{
+			URL:  gitURL,
+			Auth: auth,
+		})
 		if err != nil {
 			return err
 		}
