@@ -35,6 +35,11 @@ const (
 )
 
 func StartFromGit(name, gitURL, path string) error {
+	ln := files.ProfileConfig(name)
+	if _, err := os.Lstat(ln); err == nil {
+		return fmt.Errorf("profile %q is already started", name)
+	}
+
 	dir, err := files.GitDirPath(gitURL)
 	if err != nil {
 		return err
@@ -93,6 +98,14 @@ func StartFromGit(name, gitURL, path string) error {
 		return err
 	}
 
+	err = os.Symlink(cfgPath, ln)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(ln)
+	}()
+
 	p, ok := cfg.Profiles[name]
 	if !ok {
 		return fmt.Errorf("cannot file profile %q in config %q", name, cfgPath)
@@ -120,6 +133,12 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 			err = err1
 		}
 		wg.Done()
+	}()
+
+	defer func() {
+		if fn, err := files.SocketPath(profile.Name); err != nil {
+			_ = os.Remove(fn)
+		}
 	}()
 
 	err = createMagicCookie(profile)

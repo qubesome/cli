@@ -5,11 +5,14 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"flag"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/qubesome"
 	"github.com/qubesome/cli/internal/types"
 )
@@ -44,6 +47,36 @@ func runCmd(args []string, cfg *types.Config) error {
 
 	if in.Name == "" || in.Profile == "" {
 		runUsage()
+	}
+
+	// If user level config was not found, try to load the config
+	// for the target profile which at this point must be started.
+	if cfg == nil {
+		cfgPath := files.ProfileConfig(in.Profile)
+		slog.Debug("trying to load config from started profile", "path", cfgPath)
+
+		target, err := os.Readlink(cfgPath)
+		if err != nil {
+			return fmt.Errorf("cannot read profile symlink: %w", err)
+		}
+		cfgPath = target
+
+		cfg, err = types.LoadConfig(cfgPath)
+		if err != nil {
+			return fmt.Errorf("could load config (check profile is loaded): %w", err)
+		}
+
+		profile, ok := cfg.Profiles[in.Profile]
+		if !ok {
+			panic("test")
+		}
+
+		pp, err := securejoin.SecureJoin(filepath.Dir(cfgPath), profile.Path)
+		if err != nil {
+			return err
+		}
+		slog.Debug("override path", "path", pp)
+		in.Path = pp
 	}
 
 	q := qubesome.New()

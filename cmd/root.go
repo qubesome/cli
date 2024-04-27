@@ -25,17 +25,31 @@ var (
 	}
 )
 
+const (
+	DefaultLogLevel = "DEBUG"
+)
+
 func Exec(args []string) {
 	execName = args[0]
 
-	cfg, err := types.LoadConfig(files.QubesomeConfig())
-	checkNil(err)
+	var cfg *types.Config
+	var err error
 
-	err = log.Configure(cfg.Logging.Level,
-		cfg.Logging.LogToStdout,
-		cfg.Logging.LogToFile,
-		cfg.Logging.LogToSyslog)
-	checkNil(err)
+	path := files.QubesomeConfig()
+	if _, err = os.Stat(path); err == nil {
+		cfg, err = types.LoadConfig(path)
+		checkNil(err)
+
+		err = log.Configure(cfg.Logging.Level,
+			cfg.Logging.LogToStdout,
+			cfg.Logging.LogToFile,
+			cfg.Logging.LogToSyslog)
+		checkNil(err)
+	}
+
+	// If no config found is found, enable stdout log for
+	// improved troubleshooting.
+	err = log.Configure(DefaultLogLevel, true, false, false)
 
 	slog.Debug("qubesome called", "args", args, "config", cfg)
 	if len(args) < 2 {

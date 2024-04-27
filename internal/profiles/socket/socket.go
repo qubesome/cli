@@ -77,7 +77,6 @@ func Listen(p *types.Profile, cfg *types.Config) error {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		os.Remove(fn)
 		os.Exit(1)
 	}()
 

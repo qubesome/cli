@@ -17,7 +17,7 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		return err
 	}
 
-	workloadsDir, err := files.WorkloadsDir(in.Name)
+	workloadsDir, err := files.WorkloadsDir(in.Path)
 	if err != nil {
 		return err
 	}
@@ -46,6 +46,9 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 	if !exists {
 		return fmt.Errorf("profile %q does not exist", in.Profile)
 	}
+
+	// TODO: this should be set by caller.
+	profile.Path = in.Path
 
 	if fi, err := os.Stat(profile.Path); err != nil || !fi.IsDir() {
 		return fmt.Errorf("%w: %s", ErrProfileDirNotExist, profile.Path)

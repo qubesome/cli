@@ -7,14 +7,11 @@ import (
 	"os"
 
 	"github.com/qubesome/cli/internal/clipboard"
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
 )
 
 func clipboardCmd(args []string, cfg *types.Config) error {
-	if cfg == nil {
-		return fmt.Errorf("err: could not load config")
-	}
-
 	var t string
 	var fromHost bool
 	var fromProfile string
@@ -34,6 +31,19 @@ func clipboardCmd(args []string, cfg *types.Config) error {
 		clipboardUsage()
 	}
 
+	toProfile := f.Arg(0)
+	// If user level config was not found, try to load the config
+	// for the target profile which at this point must be started.
+	if cfg == nil {
+		cfgPath := files.ProfileConfig(toProfile)
+		slog.Debug("trying to load config from started profile", "path", cfgPath)
+
+		cfg, err = types.LoadConfig(cfgPath)
+		if err != nil {
+			return fmt.Errorf("could load config (check profile is loaded): %w", err)
+		}
+	}
+
 	from := uint8(0)
 	if fromHost && len(fromProfile) > 0 {
 		return fmt.Errorf("err: --from-host cannot be used with --from-profile")
@@ -47,16 +57,12 @@ func clipboardCmd(args []string, cfg *types.Config) error {
 		from = p.Display
 	}
 
-	toProfile := f.Arg(0)
 	var to *types.Profile
-
-	if len(toProfile) > 0 {
-		p, ok := cfg.Profiles[toProfile]
-		if !ok {
-			return fmt.Errorf("profile %s not found", toProfile)
-		}
-		to = p
+	p, ok := cfg.Profiles[toProfile]
+	if !ok {
+		return fmt.Errorf("profile %s not found", toProfile)
 	}
+	to = p
 
 	slog.Debug("clipboard copy", "from", from, "to", to, "type", t)
 	return clipboard.Copy(from, to, t)

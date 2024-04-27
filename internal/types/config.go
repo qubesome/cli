@@ -1,10 +1,7 @@
 package types
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
-	"log/slog"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -59,11 +56,6 @@ type Profile struct {
 
 func LoadConfig(path string) (*Config, error) {
 	cfg := &Config{}
-
-	if _, err := os.Stat(path); err != nil && errors.Is(err, fs.ErrNotExist) {
-		slog.Debug("qubesome config not found, falling back to default", "path", path)
-		return cfg, nil
-	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {

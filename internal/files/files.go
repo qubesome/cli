@@ -38,6 +38,13 @@ func QubesomeConfig() string {
 	return filepath.Join(QubesomeDir(), "qubesome.config")
 }
 
+// ProfileConfig returns the profile config file path. This will be
+// a symlink to the actual profile which is sourced within the Git
+// repository.
+func ProfileConfig(profile string) string {
+	return filepath.Join(RunUserQubesome(), fmt.Sprintf("%s.config", profile))
+}
+
 // ImagesLastCheckedPath returns the file path for the file that records
 // when images where last checked.
 func ImagesLastCheckedPath() string {
@@ -88,8 +95,8 @@ func GitDirPath(url string) (string, error) {
 }
 
 // WorkloadsDir returns the workloads directory path for a given Qubesome profile.
-func WorkloadsDir(profile string) (string, error) {
-	return securejoin.SecureJoin(QubesomeDir(), filepath.Join(profile, "workloads"))
+func WorkloadsDir(path string) (string, error) {
+	return securejoin.SecureJoin(path, "workloads")
 }
 
 // WorkloadFiles returns a list of workload file paths.
