@@ -106,7 +106,7 @@ func Test_HandleMime(t *testing.T) {
 				return nil
 			}
 
-			err := q.HandleMime(tc.args)
+			err := q.HandleMime(nil, tc.args)
 
 			if tc.errContains == "" {
 				assert.Nil(err)

@@ -74,6 +74,12 @@ func SocketPath(profile string) (string, error) {
 	return securejoin.SecureJoin(base, fmt.Sprintf("%s/qube.sock", profile))
 }
 
+// InProfileSocketPath returns the path to the socket when running inside the profile
+// container.
+func InProfileSocketPath() string {
+	return "/tmp/qube.sock"
+}
+
 // GitRoot returns the root directory for git repositories.
 func GitRoot() string {
 	return filepath.Join(RunUserQubesome(), "git")

@@ -40,16 +40,18 @@ func Exec(args []string) {
 		cfg, err = types.LoadConfig(path)
 		checkNil(err)
 
+		slog.Debug("global config loaded", "path", path)
+
 		err = log.Configure(cfg.Logging.Level,
 			cfg.Logging.LogToStdout,
 			cfg.Logging.LogToFile,
 			cfg.Logging.LogToSyslog)
 		checkNil(err)
+	} else {
+		// If no config found is found, enable stdout log for
+		// improved troubleshooting.
+		err = log.Configure(DefaultLogLevel, true, false, false)
 	}
-
-	// If no config found is found, enable stdout log for
-	// improved troubleshooting.
-	err = log.Configure(DefaultLogLevel, true, false, false)
 
 	slog.Debug("qubesome called", "args", args, "config", cfg)
 	if len(args) < 2 {

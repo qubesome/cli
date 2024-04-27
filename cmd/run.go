@@ -17,9 +17,8 @@ import (
 	"github.com/qubesome/cli/internal/types"
 )
 
-const socketAddress = "/tmp/qube.sock"
-
 func runCmd(args []string, cfg *types.Config) error {
+	socketAddress := files.InProfileSocketPath()
 	slog.Debug("check whether running inside container")
 	if _, err := os.Stat(socketAddress); err == nil {
 		fmt.Println("dialing host qubesome", "socket", socketAddress)
@@ -38,16 +37,18 @@ func runCmd(args []string, cfg *types.Config) error {
 	in := qubesome.WorkloadInfo{}
 
 	fs := flag.NewFlagSet("", flag.ExitOnError)
-	fs.StringVar(&in.Name, "name", "", fmt.Sprintf("The name of the workload to be executed. For new workloads use %s import first.", execName))
 	fs.StringVar(&in.Profile, "profile", "untrusted", "The profile name which will be used to run the workload.")
+
 	err := fs.Parse(args)
 	if err != nil {
 		return fmt.Errorf("failed to parse args: %w", err)
 	}
 
-	if in.Name == "" || in.Profile == "" {
+	if in.Profile == "" || fs.NArg() != 1 {
 		runUsage()
 	}
+
+	in.Name = fs.Arg(0)
 
 	// If user level config was not found, try to load the config
 	// for the target profile which at this point must be started.
@@ -68,7 +69,7 @@ func runCmd(args []string, cfg *types.Config) error {
 
 		profile, ok := cfg.Profiles[in.Profile]
 		if !ok {
-			panic("test")
+			return fmt.Errorf("failed to find profile %s", in.Profile)
 		}
 
 		pp, err := securejoin.SecureJoin(filepath.Dir(cfgPath), profile.Path)
@@ -98,7 +99,7 @@ func runCmd(args []string, cfg *types.Config) error {
 }
 
 func runUsage() {
-	fmt.Printf(`usage: %s run -name chrome -profile untrusted
+	fmt.Printf(`usage: %s run -profile untrusted chrome
 `, execName)
 	os.Exit(1)
 }

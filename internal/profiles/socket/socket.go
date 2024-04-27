@@ -120,7 +120,6 @@ func Listen(p *types.Profile, cfg *types.Config) error {
 			case "run":
 				// TODO: Refactor to avoid code duplication from root.go
 				fs := flag.NewFlagSet("", flag.ExitOnError)
-				fs.StringVar(&in.Name, "name", "", "")
 				fs.String("profile", "", "")
 				err := fs.Parse(fields[1:]) // ignore command
 				if err != nil {
@@ -132,6 +131,8 @@ func Listen(p *types.Profile, cfg *types.Config) error {
 					in.Args = fields[len(fields)-fs.NArg():]
 					slog.Debug("extra args", "args", in.Args)
 				}
+
+				in.Name = fs.Arg(0)
 
 				err = q.Run(in)
 				if err != nil {
@@ -151,9 +152,9 @@ func Listen(p *types.Profile, cfg *types.Config) error {
 					return
 				}
 
-				err = q.HandleMime(fs.Args())
+				err = q.HandleMime(&in, fs.Args())
 				if err != nil {
-					slog.Error("failed to run workload: %v", err)
+					slog.Error("failed to handle mime: %v", err)
 				}
 			default:
 				slog.Error("unsupported command: %s", "fields", strings.Join(fields, " "))
