@@ -15,8 +15,6 @@ import (
 )
 
 var (
-	command = "/usr/bin/docker"
-
 	defaultMimeHandler = `[Desktop Entry]
 Version=1.0
 Type=Application
@@ -52,7 +50,7 @@ x-scheme-handler/snap=snap-handle-link.desktop;
 
 func ContainerID(name string) (string, bool) {
 	args := fmt.Sprintf("ps -a -q -f name=%s", name)
-	cmd := execabs.Command(command, //nolint:gosec
+	cmd := execabs.Command(files.DockerBinary, //nolint:gosec
 		strings.Split(args, " ")...)
 
 	out, err := cmd.Output()
@@ -69,8 +67,8 @@ func exec(id string, ew types.EffectiveWorkload) error {
 	args := []string{"exec", id, ew.Workload.Command}
 	args = append(args, ew.Workload.Args...)
 
-	slog.Debug(command+" exec", "container-id", id, "cmd", ew.Workload.Command, "args", ew.Workload.Args)
-	cmd := execabs.Command(command, args...)
+	slog.Debug(files.DockerBinary+" exec", "container-id", id, "cmd", ew.Workload.Command, "args", ew.Workload.Args)
+	cmd := execabs.Command(files.DockerBinary, args...)
 
 	return cmd.Run()
 }
@@ -251,8 +249,8 @@ func Run(ew types.EffectiveWorkload) error {
 	args = append(args, wl.Command)
 	args = append(args, wl.Args...)
 
-	slog.Debug(fmt.Sprintf("exec: %s", command), "args", args)
-	cmd := execabs.Command(command, args...)
+	slog.Debug(fmt.Sprintf("exec: %s", files.DockerBinary), "args", args)
+	cmd := execabs.Command(files.DockerBinary, args...)
 
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -264,8 +262,8 @@ func Run(ew types.EffectiveWorkload) error {
 func getHomeDir(image string) (string, error) {
 	args := []string{"run", "--rm", image, "ls", "/home"}
 
-	slog.Debug(command + strings.Join(args, " "))
-	cmd := execabs.Command(command, args...)
+	slog.Debug(files.DockerBinary + strings.Join(args, " "))
+	cmd := execabs.Command(files.DockerBinary, args...)
 
 	out, err := cmd.Output()
 	if err != nil {

@@ -168,16 +168,16 @@ func createMagicCookie(profile *types.Profile) error {
 		return fmt.Errorf("failed to ensure clean workload cookie %q", workload)
 	}
 
-	cmd := execabs.Command("/usr/bin/mcookie")
+	cmd := execabs.Command(files.MCookieBinary)
 	cookie, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("cannot create auth cookie for profile %q: %w", profile.Name, err)
 	}
 
-	slog.Debug("/usr/bin/xauth", "args",
+	slog.Debug(files.XauthBinary, "args",
 		[]string{"-f", server, "add", ":" + strconv.Itoa(int(profile.Display)), ".", string(cookie)})
 	cmd = execabs.Command(
-		"/usr/bin/xauth", "-f", server, "add", ":"+strconv.Itoa(int(profile.Display)), ".", string(cookie))
+		files.XauthBinary, "-f", server, "add", ":"+strconv.Itoa(int(profile.Display)), ".", string(cookie))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("XAUTHORITY=%q", server))
 
 	err = cmd.Run()
@@ -188,13 +188,13 @@ func createMagicCookie(profile *types.Profile) error {
 	args := []string{
 		"-c",
 		fmt.Sprintf("XAUTHORITY=%q", server) + " " +
-			"/usr/bin/xauth nlist :" + strconv.Itoa(int(profile.Display)) +
-			" | /usr/bin/sed -e 's/^..../ffff/' " +
+			files.XauthBinary + " nlist :" + strconv.Itoa(int(profile.Display)) +
+			" | " + files.SedBinary + " -e 's/^..../ffff/' " +
 			" | " + fmt.Sprintf("XAUTHORITY=%q", server) + " " +
-			"/usr/bin/xauth -f " + workload + " nmerge -",
+			files.XauthBinary + " -f " + workload + " nmerge -",
 	}
-	slog.Debug("/usr/bin/sh", "args", args)
-	cmd = execabs.Command("/usr/bin/sh", args...)
+	slog.Debug(files.ShBinary, "args", args)
+	cmd = execabs.Command(files.ShBinary, args...)
 
 	err = cmd.Run()
 	if err != nil {
@@ -205,10 +205,10 @@ func createMagicCookie(profile *types.Profile) error {
 }
 
 func startWindowManager(name, display string) error {
-	args := []string{"exec", name, "bash", "-c", fmt.Sprintf("DISPLAY=:%s exec awesome", display)}
+	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s exec awesome", display)}
 
-	slog.Debug("docker exec", "container-name", name, "args", args)
-	cmd := execabs.Command("/usr/bin/docker", args...)
+	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
+	cmd := execabs.Command(files.DockerBinary, args...)
 
 	return cmd.Run()
 }
@@ -294,7 +294,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	dockerArgs = append(dockerArgs, cArgs...)
 
 	slog.Debug("exec: docker", "args", dockerArgs)
-	cmd := execabs.Command("/usr/bin/docker", dockerArgs...)
+	cmd := execabs.Command(files.DockerBinary, dockerArgs...)
 
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

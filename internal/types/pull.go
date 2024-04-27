@@ -124,7 +124,7 @@ func PullAll() error {
 
 func pull(image string) error {
 	slog.Debug("pulling workload image", "image", image)
-	cmd := execabs.Command("/usr/bin/docker", "pull", image)
+	cmd := execabs.Command(files.DockerBinary, "pull", image)
 
 	return cmd.Run()
 }

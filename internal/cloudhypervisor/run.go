@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
@@ -15,7 +16,7 @@ import (
 func createRootFs(dir, img string) (string, error) {
 	slog.Info("creating root fs")
 	rootfs := filepath.Join(dir, "roofs.ext4")
-	cmd := execabs.Command("/usr/bin/docker",
+	cmd := execabs.Command(files.DockerBinary,
 		"run", "--rm", "--privileged",
 		"-v", "/tmp/:/tmp/",
 		img,

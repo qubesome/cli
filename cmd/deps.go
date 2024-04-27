@@ -7,46 +7,49 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
 )
 
 var deps map[string][]string = map[string][]string{
 	"clipboard": {
-		"/usr/bin/xclip",
+		files.XclipBinary,
+		files.ShBinary,
 	},
 	"run": {
-		"/usr/bin/docker",
+		files.DockerBinary,
 	},
 	"xdg-open": {
-		"/usr/bin/docker",
+		files.DockerBinary,
 	},
 	"images": {
-		"/usr/bin/docker",
+		files.DockerBinary,
 	},
 	"profiles": {
-		"/usr/bin/docker",
-		"/usr/bin/xauth",
-		"/usr/bin/mcookie",
-		"/usr/bin/sed",
+		files.DockerBinary,
+		files.XauthBinary,
+		files.MCookieBinary,
+		files.SedBinary,
+		files.ShBinary,
 	},
 }
 
 var optionalDeps map[string][]string = map[string][]string{
 	"run": {
-		"/usr/bin/firecracker",
-		"/usr/bin/cloud-hypervisor",
+		files.FireCrackerBinary,
+		files.CloudHypervisorBinary,
 	},
 	"xdg-open": {
-		"/usr/bin/firecracker",
-		"/usr/bin/cloud-hypervisor",
+		files.FireCrackerBinary,
+		files.CloudHypervisorBinary,
 	},
 	"images": {
-		"/usr/bin/firecracker",
-		"/usr/bin/cloud-hypervisor",
+		files.FireCrackerBinary,
+		files.CloudHypervisorBinary,
 	},
 	"profiles": {
-		"/usr/bin/firecracker",
-		"/usr/bin/cloud-hypervisor",
+		files.FireCrackerBinary,
+		files.CloudHypervisorBinary,
 	},
 }
 

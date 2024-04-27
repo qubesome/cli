@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/qubesome/cli/internal/files"
 	"golang.org/x/sys/execabs"
 )
 
@@ -73,7 +74,7 @@ func ensureDependencies(img string) error {
 
 func setupTaps(img string) error {
 	slog.Info("setting up taps")
-	cmd := execabs.Command("/usr/bin/docker",
+	cmd := execabs.Command(files.DockerBinary,
 		"run", "--rm", "--privileged",
 		"--network", "host",
 		img,
