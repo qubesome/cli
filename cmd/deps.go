@@ -37,19 +37,15 @@ var deps map[string][]string = map[string][]string{
 var optionalDeps map[string][]string = map[string][]string{
 	"run": {
 		files.FireCrackerBinary,
-		files.CloudHypervisorBinary,
 	},
 	"xdg-open": {
 		files.FireCrackerBinary,
-		files.CloudHypervisorBinary,
 	},
 	"images": {
 		files.FireCrackerBinary,
-		files.CloudHypervisorBinary,
 	},
 	"profiles": {
 		files.FireCrackerBinary,
-		files.CloudHypervisorBinary,
 	},
 }
 
