@@ -22,7 +22,6 @@ import (
 )
 
 var (
-	ProfileDirFormat    = ".qubesome/profiles/%s"
 	ContainerNameFormat = "qubesome-%s"
 
 	profileImage = "ghcr.io/qubesome/xorg:latest"
@@ -65,7 +64,6 @@ func StartFromGit(name, gitURL, path string) error {
 			return fmt.Errorf("failed to pull latest: %w", err)
 		}
 	} else {
-
 		var auth transport.AuthMethod
 		if strings.HasPrefix(gitURL, "git@") {
 			a, err := ssh.NewSSHAgentAuth("git")
@@ -84,6 +82,7 @@ func StartFromGit(name, gitURL, path string) error {
 		}
 	}
 
+	// Get the qubesome config from the Git repository.
 	cfgPath, err := securejoin.SecureJoin(dir, filepath.Join(path, "qubesome.config"))
 	if err != nil {
 		return err

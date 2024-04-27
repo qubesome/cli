@@ -51,7 +51,7 @@ func startCmd(args []string, cfg *types.Config) error {
 		return fmt.Errorf("profile %q not found", name)
 	}
 
-	ep, err := securejoin.SecureJoin(files.ProfilePath(), profile.Path)
+	ep, err := securejoin.SecureJoin(files.QubesomeDir(), profile.Path)
 	if err != nil {
 		return err
 	}

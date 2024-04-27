@@ -9,8 +9,7 @@ import (
 	"sync"
 	"time"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
-	"github.com/qubesome/cli/internal/util"
+	"github.com/qubesome/cli/internal/files"
 	"golang.org/x/sys/execabs"
 	"gopkg.in/yaml.v3"
 )
@@ -48,28 +47,17 @@ func (o WorkloadPullMode) Pull(wg *sync.WaitGroup) error {
 }
 
 var (
-	pullExpiration                 = 24 * time.Hour
-	pullExpirationFile             = ".images-last-checked"
-	pullFileMode       fs.FileMode = 0o600
+	pullExpiration = 24 * time.Hour
 )
 
 func pullExpired() (bool, error) {
-	d, err := util.Path(util.QubesomeDir)
-	if err != nil {
-		return false, fmt.Errorf("cannot get qubesome path: %w", err)
-	}
-
-	fn, err := securejoin.SecureJoin(d, pullExpirationFile)
-	if err != nil {
-		return false, fmt.Errorf("cannot join %q and %q: %w", d, fn, err)
-	}
-
+	fn := files.ImagesLastCheckedPath()
 	fi, err := os.Stat(fn)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			return false, fmt.Errorf("cannot stat %q: %w", fn, err)
 		}
-		if err := os.WriteFile(fn, []byte{}, pullFileMode); err != nil {
+		if err := os.WriteFile(fn, []byte{}, files.FileMode); err != nil {
 			return false, fmt.Errorf("cannot create file %q: %w", fn, err)
 		}
 		_, err = os.Stat(fn)
@@ -80,7 +68,7 @@ func pullExpired() (bool, error) {
 	}
 
 	if fi.ModTime().Before(time.Now().Add(-pullExpiration)) {
-		if err := os.WriteFile(fn, []byte{}, pullFileMode); err != nil {
+		if err := os.WriteFile(fn, []byte{}, files.FileMode); err != nil {
 			return false, fmt.Errorf("cannot update file %q: %w", fn, err)
 		}
 		return true, nil
@@ -90,25 +78,24 @@ func pullExpired() (bool, error) {
 }
 
 func PullAll() error {
-	workloadDir, err := util.Path(util.WorkloadsDir)
+	matches, err := files.WorkloadFiles()
 	if err != nil {
-		return fmt.Errorf("cannot get qubesome path: %w", err)
+		return fmt.Errorf("cannot get workloads files: %w", err)
 	}
 
-	de, err := os.ReadDir(workloadDir)
-	if err != nil {
-		return fmt.Errorf("cannot read workloads dir: %w", err)
+	if len(matches) == 0 {
+		fmt.Println("no workloads found")
 	}
 
 	seen := map[string]struct{}{}
-	for _, w := range de {
-		if !w.Type().IsRegular() {
-			continue
+	for _, fn := range matches {
+		fi, err := os.Stat(fn)
+		if err != nil {
+			return fmt.Errorf("cannot stat file %q: %w", fn, err)
 		}
 
-		fn, err := securejoin.SecureJoin(workloadDir, w.Name())
-		if err != nil {
-			return fmt.Errorf("cannot join %q and %q: %w", workloadDir, fn, err)
+		if !fi.Mode().IsRegular() {
+			continue
 		}
 
 		data, err := os.ReadFile(fn)

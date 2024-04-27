@@ -3,36 +3,22 @@ package qubesome
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/cloudhypervisor"
 	"github.com/qubesome/cli/internal/docker"
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/firecracker"
 	"github.com/qubesome/cli/internal/types"
-	"github.com/qubesome/cli/internal/util"
 	"gopkg.in/yaml.v3"
 )
-
-func (q *Qubesome) workloadDir(in WorkloadInfo) (string, error) {
-	if in.Path != "" {
-		return filepath.Join(in.Path, "workloads"), nil
-	}
-
-	workloadsDir, err := util.Path(util.WorkloadsDir)
-	if err != nil {
-		return "", err
-	}
-
-	return workloadsDir, nil
-}
 
 func (q *Qubesome) Run(in WorkloadInfo) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
 
-	workloadsDir, err := q.workloadDir(in)
+	workloadsDir, err := files.WorkloadsDir(in.Name)
 	if err != nil {
 		return err
 	}

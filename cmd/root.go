@@ -3,22 +3,13 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"log/slog"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/log"
 	"github.com/qubesome/cli/internal/types"
 )
-
-//nolint:gochecknoinits
-func init() {
-	d, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-	homedir = d
-}
 
 var (
 	execName string
@@ -34,15 +25,10 @@ var (
 	}
 )
 
-const (
-	configFile = ".qubesome/qubesome.config"
-)
-
 func Exec(args []string) {
 	execName = args[0]
 
-	path := filepath.Join(homedir, configFile)
-	cfg, err := types.LoadConfig(path)
+	cfg, err := types.LoadConfig(files.QubesomeConfig())
 	checkNil(err)
 
 	err = log.Configure(cfg.Logging.Level,
