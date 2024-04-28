@@ -1,4 +1,4 @@
-package cmd
+package start
 
 import (
 	"flag"
@@ -17,10 +17,10 @@ const startUsagef = `usage:
     %[1]s start -git=https://github.com/qubesome/dotfiles-example -path / <profile>
 `
 
-func startCmd(args []string, cfg *types.Config) error {
+func Command(args []string, cfg *types.Config) error {
 	slog.Debug("cmd", "args", args)
 	if len(args) < 1 {
-		startUsage()
+		startUsage(os.Args[0])
 	}
 
 	var gitURL, path string
@@ -34,7 +34,7 @@ func startCmd(args []string, cfg *types.Config) error {
 	}
 
 	if f.NArg() != 1 {
-		startUsage()
+		startUsage(os.Args[0])
 	}
 
 	name := f.Arg(0)
@@ -60,7 +60,7 @@ func startCmd(args []string, cfg *types.Config) error {
 	return profiles.Start(profile, cfg)
 }
 
-func startUsage() {
-	fmt.Printf(startUsagef, execName)
+func startUsage(name string) {
+	fmt.Printf(startUsagef, name)
 	os.Exit(1)
 }

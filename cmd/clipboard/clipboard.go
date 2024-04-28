@@ -1,4 +1,4 @@
-package cmd
+package clipboard
 
 import (
 	"flag"
@@ -11,7 +11,7 @@ import (
 	"github.com/qubesome/cli/internal/types"
 )
 
-func clipboardCmd(args []string, cfg *types.Config) error {
+func Command(args []string, cfg *types.Config) error {
 	var t string
 	var fromHost bool
 	var fromProfile string
@@ -28,7 +28,7 @@ func clipboardCmd(args []string, cfg *types.Config) error {
 	slog.Debug("cmd", "args", args)
 
 	if len(f.Args()) != 1 {
-		clipboardUsage()
+		clipboardUsage(os.Args[0])
 	}
 
 	toProfile := f.Arg(0)
@@ -68,11 +68,11 @@ func clipboardCmd(args []string, cfg *types.Config) error {
 	return clipboard.Copy(from, to, t)
 }
 
-func clipboardUsage() {
+func clipboardUsage(name string) {
 	fmt.Printf(
 		"usage: %[1]s clipboard --from-profile <profile_name> <profile_to>\n"+
 			"       %[1]s clipboard --type image/png --from-host <profile_to>\n"+
 			"       %[1]s clipboard --from-host <profile_to>\n",
-		execName)
+		name)
 	os.Exit(1)
 }

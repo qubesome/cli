@@ -1,15 +1,13 @@
-package cmd
+package xdg
 
 import (
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-
-	"flag"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/files"
@@ -17,16 +15,19 @@ import (
 	"github.com/qubesome/cli/internal/types"
 )
 
-func runCmd(args []string, cfg *types.Config) error {
+func Command(args []string, cfg *types.Config) error {
 	socketAddress := files.InProfileSocketPath()
 	slog.Debug("check whether running inside container")
 	if _, err := os.Stat(socketAddress); err == nil {
-		fmt.Println("dialing host qubesome", "socket", socketAddress)
+		slog.Debug("dialing host qubesome", "socket", socketAddress)
 		c, err := net.Dial("unix", socketAddress)
 		if err != nil {
 			return err
 		}
-		args = append([]string{"run"}, args...)
+
+		args = append([]string{"xdg-open"}, args...)
+		slog.Debug("writing to socket", "args", args)
+
 		_, err = c.Write([]byte(strings.Join(args, " ")))
 		if err != nil {
 			return err
@@ -34,26 +35,33 @@ func runCmd(args []string, cfg *types.Config) error {
 		return nil
 	}
 
-	in := qubesome.WorkloadInfo{}
-
+	var profile string
 	fs := flag.NewFlagSet("", flag.ExitOnError)
-	fs.StringVar(&in.Profile, "profile", "untrusted", "The profile name which will be used to run the workload.")
+	fs.StringVar(&profile, "profile", "untrusted", "The profile name which will be used to run the workload.")
 
 	err := fs.Parse(args)
 	if err != nil {
 		return fmt.Errorf("failed to parse args: %w", err)
 	}
 
-	if in.Profile == "" || fs.NArg() != 1 {
-		runUsage()
+	slog.Debug("cmd", "args", args)
+
+	if len(fs.Args()) != 1 {
+		xdgOpenUsage(os.Args[0])
 	}
 
-	in.Name = fs.Arg(0)
+	q := qubesome.New()
+
+	var in *qubesome.WorkloadInfo
 
 	// If user level config was not found, try to load the config
 	// for the target profile which at this point must be started.
 	if cfg == nil {
-		cfgPath := files.ProfileConfig(in.Profile)
+		if profile == "" {
+			return fmt.Errorf("profile is required when no global config is present")
+		}
+
+		cfgPath := files.ProfileConfig(profile)
 		slog.Debug("trying to load config from started profile", "path", cfgPath)
 
 		target, err := os.Readlink(cfgPath)
@@ -62,44 +70,35 @@ func runCmd(args []string, cfg *types.Config) error {
 		}
 		cfgPath = target
 
-		cfg, err = types.LoadConfig(cfgPath)
+		c, err := types.LoadConfig(cfgPath)
 		if err != nil {
 			return fmt.Errorf("could load config (check profile is loaded): %w", err)
 		}
+		cfg = c
 
-		profile, ok := cfg.Profiles[in.Profile]
+		p, ok := cfg.Profiles[profile]
 		if !ok {
-			return fmt.Errorf("failed to find profile %s", in.Profile)
+			return fmt.Errorf("failed to find profile %s", profile)
 		}
 
-		pp, err := securejoin.SecureJoin(filepath.Dir(cfgPath), profile.Path)
+		pp, err := securejoin.SecureJoin(filepath.Dir(cfgPath), p.Path)
 		if err != nil {
 			return err
 		}
 		slog.Debug("override path", "path", pp)
-		in.Path = pp
+		in = &qubesome.WorkloadInfo{
+			Profile: profile,
+			Path:    pp,
+		}
 	}
 
-	q := qubesome.New()
 	q.Config = cfg
 
-	wg := sync.WaitGroup{}
-	if err := cfg.WorkloadPullMode.Pull(&wg); err != nil {
-		return err
-	}
-	// Wait for any background operation that is in-flight.
-	defer wg.Wait()
-
-	if fs.NArg() > 0 {
-		in.Args = args[len(args)-fs.NArg():]
-		slog.Debug("extra args", "args", in.Args)
-	}
-
-	return q.Run(in)
+	return q.HandleMime(in, fs.Args())
 }
 
-func runUsage() {
-	fmt.Printf(`usage: %s run -profile untrusted chrome
-`, execName)
+func xdgOpenUsage(name string) {
+	fmt.Printf(`usage: %s xdg-open https://google.com
+`, name)
 	os.Exit(1)
 }

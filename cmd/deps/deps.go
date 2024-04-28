@@ -1,4 +1,4 @@
-package cmd
+package deps
 
 import (
 	"flag"
@@ -49,7 +49,7 @@ var optionalDeps map[string][]string = map[string][]string{
 	},
 }
 
-func depsCmd(args []string, _ *types.Config) error {
+func Command(args []string, _ *types.Config) error {
 	f := flag.NewFlagSet("", flag.ExitOnError)
 	err := f.Parse(args)
 	if err != nil {
@@ -59,7 +59,7 @@ func depsCmd(args []string, _ *types.Config) error {
 	slog.Debug("cmd", "args", args)
 
 	if len(f.Args()) != 1 || f.Arg(0) != "show" {
-		depsUsage()
+		depsUsage(os.Args[0])
 	}
 
 	for name, d := range deps {
@@ -100,8 +100,8 @@ func depsCmd(args []string, _ *types.Config) error {
 	return nil
 }
 
-func depsUsage() {
+func depsUsage(name string) {
 	fmt.Printf(
-		"usage: %[1]s deps show\n", execName)
+		"usage: %[1]s deps show\n", name)
 	os.Exit(1)
 }

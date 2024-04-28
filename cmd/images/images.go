@@ -1,4 +1,4 @@
-package cmd
+package images
 
 import (
 	"flag"
@@ -9,7 +9,7 @@ import (
 	"github.com/qubesome/cli/internal/types"
 )
 
-func imagesCmd(args []string, cfg *types.Config) error {
+func Command(args []string, cfg *types.Config) error {
 	f := flag.NewFlagSet("", flag.ExitOnError)
 	err := f.Parse(args)
 	if err != nil {
@@ -19,7 +19,7 @@ func imagesCmd(args []string, cfg *types.Config) error {
 	slog.Debug("cmd", "args", args)
 
 	if len(f.Args()) != 1 || f.Arg(0) != "pull" {
-		imagesUsage()
+		imagesUsage(os.Args[0])
 	}
 
 	if cfg == nil {
@@ -29,7 +29,7 @@ func imagesCmd(args []string, cfg *types.Config) error {
 	return types.PullAll()
 }
 
-func imagesUsage() {
-	fmt.Printf("usage: %s images pull", execName)
+func imagesUsage(name string) {
+	fmt.Printf("usage: %s images pull", name)
 	os.Exit(1)
 }

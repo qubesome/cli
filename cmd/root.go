@@ -6,31 +6,66 @@ import (
 
 	"log/slog"
 
+	"github.com/qubesome/cli/cmd/clipboard"
+	"github.com/qubesome/cli/cmd/deps"
+	"github.com/qubesome/cli/cmd/images"
+	"github.com/qubesome/cli/cmd/run"
+	"github.com/qubesome/cli/cmd/start"
+	"github.com/qubesome/cli/cmd/xdg"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/log"
 	"github.com/qubesome/cli/internal/types"
 )
 
-var (
-	execName string
-	homedir  string
-
-	commands = map[string]func([]string, *types.Config) error{
-		"run":       runCmd,
-		"xdg-open":  xdgOpenCmd,
-		"images":    imagesCmd,
-		"start":     startCmd,
-		"clipboard": clipboardCmd,
-		"deps":      depsCmd,
+func newConsole() *Console {
+	return &Console{
+		commands: map[string]func([]string, *types.Config) error{
+			"run":       run.Command,
+			"xdg-open":  xdg.Command,
+			"images":    images.Command,
+			"start":     start.Command,
+			"clipboard": clipboard.Command,
+			"deps":      deps.Command,
+		},
 	}
-)
+}
 
-const (
-	DefaultLogLevel = "DEBUG"
+type Console struct {
+	commands map[string]func([]string, *types.Config) error
+}
+
+func (*Console) Exit(code int) {
+	os.Exit(code)
+}
+
+func (*Console) Printf(format string, a ...any) (n int, err error) {
+	return fmt.Printf(format, a...)
+}
+
+func (c *Console) Command(name string) (func([]string, *types.Config) error, bool) {
+	f, ok := c.commands[name]
+	return f, ok
+}
+
+type App interface {
+	Exit(code int)
+	Printf(format string, a ...interface{}) (n int, err error)
+	Command(name string) (func([]string, *types.Config) error, bool)
+}
+
+var (
+	// DefaultLogLevel defines the initial log level, which is overriden
+	// by any LogLevel defined at the user-level configuration file.
+	DefaultLogLevel     = "DEBUG"
+	ConsoleApp      App = newConsole()
+
+	homedir string
 )
 
 func Exec(args []string) {
-	execName = args[0]
+	if len(args) == 0 {
+		return
+	}
 
 	var cfg *types.Config
 	var err error
@@ -55,13 +90,15 @@ func Exec(args []string) {
 
 	slog.Debug("qubesome called", "args", args, "config", cfg)
 	if len(args) < 2 {
-		rootUsage()
+		rootUsage(args[0])
+		return
 	}
 
-	cmd, ok := commands[args[1]]
+	cmd, ok := ConsoleApp.Command(args[1])
 	if !ok {
-		rootUsage()
-		os.Exit(1)
+		rootUsage(args[0])
+		ConsoleApp.Exit(1)
+		return
 	}
 
 	slog.Debug("exec subcommand", args[1], args[2:])
@@ -71,12 +108,11 @@ func Exec(args []string) {
 func checkNil(err error) {
 	if err != nil {
 		slog.Error(err.Error())
-		os.Exit(1)
+		ConsoleApp.Exit(1)
 	}
 }
 
-func rootUsage() {
-	fmt.Printf(`usage: %s <command> [flags]
+var usage = `usage: %s <command> [flags]
 
 Supported commands:
   run: 	 	  Execute qubesome workloads
@@ -85,6 +121,9 @@ Supported commands:
   start:	  Start qubesome profiles.
   clipboard:  Enable copying of clipboard from host and between profiles
   deps: 	  Shows status of all dependencies
-`, execName)
-	os.Exit(1)
+`
+
+func rootUsage(name string) {
+	ConsoleApp.Printf(usage, name)
+	ConsoleApp.Exit(1)
 }
