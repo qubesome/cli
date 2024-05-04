@@ -19,7 +19,7 @@ var (
 Version=1.0
 Type=Application
 Name=qubesome Mime Handler
-Exec=/usr/local/bin/qubesome xdg-open %u
+Exec=/usr/local/bin/qubesome xdg open %u
 StartupNotify=false
 `
 	mimesList = `[Default Applications]

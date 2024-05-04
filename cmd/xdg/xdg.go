@@ -1,4 +1,4 @@
-package run
+package xdg
 
 import (
 	"flag"
@@ -8,7 +8,9 @@ import (
 	"github.com/qubesome/cli/internal/qubesome"
 )
 
-const usage = `usage: %s run -profile untrusted chrome
+const usage = `usage:
+    %[1]s xdg open https://google.com
+    %[1]s xdg --profile personal open https://google.com
 `
 
 type handler struct {
@@ -30,30 +32,25 @@ func (c *handler) Handle(in command.App) (command.Action[qubesome.Options], []co
 		return nil, nil, fmt.Errorf("failed to parse args: %w", err)
 	}
 
-	if fs.NArg() < 1 {
+	if fs.NArg() < 2 || (fs.NArg() > 0 && fs.Arg(0) != "open") {
 		in.Usage(usage)
 		return nil, nil, nil
 	}
 
 	var opts []command.Option[qubesome.Options]
-	opts = append(opts, qubesome.WithWorkload(fs.Arg(0)))
 	opts = append(opts, qubesome.WithProfile(profile))
+	opts = append(opts, qubesome.WithExtraArgs(fs.Args()[1:]))
 
 	cfg := in.UserConfig()
-	if cfg == nil {
+	if cfg == nil && profile != "" {
 		cfg = in.ProfileConfig(profile)
 	}
 
 	opts = append(opts, qubesome.WithConfig(cfg))
 
-	if fs.NArg() > 1 {
-		extra := fs.Args()[1:]
-		opts = append(opts, qubesome.WithExtraArgs(extra))
-	}
-
 	return c, opts, nil
 }
 
 func (c *handler) Run(opts ...command.Option[qubesome.Options]) error {
-	return qubesome.Run(opts...)
+	return qubesome.XdgRun(opts...)
 }

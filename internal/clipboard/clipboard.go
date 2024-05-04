@@ -5,17 +5,36 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
 
-var ErrUnsupportedCopyType = errors.New("unsupported copy type")
-var ErrCannotCopyClipboardWithinSameDisplay = errors.New("cannot copy clipboard within the same display")
+var (
+	ErrUnsupportedCopyType                  = errors.New("unsupported copy type")
+	ErrCannotCopyClipboardWithinSameDisplay = errors.New("cannot copy clipboard within the same display")
+)
 
-func Copy(from uint8, to *types.Profile, target string) error {
-	if !validTarget(target) {
-		return fmt.Errorf("%w: %s", ErrUnsupportedCopyType, target)
+func Run(opts ...command.Option[Options]) error {
+	o := &Options{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	var from uint8
+	var to *types.Profile
+
+	if o.SourceProfile != nil {
+		from = o.SourceProfile.Display
+	}
+
+	if o.TargetProfile != nil {
+		to = o.TargetProfile
+	}
+
+	if !validTarget(o.ContentType) {
+		return fmt.Errorf("%w: %s", ErrUnsupportedCopyType, o.ContentType)
 	}
 
 	if from == to.Display {
@@ -23,8 +42,8 @@ func Copy(from uint8, to *types.Profile, target string) error {
 	}
 
 	targetExtra := ""
-	if target != "" {
-		targetExtra = fmt.Sprintf("-t %s", target)
+	if o.ContentType != "" {
+		targetExtra = fmt.Sprintf("-t %s", o.ContentType)
 	}
 
 	cookiePath, err := files.ServerCookiePath(to.Name)

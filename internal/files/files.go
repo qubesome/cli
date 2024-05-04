@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
@@ -21,6 +20,7 @@ import (
 
 const (
 	FileMode = 0o600
+	DirMode  = 0o700
 )
 
 var (
@@ -101,32 +101,6 @@ func GitDirPath(url string) (string, error) {
 }
 
 // WorkloadsDir returns the workloads directory path for a given Qubesome profile.
-func WorkloadsDir(path string) (string, error) {
-	return securejoin.SecureJoin(path, "workloads")
-}
-
-// WorkloadFiles returns a list of workload file paths.
-func WorkloadFiles() ([]string, error) {
-	var matches []string
-	root := GitRoot()
-	pattern := fmt.Sprintf("^%s/.*/workloads/.*.yaml$", root)
-
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		matched, err := regexp.MatchString(pattern, path)
-		if err != nil {
-			return err
-		}
-		if matched {
-			matches = append(matches, path)
-		}
-		return nil
-	})
-	return matches, err
+func WorkloadsDir(root, path string) (string, error) {
+	return securejoin.SecureJoin(root, filepath.Join(path, "workloads"))
 }

@@ -2,22 +2,113 @@ package qubesome
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
+	"sync"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
+	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/docker"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/firecracker"
+	"github.com/qubesome/cli/internal/images"
+	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/types"
 	"gopkg.in/yaml.v3"
 )
 
-func (q *Qubesome) Run(in WorkloadInfo) error {
+func init() {
+	inception.Add("run", runCmd)
+	inception.Add("xdg", xdgCmd)
+}
+
+func runCmd(cfg *types.Config, p *types.Profile, args []string) error {
+	opts := []command.Option[Options]{
+		WithConfig(cfg),
+		WithProfile(p.Name),
+		WithWorkload(args[0]),
+	}
+
+	if len(args) > 0 {
+		opts = append(opts, WithExtraArgs(args[1:]))
+	}
+
+	return Run(opts...)
+}
+
+func xdgCmd(cfg *types.Config, p *types.Profile, args []string) error {
+	return XdgRun(WithProfile(p.Name), WithExtraArgs(args))
+}
+
+func XdgRun(opts ...command.Option[Options]) error {
+	o := &Options{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	if len(o.ExtraArgs) == 0 {
+		return fmt.Errorf("xdg missing args")
+	}
+
+	if inception.Inside() {
+		return inception.RunOnHost("xdg", o.ExtraArgs)
+	}
+
+	q := New()
+
+	var in *WorkloadInfo
+
+	in = &WorkloadInfo{
+		Profile: o.Profile,
+		Config:  o.Config,
+	}
+
+	return q.HandleMime(in, o.ExtraArgs)
+}
+
+func Run(opts ...command.Option[Options]) error {
+	o := &Options{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	if inception.Inside() {
+		args := []string{o.Workload}
+		args = append(args, o.ExtraArgs...)
+		return inception.RunOnHost("run", args)
+	}
+
+	if err := o.Validate(); err != nil {
+		return err
+	}
+
+	wg := sync.WaitGroup{}
+	if err := images.Pull(o.Config, &wg); err != nil {
+		return err
+	}
+	in := WorkloadInfo{
+		Name:    o.Workload,
+		Profile: o.Profile,
+		Args:    o.ExtraArgs,
+		Config:  o.Config,
+	}
+
+	// Wait for any background operation that is in-flight.
+	defer wg.Wait()
+	return runner(in)
+}
+
+func runner(in WorkloadInfo) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
 
-	workloadsDir, err := files.WorkloadsDir(in.Path)
+	profile, exists := in.Config.Profiles[in.Profile]
+	if !exists {
+		return fmt.Errorf("profile %q does not exist", in.Profile)
+	}
+
+	workloadsDir, err := files.WorkloadsDir(in.Config.RootDir, profile.Path)
 	if err != nil {
 		return err
 	}
@@ -42,13 +133,12 @@ func (q *Qubesome) Run(in WorkloadInfo) error {
 		return fmt.Errorf("cannot unmarshal workload config %q: %w", cfg, err)
 	}
 
-	profile, exists := q.Config.Profiles[in.Profile]
-	if !exists {
-		return fmt.Errorf("profile %q does not exist", in.Profile)
+	pp, err := securejoin.SecureJoin(in.Config.RootDir, profile.Path)
+	if err != nil {
+		return err
 	}
-
-	// TODO: this should be set by caller.
-	profile.Path = in.Path
+	slog.Debug("bind workload path to profile root dir", "path", pp)
+	profile.Path = pp
 
 	if fi, err := os.Stat(profile.Path); err != nil || !fi.IsDir() {
 		return fmt.Errorf("%w: %s", ErrProfileDirNotExist, profile.Path)

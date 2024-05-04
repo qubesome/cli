@@ -2,65 +2,59 @@ package start
 
 import (
 	"flag"
-	"fmt"
-	"log/slog"
-	"os"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
-	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/profiles"
-	"github.com/qubesome/cli/internal/types"
 )
 
-const startUsagef = `usage:
+const usage = `usage:
     %[1]s start <profile>
     %[1]s start -git=https://github.com/qubesome/dotfiles-example -path / <profile>
 `
 
-func Command(args []string, cfg *types.Config) error {
-	slog.Debug("cmd", "args", args)
-	if len(args) < 1 {
-		startUsage(os.Args[0])
-	}
+type handler struct {
+	app command.App
+}
 
+func New() command.Handler[profiles.Options] {
+	return &handler{}
+}
+
+func (c *handler) Handle(in command.App) (command.Action[profiles.Options], []command.Option[profiles.Options], error) {
 	var gitURL, path string
-	f := flag.NewFlagSet("", flag.ExitOnError)
+
+	f := flag.NewFlagSet("", flag.ContinueOnError)
 	f.StringVar(&gitURL, "git", "", "Defines a git repository source")
 	f.StringVar(&path, "path", "", "Dir path that contains qubesome.config")
 
-	err := f.Parse(args)
+	err := f.Parse(in.Args())
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
+	var opts []command.Option[profiles.Options]
+
 	if f.NArg() != 1 {
-		startUsage(os.Args[0])
+		in.Usage(usage)
+		return nil, nil, nil
 	}
 
 	name := f.Arg(0)
 	if gitURL != "" {
-		return profiles.StartFromGit(name, gitURL, path)
+		opts = append(opts, profiles.WithGitUrl(gitURL))
 	}
 
-	if cfg == nil {
-		return fmt.Errorf(`err: could not load config`)
+	cfg := in.UserConfig()
+	if cfg != nil {
+		opts = append(opts, profiles.WithConfig(cfg))
 	}
 
-	profile, ok := cfg.Profiles[name]
-	if !ok {
-		return fmt.Errorf("profile %q not found", name)
-	}
+	opts = append(opts, profiles.WithProfile(name))
+	opts = append(opts, profiles.WithPath(path))
 
-	ep, err := securejoin.SecureJoin(files.QubesomeDir(), profile.Path)
-	if err != nil {
-		return err
-	}
-	profile.Path = ep
-
-	return profiles.Start(profile, cfg)
+	return c, opts, nil
 }
 
-func startUsage(name string) {
-	fmt.Printf(startUsagef, name)
-	os.Exit(1)
+func (c *handler) Run(opts ...command.Option[profiles.Options]) error {
+	return profiles.Run(opts...)
 }

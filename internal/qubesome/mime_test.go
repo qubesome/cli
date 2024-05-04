@@ -14,6 +14,7 @@ func Test_HandleMime(t *testing.T) {
 		cfg         *types.Config
 		errContains string
 		workload    *WorkloadInfo
+		profile     string
 	}{
 		{
 			name: "use default mime handler",
@@ -29,6 +30,12 @@ func Test_HandleMime(t *testing.T) {
 				Name:    "w",
 				Profile: "c",
 				Args:    []string{"app://foo/bar"},
+				Config: &types.Config{
+					DefaultMimeHandler: &types.MimeHandler{
+						Workload: "w",
+						Profile:  "c",
+					},
+				},
 			},
 		},
 		{
@@ -43,6 +50,11 @@ func Test_HandleMime(t *testing.T) {
 				Name:    "bar",
 				Profile: "foo",
 				Args:    []string{"app://foo/bar"},
+				Config: &types.Config{
+					MimeHandlers: map[string]types.MimeHandler{
+						"app": {Workload: "bar", Profile: "foo"},
+					},
+				},
 			},
 		},
 		{
@@ -61,6 +73,15 @@ func Test_HandleMime(t *testing.T) {
 				Name:    "bar",
 				Profile: "foo",
 				Args:    []string{"app://foo/bar"},
+				Config: &types.Config{
+					DefaultMimeHandler: &types.MimeHandler{
+						Workload: "other",
+						Profile:  "handler",
+					},
+					MimeHandlers: map[string]types.MimeHandler{
+						"app": {Workload: "bar", Profile: "foo"},
+					},
+				},
 			},
 		},
 		{
@@ -89,6 +110,29 @@ func Test_HandleMime(t *testing.T) {
 			args:        []string{"/qube", "/some"},
 			errContains: "a single arg must be provided",
 		},
+		{
+			name: "use default mime handler with profile override",
+			args: []string{"app://foo/bar"},
+			cfg: &types.Config{
+				DefaultMimeHandler: &types.MimeHandler{
+					Workload: "w",
+					Profile:  "personal",
+				},
+			},
+			errContains: "",
+			workload: &WorkloadInfo{
+				Name:    "w",
+				Profile: "untrusted",
+				Args:    []string{"app://foo/bar"},
+				Config: &types.Config{
+					DefaultMimeHandler: &types.MimeHandler{
+						Workload: "w",
+						Profile:  "personal",
+					},
+				},
+			},
+			profile: "untrusted",
+		},
 	}
 
 	for _, tc := range tests {
@@ -99,14 +143,13 @@ func Test_HandleMime(t *testing.T) {
 			called := 0
 
 			q := New()
-			q.Config = tc.cfg
 			q.runner = func(wi WorkloadInfo) error {
 				actual = &wi
 				called++
 				return nil
 			}
 
-			err := q.HandleMime(nil, tc.args)
+			err := q.HandleMime(&WorkloadInfo{Config: tc.cfg, Profile: tc.profile}, tc.args)
 
 			if tc.errContains == "" {
 				assert.Nil(err)

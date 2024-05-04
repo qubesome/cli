@@ -15,8 +15,10 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
-	"github.com/qubesome/cli/internal/profiles/socket"
+	"github.com/qubesome/cli/internal/inception"
+	"github.com/qubesome/cli/internal/socket"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
@@ -28,11 +30,30 @@ var (
 )
 
 const (
-	cookiesFileMode = 0o600
-	dirFileMode     = 0o700
-	maxWaitTime     = 30 * time.Second
-	sleepTime       = 150 * time.Millisecond
+	maxWaitTime = 30 * time.Second
+	sleepTime   = 150 * time.Millisecond
 )
+
+func Run(opts ...command.Option[Options]) error {
+	o := &Options{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	if o.GitUrl != "" {
+		return StartFromGit(o.Profile, o.GitUrl, o.Path)
+	}
+
+	if o.Config == nil {
+		return fmt.Errorf("cannot start profile: nil config")
+	}
+	profile, ok := o.Config.Profiles[o.Profile]
+	if !ok {
+		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
+	}
+
+	return Start(profile, o.Config)
+}
 
 func StartFromGit(name, gitURL, path string) error {
 	ln := files.ProfileConfig(name)
@@ -124,11 +145,15 @@ func StartFromGit(name, gitURL, path string) error {
 }
 
 func Start(profile *types.Profile, cfg *types.Config) (err error) {
+	if cfg == nil {
+		return fmt.Errorf("cannot start profile: config is nil")
+	}
+
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
 	go func() {
-		err1 := socket.Listen(profile, cfg)
+		err1 := socket.Listen(profile, cfg, inception.HandleConnection)
 		if err != nil && err == nil {
 			err = err1
 		}
@@ -171,18 +196,18 @@ func createMagicCookie(profile *types.Profile) error {
 		return err
 	}
 
-	err = os.MkdirAll(filepath.Dir(server), dirFileMode)
+	err = os.MkdirAll(filepath.Dir(server), files.DirMode)
 	if err != nil {
 		return err
 	}
 
 	// If previous cookies exist, remove them.
-	err = os.WriteFile(server, []byte{}, cookiesFileMode)
+	err = os.WriteFile(server, []byte{}, files.FileMode)
 	if err != nil {
 		return fmt.Errorf("failed to ensure clean server cookie %q", server)
 	}
 
-	err = os.WriteFile(workload, []byte{}, cookiesFileMode)
+	err = os.WriteFile(workload, []byte{}, files.FileMode)
 	if err != nil {
 		return fmt.Errorf("failed to ensure clean workload cookie %q", workload)
 	}

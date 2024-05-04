@@ -2,6 +2,7 @@ package qubesome
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/qubesome/cli/internal/types"
 )
@@ -16,15 +17,13 @@ var (
 )
 
 type Qubesome struct {
-	Config *types.Config
-
 	runner func(in WorkloadInfo) error
 }
 
 func New() *Qubesome {
 	q := &Qubesome{}
 
-	q.runner = q.Run
+	q.runner = runner
 
 	return q
 }
@@ -35,10 +34,13 @@ type WorkloadInfo struct {
 	Path    string
 
 	// Args provides additional args to the default command on the target workload
-	Args []string
+	Args   []string
+	Config *types.Config
 }
 
 func (w *WorkloadInfo) Validate() error {
-	// TODO: Name/Profile
+	if w.Config == nil {
+		return fmt.Errorf("no config found")
+	}
 	return nil
 }

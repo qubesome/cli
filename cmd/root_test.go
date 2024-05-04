@@ -3,44 +3,32 @@ package cmd
 import (
 	"testing"
 
-	"github.com/qubesome/cli/internal/types"
-	"github.com/stretchr/testify/mock"
+	"github.com/qubesome/cli/internal/command"
 )
 
-type ConsoleMock struct {
-	mock.Mock
+func init() {
+	// Remove potential log noises during tests.
+	DefaultLogLevel = "INFO"
 }
 
-func (m *ConsoleMock) Exit(code int) {
-	m.Called(code)
-}
-
-func (m *ConsoleMock) Printf(format string, a ...any) (int, error) {
-	args := m.Called(format, a)
-	return args.Int(0), args.Error(1)
-}
-
-func (m *ConsoleMock) Command(name string) (func([]string, *types.Config) error, bool) {
-	args := m.Called(name)
-	return args.Get(0).(func([]string, *types.Config) error), args.Bool(1)
-}
-
-func (m *ConsoleMock) Fake(a []string, c *types.Config) error {
-	args := m.Called(a, c)
-	return args.Error(0)
-}
+type consoleMock = command.ConsoleMock[any]
+type handlerMock = command.HandlerMock[any]
 
 func TestExec(t *testing.T) {
 	tests := []struct {
 		name      string
 		args      []string
-		mockSetup func(*ConsoleMock)
+		mockSetup func(*consoleMock)
 	}{
-		{name: "empty args"},
+		{
+			name:      "empty args",
+			mockSetup: func(cm *consoleMock) {},
+		},
 		{
 			name: "insufficient args shows usage",
 			args: []string{"foo"},
-			mockSetup: func(cm *ConsoleMock) {
+			mockSetup: func(cm *consoleMock) {
+				cm.On("UserConfig").Return(nil)
 				cm.On("Printf", usage, []interface{}{"foo"}).Return(0, nil)
 				cm.On("Exit", 1)
 			},
@@ -48,8 +36,9 @@ func TestExec(t *testing.T) {
 		{
 			name: "invalid command shows usage",
 			args: []string{"foo", "bar"},
-			mockSetup: func(cm *ConsoleMock) {
-				cm.On("Command", "bar").Return(cm.Fake, false)
+			mockSetup: func(cm *consoleMock) {
+				cm.On("UserConfig").Return(nil)
+				cm.On("Command", "bar").Return(false)
 				cm.On("Printf", usage, []interface{}{"foo"}).Return(0, nil)
 				cm.On("Exit", 1)
 			},
@@ -57,27 +46,45 @@ func TestExec(t *testing.T) {
 		{
 			name: "valid command",
 			args: []string{"foo", "bar", "of", "foo"},
-			mockSetup: func(cm *ConsoleMock) {
-				cm.On("Command", "bar").Return(cm.Fake, true)
-
-				var cfg *types.Config
-				cm.On("Fake", []string{"of", "foo"}, cfg).Return(nil)
+			mockSetup: func(cm *consoleMock) {
+				cm.On("UserConfig").Return(nil)
+				cm.On("Command", "bar").Return(true)
+				cm.On("RunSubCommand").Return(nil)
+			},
+		},
+		{
+			name: "valid command with options",
+			args: []string{"foo", "bar", "of", "foo"},
+			mockSetup: func(cm *consoleMock) {
+				cm.On("UserConfig").Return(nil)
+				cm.On("Command", "bar").Return(true)
+				cm.On("RunSubCommand").Return(nil)
 			},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := new(ConsoleMock)
+			m := new(consoleMock)
 			ConsoleApp = m
 
-			if tc.mockSetup != nil {
-				tc.mockSetup(m)
-			}
+			tc.mockSetup(m)
 
 			Exec(tc.args)
 
 			m.AssertExpectations(t)
 		})
+	}
+}
+
+type options struct{}
+
+func WithOption1() command.Option[options] {
+	return func(o *options) {
+	}
+}
+
+func WithOption2() command.Option[options] {
+	return func(o *options) {
 	}
 }

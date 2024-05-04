@@ -3,7 +3,10 @@ package types
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 
+	"github.com/qubesome/cli/internal/files"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,6 +22,37 @@ type Config struct {
 
 	// WorkloadPullMode defines how workload images should be pulled.
 	WorkloadPullMode WorkloadPullMode `yaml:"workloadPullMode"`
+
+	RootDir string
+}
+
+// WorkloadFiles returns a list of workload file paths.
+func (c *Config) WorkloadFiles() ([]string, error) {
+	var matches []string
+	root := c.RootDir
+	if root == "" {
+		root = files.QubesomeConfig()
+	}
+	pattern := fmt.Sprintf("^%s/.*/workloads/.*.yaml$", root)
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		matched, err := regexp.MatchString(pattern, path)
+		if err != nil {
+			return err
+		}
+		if matched {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+	return matches, err
 }
 
 type Logging struct {

@@ -1,4 +1,4 @@
-package types
+package images
 
 import (
 	"errors"
@@ -9,40 +9,39 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 	"gopkg.in/yaml.v3"
 )
 
-type WorkloadPullMode string
+func Run(opts ...command.Option[Options]) error {
+	o := &Options{}
+	for _, opt := range opts {
+		opt(o)
+	}
 
-const (
-	// OnDemand is a no-op and won't preemptively pull workload images.
-	// This is the default behaviour.
-	OnDemand WorkloadPullMode = "on-demand"
-	// Background downloads all workload images on the background when
-	// any command is executed. This operation will only take place once
-	// a day.
-	Background WorkloadPullMode = "background"
-)
+	slog.Debug("images.Run", "options", o)
+	return PullAll(o.Config)
+}
 
-func (o WorkloadPullMode) Pull(wg *sync.WaitGroup) error {
-	switch o {
-	case Background:
+func Pull(cfg *types.Config, wg *sync.WaitGroup) error {
+	switch cfg.WorkloadPullMode {
+	case types.Background:
 		wg.Add(1)
 		go func() {
 			if exp, _ := pullExpired(); exp {
-				err := PullAll()
+				err := PullAll(cfg)
 				if err != nil {
 					slog.Error("error pulling images", "error", err)
 				}
 			}
 			wg.Done()
 		}()
-	case OnDemand:
+	case types.OnDemand:
 		// no-op as images will be pull when needed.
 	}
-
 	return nil
 }
 
@@ -77,18 +76,18 @@ func pullExpired() (bool, error) {
 	return false, nil
 }
 
-func PullAll() error {
-	matches, err := files.WorkloadFiles()
+func PullAll(cfg *types.Config) error {
+	wf, err := cfg.WorkloadFiles()
 	if err != nil {
 		return fmt.Errorf("cannot get workloads files: %w", err)
 	}
 
-	if len(matches) == 0 {
+	if len(wf) == 0 {
 		fmt.Println("no workloads found")
 	}
 
 	seen := map[string]struct{}{}
-	for _, fn := range matches {
+	for _, fn := range wf {
 		fi, err := os.Stat(fn)
 		if err != nil {
 			return fmt.Errorf("cannot stat file %q: %w", fn, err)
@@ -103,7 +102,7 @@ func PullAll() error {
 			return fmt.Errorf("cannot read file %q: %w", fn, err)
 		}
 
-		w := Workload{}
+		w := types.Workload{}
 		err = yaml.Unmarshal(data, &w)
 		if err != nil {
 			return fmt.Errorf("cannot unmarshal workload file %q: %w", fn, err)

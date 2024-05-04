@@ -2,106 +2,37 @@ package deps
 
 import (
 	"flag"
-	"fmt"
-	"log/slog"
-	"os"
-	"os/exec"
 
-	"github.com/qubesome/cli/internal/files"
-	"github.com/qubesome/cli/internal/types"
+	"github.com/qubesome/cli/internal/command"
+	"github.com/qubesome/cli/internal/deps"
 )
 
-var deps map[string][]string = map[string][]string{
-	"clipboard": {
-		files.XclipBinary,
-		files.ShBinary,
-	},
-	"run": {
-		files.DockerBinary,
-	},
-	"xdg-open": {
-		files.DockerBinary,
-	},
-	"images": {
-		files.DockerBinary,
-	},
-	"profiles": {
-		files.DockerBinary,
-		files.XauthBinary,
-		files.MCookieBinary,
-		files.SedBinary,
-		files.ShBinary,
-	},
+const usage = `usage: %[1]s deps show
+`
+
+type handler struct {
+	app command.App
 }
 
-var optionalDeps map[string][]string = map[string][]string{
-	"run": {
-		files.FireCrackerBinary,
-	},
-	"xdg-open": {
-		files.FireCrackerBinary,
-	},
-	"images": {
-		files.FireCrackerBinary,
-	},
-	"profiles": {
-		files.FireCrackerBinary,
-	},
+func New() command.Handler[any] {
+	return &handler{}
 }
 
-func Command(args []string, _ *types.Config) error {
-	f := flag.NewFlagSet("", flag.ExitOnError)
-	err := f.Parse(args)
+func (c *handler) Handle(app command.App) (command.Action[any], []command.Option[any], error) {
+	f := flag.NewFlagSet("", flag.ContinueOnError)
+	err := f.Parse(app.Args())
 	if err != nil {
-		return fmt.Errorf("failed to parse args: %w", err)
+		return nil, nil, err
 	}
-
-	slog.Debug("cmd", "args", args)
 
 	if len(f.Args()) != 1 || f.Arg(0) != "show" {
-		depsUsage(os.Args[0])
+		app.Usage(usage)
+		return nil, nil, nil
 	}
 
-	for name, d := range deps {
-		fmt.Printf("%s: ", name)
-
-		if len(d) == 0 {
-			fmt.Println("OK")
-			continue
-		} else {
-			fmt.Println()
-		}
-
-		for _, dn := range d {
-			_, err := exec.LookPath(dn)
-			status := "OK"
-			if err != nil {
-				status = "NOT FOUND"
-			}
-
-			fmt.Printf("- %s: %s\n", dn, status)
-		}
-
-		if opt, ok := optionalDeps[name]; ok {
-			for _, dn := range opt {
-				_, err := exec.LookPath(dn)
-				status := "OK"
-				if err != nil {
-					status = "NOT FOUND (Optional)"
-				}
-
-				fmt.Printf("- %s: %s\n", dn, status)
-			}
-		}
-
-		fmt.Println()
-	}
-
-	return nil
+	return c, nil, nil
 }
 
-func depsUsage(name string) {
-	fmt.Printf(
-		"usage: %[1]s deps show\n", name)
-	os.Exit(1)
+func (c *handler) Run(opts ...command.Option[any]) error {
+	return deps.Run(opts...)
 }
