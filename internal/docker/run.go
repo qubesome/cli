@@ -221,6 +221,11 @@ func Run(ew types.EffectiveWorkload) error {
 
 		src, err := securejoin.SecureJoin(ew.Profile.Path, ps[0])
 		if err != nil {
+			slog.Warn("failed to join mount path", "path", p, "error", err)
+			continue
+		}
+
+		if _, err := os.Stat(src); err != nil {
 			slog.Warn("failed to mount path", "path", p, "error", err)
 			continue
 		}
@@ -230,7 +235,19 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	for _, p := range wl.HomePaths {
-		args = append(args, "-v="+os.ExpandEnv(filepath.Join("${HOME}", p)))
+		path := os.ExpandEnv(filepath.Join("${HOME}", p))
+		ps := strings.SplitN(p, ":", 2)
+		if len(ps) != 2 {
+			slog.Warn("failed to mount home path", "path", p)
+			continue
+		}
+
+		if _, err := os.Stat(ps[0]); err != nil {
+			slog.Warn("failed to mount home path", "path", path, "error", err)
+			continue
+		}
+
+		args = append(args, "-v="+path)
 	}
 
 	// TODO: Block by profile

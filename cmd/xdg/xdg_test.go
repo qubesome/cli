@@ -41,7 +41,11 @@ func TestHandler(t *testing.T) {
 				cm.On("Args").Return([]string{"open", "foo"})
 				cm.On("UserConfig").Return(nil)
 			},
-			err: "no config found",
+			action: cmd.New().(command.Action[qubesome.Options]),
+			opts: &qubesome.Options{
+				ExtraArgs: []string{"foo"},
+				Config:    nil,
+			},
 		},
 		{
 			name: "no profile config",
@@ -50,7 +54,12 @@ func TestHandler(t *testing.T) {
 				cm.On("UserConfig").Return(nil)
 				cm.On("ProfileConfig", "bar").Return(nil)
 			},
-			err: "no config found",
+			action: cmd.New().(command.Action[qubesome.Options]),
+			opts: &qubesome.Options{
+				ExtraArgs: []string{"foo"},
+				Profile:   "bar",
+				Config:    nil,
+			},
 		},
 		{
 			name: "https://url",
