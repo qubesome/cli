@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func init() {
+func init() { //nolint
 	inception.Add("run", runCmd)
 	inception.Add("xdg", xdgCmd)
 }
@@ -55,10 +55,7 @@ func XdgRun(opts ...command.Option[Options]) error {
 	}
 
 	q := New()
-
-	var in *WorkloadInfo
-
-	in = &WorkloadInfo{
+	in := &WorkloadInfo{
 		Profile: o.Profile,
 		Config:  o.Config,
 	}

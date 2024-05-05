@@ -11,7 +11,6 @@ const usage = `usage: %[1]s deps show
 `
 
 type handler struct {
-	app command.App
 }
 
 func New() command.Handler[any] {

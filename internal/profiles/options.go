@@ -6,15 +6,15 @@ import (
 )
 
 type Options struct {
-	GitUrl  string
+	GitURL  string
 	Path    string
 	Profile string
 	Config  *types.Config
 }
 
-func WithGitUrl(gitUrl string) command.Option[Options] {
+func WithGitURL(gitURL string) command.Option[Options] {
 	return func(o *Options) {
-		o.GitUrl = gitUrl
+		o.GitURL = gitURL
 	}
 }
 

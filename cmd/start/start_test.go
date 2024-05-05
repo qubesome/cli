@@ -20,7 +20,7 @@ type consoleMock = *command.ConsoleMock[profiles.Options]
 type handlerMock = *command.HandlerMock[profiles.Options]
 
 func TestHandler(t *testing.T) {
-	tests := []struct {
+	tests := []struct { //nolint
 		name      string
 		mockSetup func(consoleMock, handlerMock)
 		action    command.Action[profiles.Options]
@@ -79,7 +79,7 @@ func TestHandler(t *testing.T) {
 			action: cmd.New().(command.Action[profiles.Options]),
 			opts: &profiles.Options{
 				Profile: "foo",
-				GitUrl:  "places",
+				GitURL:  "places",
 				Config: &types.Config{
 					Profiles: map[string]*types.Profile{
 						"foo": {Name: "foo"},
@@ -100,7 +100,7 @@ func TestHandler(t *testing.T) {
 			action: cmd.New().(command.Action[profiles.Options]),
 			opts: &profiles.Options{
 				Profile: "foo",
-				GitUrl:  "places",
+				GitURL:  "places",
 				Path:    "/bar",
 				Config: &types.Config{
 					Profiles: map[string]*types.Profile{

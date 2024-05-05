@@ -68,7 +68,7 @@ func exec(id string, ew types.EffectiveWorkload) error {
 	args = append(args, ew.Workload.Args...)
 
 	slog.Debug(files.DockerBinary+" exec", "container-id", id, "cmd", ew.Workload.Command, "args", ew.Workload.Args)
-	cmd := execabs.Command(files.DockerBinary, args...)
+	cmd := execabs.Command(files.DockerBinary, args...) //nolint
 
 	return cmd.Run()
 }
@@ -276,7 +276,7 @@ func Run(ew types.EffectiveWorkload) error {
 	args = append(args, wl.Args...)
 
 	slog.Debug(fmt.Sprintf("exec: %s", files.DockerBinary), "args", args)
-	cmd := execabs.Command(files.DockerBinary, args...)
+	cmd := execabs.Command(files.DockerBinary, args...) //nolint
 
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -289,7 +289,7 @@ func getHomeDir(image string) (string, error) {
 	args := []string{"run", "--rm", image, "ls", "/home"}
 
 	slog.Debug(files.DockerBinary + strings.Join(args, " "))
-	cmd := execabs.Command(files.DockerBinary, args...)
+	cmd := execabs.Command(files.DockerBinary, args...) //nolint
 
 	out, err := cmd.Output()
 	if err != nil {

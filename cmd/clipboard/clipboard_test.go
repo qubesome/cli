@@ -21,7 +21,7 @@ type consoleMock = *command.ConsoleMock[clipboard.Options]
 type handlerMock = *command.HandlerMock[clipboard.Options]
 
 func TestCommand(t *testing.T) {
-	tests := []struct {
+	tests := []struct { //nolint
 		name      string
 		mockSetup func(consoleMock, handlerMock)
 		action    command.Action[clipboard.Options]

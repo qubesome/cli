@@ -20,7 +20,7 @@ type consoleMock = *command.ConsoleMock[qubesome.Options]
 type handlerMock = *command.HandlerMock[qubesome.Options]
 
 func TestHandler(t *testing.T) {
-	tests := []struct {
+	tests := []struct { //nolint
 		name      string
 		mockSetup func(consoleMock, handlerMock)
 		action    command.Action[qubesome.Options]

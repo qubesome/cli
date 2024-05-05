@@ -15,7 +15,6 @@ const usage = `usage:
 `
 
 type handler struct {
-	app command.App
 }
 
 func New() command.Handler[clipboard.Options] {

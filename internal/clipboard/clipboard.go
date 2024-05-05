@@ -55,7 +55,7 @@ func Run(opts ...command.Option[Options]) error {
 		files.XclipBinary, int(from), cookiePath, files.XclipBinary, targetExtra, int(to.Display))
 
 	slog.Debug("clipboard copy", "command", []string{files.ShBinary, "-c", xclip})
-	cmd := execabs.Command(files.ShBinary, "-c", xclip)
+	cmd := execabs.Command(files.ShBinary, "-c", xclip) //nolint
 
 	err = cmd.Run()
 	if err != nil {

@@ -12,7 +12,6 @@ const usage = `usage: %s run -profile untrusted chrome
 `
 
 type handler struct {
-	app command.App
 }
 
 func New() command.Handler[qubesome.Options] {

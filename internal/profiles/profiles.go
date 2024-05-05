@@ -29,19 +29,14 @@ var (
 	profileImage = "ghcr.io/qubesome/xorg:latest"
 )
 
-const (
-	maxWaitTime = 30 * time.Second
-	sleepTime   = 150 * time.Millisecond
-)
-
 func Run(opts ...command.Option[Options]) error {
 	o := &Options{}
 	for _, opt := range opts {
 		opt(o)
 	}
 
-	if o.GitUrl != "" {
-		return StartFromGit(o.Profile, o.GitUrl, o.Path)
+	if o.GitURL != "" {
+		return StartFromGit(o.Profile, o.GitURL, o.Path)
 	}
 
 	if o.Config == nil {
@@ -212,7 +207,7 @@ func createMagicCookie(profile *types.Profile) error {
 		return fmt.Errorf("failed to ensure clean workload cookie %q", workload)
 	}
 
-	cmd := execabs.Command(files.MCookieBinary)
+	cmd := execabs.Command(files.MCookieBinary) //nolint
 	cookie, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("cannot create auth cookie for profile %q: %w", profile.Name, err)
@@ -220,7 +215,7 @@ func createMagicCookie(profile *types.Profile) error {
 
 	slog.Debug(files.XauthBinary, "args",
 		[]string{"-f", server, "add", ":" + strconv.Itoa(int(profile.Display)), ".", string(cookie)})
-	cmd = execabs.Command(
+	cmd = execabs.Command( //nolint
 		files.XauthBinary, "-f", server, "add", ":"+strconv.Itoa(int(profile.Display)), ".", string(cookie))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("XAUTHORITY=%q", server))
 
@@ -238,7 +233,7 @@ func createMagicCookie(profile *types.Profile) error {
 			files.XauthBinary + " -f " + workload + " nmerge -",
 	}
 	slog.Debug(files.ShBinary, "args", args)
-	cmd = execabs.Command(files.ShBinary, args...)
+	cmd = execabs.Command(files.ShBinary, args...) //nolint
 
 	err = cmd.Run()
 	if err != nil {
@@ -252,7 +247,7 @@ func startWindowManager(name, display string) error {
 	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s exec awesome", display)}
 
 	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(files.DockerBinary, args...)
+	cmd := execabs.Command(files.DockerBinary, args...) //nolint
 
 	return cmd.Run()
 }
@@ -338,7 +333,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	dockerArgs = append(dockerArgs, cArgs...)
 
 	slog.Debug("exec: docker", "args", dockerArgs)
-	cmd := execabs.Command(files.DockerBinary, dockerArgs...)
+	cmd := execabs.Command(files.DockerBinary, dockerArgs...) //nolint
 
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

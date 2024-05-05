@@ -36,7 +36,7 @@ func (m *ConsoleMock[T]) ExecName() string {
 
 func (m *ConsoleMock[T]) Args() []string {
 	args := m.Called()
-	return args.Get(0).([]string)
+	return args.Get(0).([]string) //nolint
 }
 
 func (m *ConsoleMock[T]) UserConfig() *types.Config {
@@ -47,7 +47,7 @@ func (m *ConsoleMock[T]) UserConfig() *types.Config {
 		return nil
 	}
 
-	return cfg.(*types.Config)
+	return cfg.(*types.Config) //nolint
 }
 
 func (m *ConsoleMock[T]) ProfileConfig(a string) *types.Config {
@@ -58,7 +58,7 @@ func (m *ConsoleMock[T]) ProfileConfig(a string) *types.Config {
 		return nil
 	}
 
-	return cfg.(*types.Config)
+	return cfg.(*types.Config) //nolint
 }
 
 func (m *ConsoleMock[T]) Command(name string) bool {
@@ -86,7 +86,7 @@ func (m *ConsoleMock[T]) Printf(format string, a ...any) (int, error) {
 
 func (m *ConsoleMock[T]) Handle(a App) (Action[T], []Option[T], error) {
 	args := m.Called(a)
-	return args.Get(0).(Action[T]), args.Get(1).([]Option[T]), args.Error(2)
+	return args.Get(0).(Action[T]), args.Get(1).([]Option[T]), args.Error(2) //nolint
 }
 
 func (m *ConsoleMock[T]) Run(opts ...Option[T]) error {

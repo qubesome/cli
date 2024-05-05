@@ -13,7 +13,6 @@ const usage = `usage:
 `
 
 type handler struct {
-	app command.App
 }
 
 func New() command.Handler[profiles.Options] {
@@ -41,7 +40,7 @@ func (c *handler) Handle(in command.App) (command.Action[profiles.Options], []co
 
 	name := f.Arg(0)
 	if gitURL != "" {
-		opts = append(opts, profiles.WithGitUrl(gitURL))
+		opts = append(opts, profiles.WithGitURL(gitURL))
 	}
 
 	cfg := in.UserConfig()

@@ -6,13 +6,12 @@ import (
 	"github.com/qubesome/cli/internal/command"
 )
 
-func init() {
+func init() { //nolint
 	// Remove potential log noises during tests.
 	DefaultLogLevel = "INFO"
 }
 
 type consoleMock = command.ConsoleMock[any]
-type handlerMock = command.HandlerMock[any]
 
 func TestExec(t *testing.T) {
 	tests := []struct {

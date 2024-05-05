@@ -74,7 +74,7 @@ func ensureDependencies(img string) error {
 
 func setupTaps(img string) error {
 	slog.Info("setting up taps")
-	cmd := execabs.Command(files.DockerBinary,
+	cmd := execabs.Command(files.DockerBinary, //nolint
 		"run", "--rm", "--privileged",
 		"--network", "host",
 		img,
@@ -101,8 +101,7 @@ func download(url, target string) error {
 	}
 	defer f.Close()
 
-	//nolint:gosec // ignore lint error below as the url is not controlled by user input.
-	r, err := http.Get(url)
+	r, err := http.Get(url) //nolint
 	if err != nil {
 		return err
 	}

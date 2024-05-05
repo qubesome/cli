@@ -8,12 +8,10 @@ import (
 )
 
 var (
-	// DefaultLogLevel defines the initial log level, which is overriden
+	// DefaultLogLevel defines the initial log level, which is overridden
 	// by any LogLevel defined at the user-level configuration file.
 	DefaultLogLevel             = "DEBUG"
 	ConsoleApp      command.App = newConsole()
-
-	homedir string
 )
 
 func Exec(args []string) {
@@ -34,6 +32,7 @@ func Exec(args []string) {
 		// If no config found is found, enable stdout log for
 		// improved troubleshooting.
 		err = log.Configure(DefaultLogLevel, true, false, false)
+		checkNil(err)
 	}
 
 	slog.Debug("qubesome called", "args", args, "config", cfg)

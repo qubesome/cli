@@ -121,7 +121,7 @@ func (*Console) Printf(format string, a ...any) (n int, err error) {
 }
 
 func run[K command.Handler[T], T any](handler interface{}, app command.App) error {
-	action, opts, err := handler.(K).Handle(app)
+	action, opts, err := handler.(K).Handle(app) //nolint
 	if err != nil {
 		return err
 	}

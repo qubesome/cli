@@ -19,7 +19,7 @@ const usage = `usage:
 type consoleMock = *command.ConsoleMock[images.Options]
 
 func TestHandler(t *testing.T) {
-	tests := []struct {
+	tests := []struct { //nolint
 		name      string
 		mockSetup func(consoleMock)
 		action    command.Action[images.Options]
