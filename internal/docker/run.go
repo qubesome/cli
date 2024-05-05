@@ -92,7 +92,16 @@ func Run(ew types.EffectiveWorkload) error {
 
 	var paths []string
 	if wl.HostAccess.LocalTime {
-		paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
+		// Mount localtime into container. This file may be a symlink, if so,
+		// mount the unlying file as well.
+		file := "/etc/localtime"
+		if _, err := os.Stat(file); err == nil {
+			paths = append(paths, fmt.Sprintf("-v=%[1]s:%[1]s:ro", file))
+
+			if target, err := os.Readlink(file); err == nil {
+				paths = append(paths, fmt.Sprintf("-v=%[1]s:%[1]s:ro", target))
+			}
+		}
 	}
 
 	if wl.HostAccess.MachineID {

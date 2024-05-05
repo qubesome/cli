@@ -15,7 +15,7 @@ type Workload struct {
 	MimeApps       []string `yaml:"mimeApps"`
 
 	// TODO: Rename to USB Named Devices
-	// grep -R HID_NAME /sys/class/hidraw/*/device/uevent | cut -d'=' -f2
+	// grep -R HID_NAME /sys/class/hidraw/*/device/uevent | cut -d'=' -f2 | sort -u
 	NamedDevices []string `yaml:"namedDevices"`
 	Runner       string   `yaml:"runner"`
 }
