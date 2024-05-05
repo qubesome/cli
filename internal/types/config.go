@@ -85,7 +85,8 @@ type Profile struct {
 
 	Display uint8 `yaml:"display"`
 
-	Paths []string `yaml:"paths"`
+	Paths          []string `yaml:"paths"`
+	ExternalDrives []string `yaml:"externalDrives"`
 }
 
 func LoadConfig(path string) (*Config, error) {

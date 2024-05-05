@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/docker"
+	"github.com/qubesome/cli/internal/drive"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/firecracker"
 	"github.com/qubesome/cli/internal/images"
@@ -103,6 +105,25 @@ func runner(in WorkloadInfo) error {
 	profile, exists := in.Config.Profiles[in.Profile]
 	if !exists {
 		return fmt.Errorf("profile %q does not exist", in.Profile)
+	}
+
+	if len(profile.ExternalDrives) > 0 {
+		slog.Debug("profile has required external drives", "drives", profile.ExternalDrives)
+		for _, dm := range profile.ExternalDrives {
+			split := strings.Split(dm, ":")
+			if len(split) != 2 {
+				return fmt.Errorf("cannot enforce external drive: invalid format")
+			}
+
+			ok, err := drive.Mounts(split[0], split[1])
+			if err != nil {
+				return fmt.Errorf("cannot check drive label mounts: %w", err)
+			}
+
+			if !ok {
+				return fmt.Errorf("required drive %q is not mounted at %q", split[0], split[1])
+			}
+		}
 	}
 
 	workloadsDir, err := files.WorkloadsDir(in.Config.RootDir, profile.Path)

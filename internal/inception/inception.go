@@ -90,6 +90,6 @@ func HandleConnection(cfg *types.Config, p *types.Profile, conn net.Conn) {
 
 	err = cmd(cfg, p, args)
 	if err != nil {
-		slog.Debug("inception error: failed to run command", "fields", fields)
+		slog.Debug("inception error: failed to run command", "fields", fields, "error", err)
 	}
 }
