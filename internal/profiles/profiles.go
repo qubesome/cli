@@ -18,6 +18,7 @@ import (
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/inception"
+	"github.com/qubesome/cli/internal/resolution"
 	"github.com/qubesome/cli/internal/socket"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
@@ -150,10 +151,10 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 	go func() {
 		err1 := socket.Listen(profile, cfg, inception.HandleConnection)
 		if err1 != nil {
-          slog.Debug("error listening to socket", "error", err1)
-          if err == nil {
-			err = err1
-          }
+			slog.Debug("error listening to socket", "error", err1)
+			if err == nil {
+				err = err1
+			}
 		}
 		wg.Done()
 	}()
@@ -257,6 +258,10 @@ func startWindowManager(name, display string) error {
 
 func createNewDisplay(profile *types.Profile, display string) error {
 	command := "Xephyr"
+	res, err := resolution.Primary()
+	if err != nil {
+		return err
+	}
 	cArgs := []string{
 		":" + display,
 		"-title", fmt.Sprintf("qubesome-%s :%s", profile.Name, display),
@@ -265,7 +270,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"-extension", "XTEST",
 		"-nopn",
 		"-nolisten", "tcp",
-		"-screen", "1920x1080",
+		"-screen", res,
 		"-resizeable",
 	}
 
