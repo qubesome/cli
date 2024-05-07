@@ -149,8 +149,11 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 
 	go func() {
 		err1 := socket.Listen(profile, cfg, inception.HandleConnection)
-		if err != nil && err == nil {
+		if err1 != nil {
+          slog.Debug("error listening to socket", "error", err1)
+          if err == nil {
 			err = err1
+          }
 		}
 		wg.Done()
 	}()
@@ -262,7 +265,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"-extension", "XTEST",
 		"-nopn",
 		"-nolisten", "tcp",
-		"-screen", "3440x1440",
+		"-screen", "1920x1080",
 		"-resizeable",
 	}
 

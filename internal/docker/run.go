@@ -244,8 +244,8 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	for _, p := range wl.HomePaths {
-		path := os.ExpandEnv(filepath.Join("${HOME}", p))
-		ps := strings.SplitN(p, ":", 2)
+		path := os.ExpandEnv("${HOME}" + p)
+		ps := strings.SplitN(path, ":", 2)
 		if len(ps) != 2 {
 			slog.Warn("failed to mount home path", "path", p)
 			continue
