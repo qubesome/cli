@@ -320,7 +320,8 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
 
 	for _, p := range profile.Paths {
-		paths = append(paths, "-v="+filepath.Join(profile.Path, p))
+        path := os.ExpandEnv(p)
+		paths = append(paths, "-v="+path)
 	}
 
 	dockerArgs := []string{
