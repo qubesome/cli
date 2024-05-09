@@ -87,12 +87,12 @@ func GitRoot() string {
 
 // GitDirPath returns the path to the git directory for the given URL.
 func GitDirPath(url string) (string, error) {
-	if strings.HasPrefix("~", url) {
+	if strings.HasPrefix(url, "~") {
 		if len(url) > 1 && url[1] == '/' {
 			return os.ExpandEnv("${HOME}" + url[1:]), nil
 		}
 	}
-	if strings.HasPrefix("/", url) {
+	if strings.HasPrefix(url, "/") {
 		return url, nil
 	}
 
