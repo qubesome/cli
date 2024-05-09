@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/qubesome/cli/internal/command"
+	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/resolution"
@@ -90,6 +91,13 @@ func StartFromGit(name, gitURL, path string) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// This is a Git setup, and now we know the Git Dir, so enable
+	// environment variable GITDIR expansion.
+	err = env.Update("GITDIR", dir)
+	if err != nil {
+		return err
 	}
 
 	// Get the qubesome config from the Git repository.
@@ -308,8 +316,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
 
 	for _, p := range profile.Paths {
-		path := os.ExpandEnv(p)
-		paths = append(paths, "-v="+path)
+		paths = append(paths, "-v="+env.Expand(p))
 	}
 
 	dockerArgs := []string{
