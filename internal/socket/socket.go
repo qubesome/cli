@@ -41,25 +41,17 @@ func Listen(p *types.Profile, cfg *types.Config, handler ConnectionHandler) erro
 
 	uid := os.Getuid()
 
-	err = os.Chown(fn, uid, uid)
-	if err != nil {
-		return err
-	}
 	err = os.Chmod(fn, files.FileMode)
 	if err != nil {
 		return err
 	}
 
-	pdir := fmt.Sprintf("/var/run/user/%d/qubesome/%s", uid, p.Name)
+	pdir := fmt.Sprintf("/run/user/%d/qubesome/%s", uid, p.Name)
 	err = os.MkdirAll(pdir, files.DirMode)
 	if err != nil {
 		return fmt.Errorf("failed to create profile dir: %w", err)
 	}
 
-	err = os.Chown(pdir, uid, uid)
-	if err != nil {
-		return err
-	}
 	err = os.Chmod(pdir, files.DirMode)
 	if err != nil {
 		return err
