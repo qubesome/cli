@@ -87,6 +87,8 @@ type Profile struct {
 
 	Paths          []string `yaml:"paths"`
 	ExternalDrives []string `yaml:"externalDrives"`
+
+	WindowManager string `yaml:"windowManager"`
 }
 
 func LoadConfig(path string) (*Config, error) {

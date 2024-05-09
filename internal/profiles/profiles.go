@@ -176,7 +176,7 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 	}
 
 	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
-	err = startWindowManager(name, strconv.Itoa(int(profile.Display)))
+	err = startWindowManager(name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
 	if err != nil {
 		return err
 	}
@@ -247,8 +247,8 @@ func createMagicCookie(profile *types.Profile) error {
 	return nil
 }
 
-func startWindowManager(name, display string) error {
-	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s exec awesome", display)}
+func startWindowManager(name, display, wm string) error {
+	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s exec %s", display, wm)}
 
 	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
 	cmd := execabs.Command(files.DockerBinary, args...) //nolint
@@ -320,7 +320,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
 
 	for _, p := range profile.Paths {
-        path := os.ExpandEnv(p)
+		path := os.ExpandEnv(p)
 		paths = append(paths, "-v="+path)
 	}
 
