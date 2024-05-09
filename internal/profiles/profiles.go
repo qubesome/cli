@@ -1,7 +1,6 @@
 package profiles
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -69,21 +68,10 @@ func StartFromGit(name, gitURL, path string) error {
 			return fmt.Errorf("found file instead of git dir")
 		}
 
-		r, err := git.PlainOpen(dir)
+		// Confirm the repository exists and is a valid Git repository.
+		_, err := git.PlainOpen(dir)
 		if err != nil {
 			return err
-		}
-
-		wt, err := r.Worktree()
-		if err != nil {
-			return err
-		}
-
-		err = wt.Pull(&git.PullOptions{
-			Force: true,
-		})
-		if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
-			return fmt.Errorf("failed to pull latest: %w", err)
 		}
 	} else {
 		var auth transport.AuthMethod
