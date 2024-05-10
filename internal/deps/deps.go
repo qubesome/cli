@@ -24,9 +24,6 @@ var deps map[string][]string = map[string][]string{
 	},
 	"profiles": {
 		files.DockerBinary,
-		files.XauthBinary,
-		files.MCookieBinary,
-		files.SedBinary,
 		files.ShBinary,
 	},
 }

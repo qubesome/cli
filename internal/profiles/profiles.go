@@ -21,6 +21,7 @@ import (
 	"github.com/qubesome/cli/internal/resolution"
 	"github.com/qubesome/cli/internal/socket"
 	"github.com/qubesome/cli/internal/types"
+	"github.com/qubesome/cli/internal/xauth"
 	"golang.org/x/sys/execabs"
 )
 
@@ -182,65 +183,45 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 }
 
 func createMagicCookie(profile *types.Profile) error {
-	server, err := files.ServerCookiePath(profile.Name)
+	serverPath, err := files.ServerCookiePath(profile.Name)
 	if err != nil {
 		return err
 	}
-	workload, err := files.ClientCookiePath(profile.Name)
-	if err != nil {
-		return err
-	}
-
-	err = os.MkdirAll(filepath.Dir(server), files.DirMode)
+	workloadPath, err := files.ClientCookiePath(profile.Name)
 	if err != nil {
 		return err
 	}
 
-	// If previous cookies exist, remove them.
-	err = os.WriteFile(server, []byte{}, files.FileMode)
+	err = os.MkdirAll(filepath.Dir(serverPath), files.DirMode)
 	if err != nil {
-		return fmt.Errorf("failed to ensure clean server cookie %q", server)
+		return err
 	}
 
-	err = os.WriteFile(workload, []byte{}, files.FileMode)
+	server, err := os.OpenFile(serverPath, os.O_RDWR|os.O_TRUNC, files.FileMode)
 	if err != nil {
-		return fmt.Errorf("failed to ensure clean workload cookie %q", workload)
+		return fmt.Errorf("failed to create server cookie %q", serverPath)
 	}
+	defer server.Close()
 
-	cmd := execabs.Command(files.MCookieBinary) //nolint
-	cookie, err := cmd.Output()
+	client, err := os.OpenFile(workloadPath, os.O_RDWR|os.O_TRUNC, files.FileMode)
 	if err != nil {
-		return fmt.Errorf("cannot create auth cookie for profile %q: %w", profile.Name, err)
+		return fmt.Errorf("failed to create workload cookie %q", workloadPath)
+	}
+	defer client.Close()
+
+	xauthority := os.Getenv("XAUTHORITY")
+	if xauthority == "" {
+		return fmt.Errorf("XAUTHORITY not defined")
 	}
 
-	slog.Debug(files.XauthBinary, "args",
-		[]string{"-f", server, "add", ":" + strconv.Itoa(int(profile.Display)), ".", string(cookie)})
-	cmd = execabs.Command( //nolint
-		files.XauthBinary, "-f", server, "add", ":"+strconv.Itoa(int(profile.Display)), ".", string(cookie))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("XAUTHORITY=%q", server))
-
-	err = cmd.Run()
+	slog.Debug("opening parent xauthority", "path", xauthority)
+	parent, err := os.Open(xauthority)
 	if err != nil {
-		return fmt.Errorf("cannot authorise cookie for profile %q: %w", profile.Name, err)
+		return err
 	}
+	defer parent.Close()
 
-	args := []string{
-		"-c",
-		fmt.Sprintf("XAUTHORITY=%q", server) + " " +
-			files.XauthBinary + " nlist :" + strconv.Itoa(int(profile.Display)) +
-			" | " + files.SedBinary + " -e 's/^..../ffff/' " +
-			" | " + fmt.Sprintf("XAUTHORITY=%q", server) + " " +
-			files.XauthBinary + " -f " + workload + " nmerge -",
-	}
-	slog.Debug(files.ShBinary, "args", args)
-	cmd = execabs.Command(files.ShBinary, args...) //nolint
-
-	err = cmd.Run()
-	if err != nil {
-		return fmt.Errorf("cannot merge cookie auth for profile %q: %w", profile.Name, err)
-	}
-
-	return nil
+	return xauth.AuthPair(profile.Display, parent, server, client)
 }
 
 func startWindowManager(name, display, wm string) error {
