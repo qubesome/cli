@@ -112,6 +112,11 @@ func StartFromGit(name, gitURL, path string) error {
 		return err
 	}
 
+	err = os.MkdirAll(filepath.Dir(ln), files.DirMode)
+	if err != nil {
+		return err
+	}
+
 	err = os.Symlink(cfgPath, ln)
 	if err != nil {
 		return err

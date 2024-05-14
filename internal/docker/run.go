@@ -93,7 +93,7 @@ func Run(ew types.EffectiveWorkload) error {
 	var paths []string
 	if wl.HostAccess.LocalTime {
 		// Mount localtime into container. This file may be a symlink, if so,
-		// mount the unlying file as well.
+		// mount the underlying file as well.
 		file := "/etc/localtime"
 		if _, err := os.Stat(file); err == nil {
 			paths = append(paths, fmt.Sprintf("-v=%[1]s:%[1]s:ro", file))
@@ -139,7 +139,7 @@ func Run(ew types.EffectiveWorkload) error {
 		if err != nil {
 			return err
 		}
-		args = append(args, fmt.Sprintf("-v=%s:/tmp/.Xauthority", pp))
+		args = append(args, fmt.Sprintf("-v=%s:/tmp/.Xauthority:ro", pp))
 		args = append(args, "-e=XAUTHORITY=/tmp/.Xauthority")
 		args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", ew.Profile.Display))
 	}
@@ -156,7 +156,7 @@ func Run(ew types.EffectiveWorkload) error {
 
 		srcMimeList := filepath.Join(pdir, "mimeapps.list")
 		dstMimeList := filepath.Join(homedir, ".local", "share", "applications", "mimeapps.list")
-		err = os.WriteFile(srcMimeList, []byte(mimesList), 0o600)
+		err = os.WriteFile(srcMimeList, []byte(mimesList), files.FileMode)
 		if err != nil {
 			return fmt.Errorf("failed to write mimeapps.list: %w", err)
 		}
@@ -166,7 +166,7 @@ func Run(ew types.EffectiveWorkload) error {
 		srcHandler := filepath.Join(pdir, "mime-handler.desktop")
 		dstHandler := filepath.Join(homedir, ".local", "share", "applications", "qubesome-default-handler.desktop")
 
-		err = os.WriteFile(srcHandler, []byte(defaultMimeHandler), 0o600)
+		err = os.WriteFile(srcHandler, []byte(defaultMimeHandler), files.FileMode)
 		if err != nil {
 			return fmt.Errorf("failed to write mime-handler.desktop: %w", err)
 		}
@@ -192,6 +192,7 @@ func Run(ew types.EffectiveWorkload) error {
 	// Set hostname to be the same as the container name
 	args = append(args, "-h", ew.Name)
 
+	// TODO: what exactly needs to be shared here?
 	if wl.Bluetooth || wl.VarRunUser {
 		args = append(args, "-v=/run/user/1000:/run/user/1000")
 	}
