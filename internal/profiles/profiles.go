@@ -197,13 +197,13 @@ func createMagicCookie(profile *types.Profile) error {
 		return err
 	}
 
-	server, err := os.OpenFile(serverPath, os.O_RDWR|os.O_TRUNC, files.FileMode)
+	server, err := os.OpenFile(serverPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, files.FileMode)
 	if err != nil {
 		return fmt.Errorf("failed to create server cookie %q", serverPath)
 	}
 	defer server.Close()
 
-	client, err := os.OpenFile(workloadPath, os.O_RDWR|os.O_TRUNC, files.FileMode)
+	client, err := os.OpenFile(workloadPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, files.FileMode)
 	if err != nil {
 		return fmt.Errorf("failed to create workload cookie %q", workloadPath)
 	}
