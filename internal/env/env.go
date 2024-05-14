@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-func init() {
+func init() { //nolint
 	h, _ := os.UserHomeDir()
 	_ = Update("HOME", h)
 }

@@ -14,7 +14,7 @@ import (
 
 // Primary returns the screen resolution for the primary display.
 func Primary() (string, error) {
-	cmd := execabs.Command(files.XrandrBinary)
+	cmd := execabs.Command(files.XrandrBinary) //nolint
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
