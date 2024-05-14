@@ -8,7 +8,7 @@ help: ## display Makefile's help.
 
 .PHONY: build
 build: ## build qubesome to the path set on TARGET_BIN.
-	go build -trimpath -ldflags '-extldflags -s -w' -o $(TARGET_BIN) main.go
+	go build -trimpath -tags 'netgo,osusergo,static_build' -ldflags '-extldflags -static -s -w' -o $(TARGET_BIN) main.go
 
 .PHONY: test
 test: ## run golang tests.

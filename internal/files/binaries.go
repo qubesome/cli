@@ -5,4 +5,5 @@ const (
 	XclipBinary       = "/usr/bin/xclip"
 	DockerBinary      = "/usr/bin/docker"
 	FireCrackerBinary = "/usr/bin/firecracker"
+	XrandrBinary      = "/usr/bin/xrandr"
 )

@@ -1,32 +1,42 @@
+//go:build !x11
+
 package resolution
 
-// Depends on libx11-devel.
+import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"strings"
 
-/*
-#cgo LDFLAGS: -lX11
-
-#include <X11/Xlib.h>
-*/
-import "C"
-import "fmt"
+	"github.com/qubesome/cli/internal/files"
+	"golang.org/x/sys/execabs"
+)
 
 // Primary returns the screen resolution for the primary display.
 func Primary() (string, error) {
-	d := C.XOpenDisplay(nil)
-	if d == nil {
-		return "", fmt.Errorf("cannot open display")
-	}
-	defer C.XCloseDisplay(d)
-
-	screen := C.XDefaultScreenOfDisplay(d)
-	width := int(C.XWidthOfScreen(screen))
-	if width <= 0 {
-		return "", fmt.Errorf("cannot convert display width")
-	}
-	height := int(C.XHeightOfScreen(screen))
-	if height <= 0 {
-		return "", fmt.Errorf("cannot convert display height")
+	cmd := execabs.Command(files.XrandrBinary)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
 	}
 
-	return fmt.Sprintf("%dx%d", width, height), nil
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		text := strings.TrimSpace(scanner.Text())
+		if !strings.Contains(text, "*") {
+			continue
+		}
+
+		fields := strings.Fields(text)
+		if len(fields) == 0 {
+			continue
+		}
+
+		raw := fields[0]
+		if strings.Contains(raw, "x") {
+			return raw, nil
+		}
+	}
+
+	return "", fmt.Errorf("cannot get resolution")
 }
