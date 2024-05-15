@@ -38,7 +38,7 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	if o.GitURL != "" {
-		return StartFromGit(o.Profile, o.GitURL, o.Path)
+		return StartFromGit(o.Profile, o.GitURL, o.Path, o.Local)
 	}
 
 	if o.Config == nil {
@@ -52,7 +52,26 @@ func Run(opts ...command.Option[Options]) error {
 	return Start(profile, o.Config)
 }
 
-func StartFromGit(name, gitURL, path string) error {
+func validGitDir(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	if !fi.IsDir() {
+		return false
+	}
+
+	// Confirm the repository exists and is a valid Git repository.
+	_, err = git.PlainOpen(path)
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
+func StartFromGit(name, gitURL, path, local string) error {
 	ln := files.ProfileConfig(name)
 	if _, err := os.Lstat(ln); err == nil {
 		return fmt.Errorf("profile %q is already started", name)
@@ -63,19 +82,20 @@ func StartFromGit(name, gitURL, path string) error {
 		return err
 	}
 
-	fi, err := os.Stat(dir)
-	//nolint
-	if err == nil {
-		if !fi.IsDir() {
-			return fmt.Errorf("found file instead of git dir")
+	if strings.HasPrefix(local, "~") {
+		if len(local) > 1 && local[1] == '/' {
+			local = os.ExpandEnv("${HOME}" + local[1:])
 		}
+	}
 
-		// Confirm the repository exists and is a valid Git repository.
-		_, err := git.PlainOpen(dir)
-		if err != nil {
-			return err
-		}
+	if local != "" && validGitDir(local) {
+		slog.Debug("start from local", "path", local)
+		dir = local
+	} else if validGitDir(dir) {
+		slog.Debug("start from existing cloned repo", "path", dir)
 	} else {
+		slog.Debug("cloning repo to start")
+
 		var auth transport.AuthMethod
 		if strings.HasPrefix(gitURL, "git@") {
 			a, err := ssh.NewSSHAgentAuth("git")

@@ -109,6 +109,49 @@ func TestHandler(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "local git",
+			mockSetup: func(cm consoleMock, hm handlerMock) {
+				cm.On("Args").Return([]string{"-local", "/path", "foo"})
+				cm.On("UserConfig").Return(&types.Config{
+					Profiles: map[string]*types.Profile{
+						"foo": {Name: "foo"},
+					},
+				})
+			},
+			action: cmd.New().(command.Action[profiles.Options]),
+			opts: &profiles.Options{
+				Profile: "foo",
+				Local:   "/path",
+				Config: &types.Config{
+					Profiles: map[string]*types.Profile{
+						"foo": {Name: "foo"},
+					},
+				},
+			},
+		},
+		{
+			name: "local + remote git",
+			mockSetup: func(cm consoleMock, hm handlerMock) {
+				cm.On("Args").Return([]string{"-local", "/path", "-git", "places", "foo"})
+				cm.On("UserConfig").Return(&types.Config{
+					Profiles: map[string]*types.Profile{
+						"foo": {Name: "foo"},
+					},
+				})
+			},
+			action: cmd.New().(command.Action[profiles.Options]),
+			opts: &profiles.Options{
+				Profile: "foo",
+				Local:   "/path",
+				GitURL:  "places",
+				Config: &types.Config{
+					Profiles: map[string]*types.Profile{
+						"foo": {Name: "foo"},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {

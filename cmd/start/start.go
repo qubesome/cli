@@ -20,11 +20,12 @@ func New() command.Handler[profiles.Options] {
 }
 
 func (c *handler) Handle(in command.App) (command.Action[profiles.Options], []command.Option[profiles.Options], error) {
-	var gitURL, path string
+	var gitURL, path, local string
 
 	f := flag.NewFlagSet("", flag.ContinueOnError)
 	f.StringVar(&gitURL, "git", "", "Defines a git repository source")
 	f.StringVar(&path, "path", "", "Dir path that contains qubesome.config")
+	f.StringVar(&local, "local", "", "Local path for the git repository")
 
 	err := f.Parse(in.Args())
 	if err != nil {
@@ -50,6 +51,7 @@ func (c *handler) Handle(in command.App) (command.Action[profiles.Options], []co
 
 	opts = append(opts, profiles.WithProfile(name))
 	opts = append(opts, profiles.WithPath(path))
+	opts = append(opts, profiles.WithLocal(local))
 
 	return c, opts, nil
 }

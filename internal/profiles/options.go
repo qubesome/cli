@@ -8,6 +8,7 @@ import (
 type Options struct {
 	GitURL  string
 	Path    string
+	Local   string
 	Profile string
 	Config  *types.Config
 }
@@ -21,6 +22,12 @@ func WithGitURL(gitURL string) command.Option[Options] {
 func WithPath(path string) command.Option[Options] {
 	return func(o *Options) {
 		o.Path = path
+	}
+}
+
+func WithLocal(local string) command.Option[Options] {
+	return func(o *Options) {
+		o.Local = local
 	}
 }
 
