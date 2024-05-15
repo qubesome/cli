@@ -10,7 +10,6 @@ type Workload struct {
 	SingleInstance bool     `yaml:"singleInstance"`
 	HostAccess     `yaml:"hostAccess"`
 	Paths          []string `yaml:"paths"`
-	HomePaths      []string `yaml:"homePaths"`
 	Volumes        []string `yaml:"volumes"`
 	MimeApps       []string `yaml:"mimeApps"`
 
