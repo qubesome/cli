@@ -255,7 +255,11 @@ func startWindowManager(name, display, wm string) error {
 	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
 	cmd := execabs.Command(files.DockerBinary, args...) //nolint
 
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w", output, err)
+	}
+	return nil
 }
 
 func createNewDisplay(profile *types.Profile, display string) error {
@@ -334,7 +338,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"run",
 		"--rm",
 		"-d",
-		"-e", "DISPLAY",
+		"-e", "DISPLAY=:0",
 		"--network=none",
 		"--security-opt=no-new-privileges",
 		"--cap-drop=ALL",
@@ -350,9 +354,9 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	slog.Debug("exec: docker", "args", dockerArgs)
 	cmd := execabs.Command(files.DockerBinary, dockerArgs...) //nolint
 
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w", output, err)
+	}
+	return nil
 }
