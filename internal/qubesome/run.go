@@ -11,6 +11,7 @@ import (
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/docker"
 	"github.com/qubesome/cli/internal/drive"
+	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/firecracker"
 	"github.com/qubesome/cli/internal/images"
@@ -107,15 +108,17 @@ func runner(in WorkloadInfo) error {
 		return fmt.Errorf("profile %q does not exist", in.Profile)
 	}
 
+	// TODO: Add tests/validation on profile format.
 	if len(profile.ExternalDrives) > 0 {
 		slog.Debug("profile has required external drives", "drives", profile.ExternalDrives)
 		for _, dm := range profile.ExternalDrives {
 			split := strings.Split(dm, ":")
-			if len(split) != 2 {
+			if len(split) != 3 {
 				return fmt.Errorf("cannot enforce external drive: invalid format")
 			}
 
-			ok, err := drive.Mounts(split[0], split[1])
+			label := split[0]
+			ok, err := drive.Mounts(split[1], split[2])
 			if err != nil {
 				return fmt.Errorf("cannot check drive label mounts: %w", err)
 			}
@@ -123,6 +126,8 @@ func runner(in WorkloadInfo) error {
 			if !ok {
 				return fmt.Errorf("required drive %q is not mounted at %q", split[0], split[1])
 			}
+
+			env.Add(label, split[2])
 		}
 	}
 

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
+	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
@@ -146,9 +146,7 @@ func Run(ew types.EffectiveWorkload) error {
 
 	//nolint
 	if wl.Mime {
-		uid := os.Getuid()
-		pdir := fmt.Sprintf("/var/run/user/%d/qubesome/%s", uid, ew.Profile.Name)
-
+		pdir := files.ProfileDir(ew.Profile.Name)
 		homedir, err := getHomeDir(wl.Image)
 		if err != nil {
 			return err
@@ -162,7 +160,6 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 
 		args = append(args, fmt.Sprintf("-v=%s:%s:ro", srcMimeList, dstMimeList))
-
 		srcHandler := filepath.Join(pdir, "mime-handler.desktop")
 		dstHandler := filepath.Join(homedir, ".local", "share", "applications", "qubesome-default-handler.desktop")
 
@@ -229,12 +226,7 @@ func Run(ew types.EffectiveWorkload) error {
 			continue
 		}
 
-		src, err := securejoin.SecureJoin(ew.Profile.Path, ps[0])
-		if err != nil {
-			slog.Warn("failed to join mount path", "path", p, "error", err)
-			continue
-		}
-
+		src := env.Expand(ps[0])
 		if _, err := os.Stat(src); err != nil {
 			slog.Warn("failed to mount path", "path", p, "error", err)
 			continue
@@ -289,7 +281,7 @@ func Run(ew types.EffectiveWorkload) error {
 func getHomeDir(image string) (string, error) {
 	args := []string{"run", "--rm", image, "ls", "/home"}
 
-	slog.Debug(files.DockerBinary + strings.Join(args, " "))
+	slog.Debug(files.DockerBinary + " " + strings.Join(args, " "))
 	cmd := execabs.Command(files.DockerBinary, args...) //nolint
 
 	out, err := cmd.Output()

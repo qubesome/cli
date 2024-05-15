@@ -23,6 +23,10 @@ func Update(k, v string) error {
 	return fmt.Errorf("%q is not an expandable env var", k)
 }
 
+func Add(k, v string) {
+	mapping[k] = v
+}
+
 func Expand(in string) string {
 	return os.Expand(in, expand)
 }

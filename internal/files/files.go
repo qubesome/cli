@@ -74,6 +74,11 @@ func SocketPath(profile string) (string, error) {
 	return securejoin.SecureJoin(base, fmt.Sprintf("%s/qube.sock", profile))
 }
 
+func ProfileDir(profile string) string {
+	base := RunUserQubesome()
+	return filepath.Join(base, profile)
+}
+
 // InProfileSocketPath returns the path to the socket when running inside the profile
 // container.
 func InProfileSocketPath() string {
