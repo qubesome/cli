@@ -167,6 +167,29 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return fmt.Errorf("cannot start profile: config is nil")
 	}
 
+	// Block profile from starting if external drive is not available.
+	if len(profile.ExternalDrives) > 0 {
+		slog.Debug("profile has required external drives", "drives", profile.ExternalDrives)
+		for _, dm := range profile.ExternalDrives {
+			split := strings.Split(dm, ":")
+			if len(split) != 3 {
+				return fmt.Errorf("cannot enforce external drive: invalid format")
+			}
+
+			label := split[0]
+			ok, err := drive.Mounts(split[1], split[2])
+			if err != nil {
+				return fmt.Errorf("cannot check drive label mounts: %w", err)
+			}
+
+			if !ok {
+				return fmt.Errorf("required drive %q is not mounted at %q", split[0], split[1])
+			}
+
+			env.Add(label, split[2])
+		}
+	}
+
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
