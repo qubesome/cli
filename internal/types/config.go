@@ -89,6 +89,7 @@ type Profile struct {
 	ExternalDrives []string `yaml:"externalDrives"`
 
 	WindowManager string `yaml:"windowManager"`
+	XephyrArgs    string `yaml:"xephyrArgs"`
 }
 
 func LoadConfig(path string) (*Config, error) {

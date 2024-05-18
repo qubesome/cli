@@ -124,6 +124,10 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, fmt.Sprintf("--name=%s", ew.Name))
 	}
 
+	if wl.HostAccess.Gpus != "" {
+		args = append(args, "--gpus", wl.HostAccess.Gpus)
+	}
+
 	// TODO: Split
 	if wl.Microphone || wl.Speakers {
 		args = append(args, audioParams()...)

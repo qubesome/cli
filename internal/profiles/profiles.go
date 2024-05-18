@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/qubesome/cli/internal/command"
+	"github.com/qubesome/cli/internal/drive"
 	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/inception"
@@ -273,7 +274,7 @@ func createMagicCookie(profile *types.Profile) error {
 }
 
 func startWindowManager(name, display, wm string) error {
-	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s exec %s", display, wm)}
+	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s %s", display, wm)}
 
 	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
 	cmd := execabs.Command(files.DockerBinary, args...) //nolint
@@ -301,6 +302,9 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"-nolisten", "tcp",
 		"-screen", res,
 		"-resizeable",
+	}
+	if profile.XephyrArgs != "" {
+		cArgs = append(cArgs, strings.Split(profile.XephyrArgs, " ")...)
 	}
 
 	server, err := files.ServerCookiePath(profile.Name)
@@ -365,6 +369,9 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"--network=none",
 		"--security-opt=no-new-privileges",
 		"--cap-drop=ALL",
+	}
+	if profile.HostAccess.Gpus != "" {
+		dockerArgs = append(dockerArgs, "--gpus", profile.HostAccess.Gpus)
 	}
 
 	dockerArgs = append(dockerArgs, paths...)

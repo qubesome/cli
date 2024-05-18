@@ -39,6 +39,8 @@ type HostAccess struct {
 	// LocalTime defines whether the workload should share the same
 	// local time as the host.
 	LocalTime bool `yaml:"localTime"`
+
+	Gpus string `yaml:"gpus"`
 }
 
 type EffectiveWorkload struct {
