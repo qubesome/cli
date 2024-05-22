@@ -3,7 +3,7 @@ package xdg_test
 import (
 	"testing"
 
-	cmd "github.com/qubesome/cli/cmd/xdg"
+	cmd "github.com/qubesome/cli/cmd/xdg-open"
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/qubesome"
 	"github.com/qubesome/cli/internal/types"
@@ -12,8 +12,8 @@ import (
 )
 
 const usage = `usage:
-    %[1]s xdg open https://google.com
-    %[1]s xdg --profile personal open https://google.com
+    %[1]s xdg-open https://google.com
+    %[1]s xdg-open --profile personal https://google.com
 `
 
 type consoleMock = *command.ConsoleMock[qubesome.Options]
@@ -38,7 +38,7 @@ func TestHandler(t *testing.T) {
 		{
 			name: "no config",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
-				cm.On("Args").Return([]string{"open", "foo"})
+				cm.On("Args").Return([]string{"foo"})
 				cm.On("UserConfig").Return(nil)
 			},
 			action: cmd.New().(command.Action[qubesome.Options]),
@@ -50,7 +50,7 @@ func TestHandler(t *testing.T) {
 		{
 			name: "no profile config",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
-				cm.On("Args").Return([]string{"--profile", "bar", "open", "foo"})
+				cm.On("Args").Return([]string{"--profile", "bar", "foo"})
 				cm.On("ProfileConfig", "bar").Return(nil)
 				cm.On("UserConfig").Return(nil)
 			},
@@ -64,7 +64,7 @@ func TestHandler(t *testing.T) {
 		{
 			name: "https://url",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
-				cm.On("Args").Return([]string{"open", "https://url"})
+				cm.On("Args").Return([]string{"https://url"})
 				cm.On("UserConfig").Return(&types.Config{})
 			},
 			action: cmd.New().(command.Action[qubesome.Options]),
@@ -76,7 +76,7 @@ func TestHandler(t *testing.T) {
 		{
 			name: "profile + https://url",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
-				cm.On("Args").Return([]string{"--profile", "bar", "open", "https://url"})
+				cm.On("Args").Return([]string{"--profile", "bar", "https://url"})
 				cm.On("ProfileConfig", "bar").Return(nil)
 				cm.On("UserConfig").Return(&types.Config{})
 			},

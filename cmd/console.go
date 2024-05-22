@@ -11,7 +11,7 @@ import (
 	imagesCmd "github.com/qubesome/cli/cmd/images"
 	runCmd "github.com/qubesome/cli/cmd/run"
 	startCmd "github.com/qubesome/cli/cmd/start"
-	xdgCmd "github.com/qubesome/cli/cmd/xdg"
+	xdgCmd "github.com/qubesome/cli/cmd/xdg-open"
 	clip "github.com/qubesome/cli/internal/clipboard"
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
@@ -25,7 +25,7 @@ func newConsole() *Console {
 	return &Console{
 		commands: map[string]any{
 			"run":       runCmd.New(),
-			"xdg":       xdgCmd.New(),
+			"xdg-open":  xdgCmd.New(),
 			"images":    imagesCmd.New(),
 			"start":     startCmd.New(),
 			"clipboard": clipCmd.New(),

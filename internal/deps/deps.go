@@ -16,7 +16,7 @@ var deps map[string][]string = map[string][]string{
 	"run": {
 		files.DockerBinary,
 	},
-	"xdg": {
+	"xdg-open": {
 		files.DockerBinary,
 	},
 	"images": {
@@ -33,7 +33,7 @@ var optionalDeps map[string][]string = map[string][]string{
 	"run": {
 		files.FireCrackerBinary,
 	},
-	"xdg": {
+	"xdg-open": {
 		files.FireCrackerBinary,
 	},
 	"images": {

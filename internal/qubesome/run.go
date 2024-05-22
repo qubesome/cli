@@ -22,7 +22,7 @@ import (
 
 func init() { //nolint
 	inception.Add("run", runCmd)
-	inception.Add("xdg", xdgCmd)
+	inception.Add("xdg-open", xdgCmd)
 }
 
 func runCmd(cfg *types.Config, p *types.Profile, args []string) error {
@@ -50,11 +50,11 @@ func XdgRun(opts ...command.Option[Options]) error {
 	}
 
 	if len(o.ExtraArgs) == 0 {
-		return fmt.Errorf("xdg missing args")
+		return fmt.Errorf("xdg-open missing args")
 	}
 
 	if inception.Inside() {
-		return inception.RunOnHost("xdg", o.ExtraArgs)
+		return inception.RunOnHost("xdg-open", o.ExtraArgs)
 	}
 
 	q := New()

@@ -10,8 +10,8 @@ import (
 )
 
 const usage = `usage:
-    %[1]s xdg open https://google.com
-    %[1]s xdg --profile personal open https://google.com
+    %[1]s xdg-open https://google.com
+    %[1]s xdg-open --profile personal https://google.com
 `
 
 type handler struct {
@@ -32,14 +32,14 @@ func (c *handler) Handle(in command.App) (command.Action[qubesome.Options], []co
 		return nil, nil, fmt.Errorf("failed to parse args: %w", err)
 	}
 
-	if fs.NArg() < 2 || (fs.NArg() > 0 && fs.Arg(0) != "open") {
+	if fs.NArg() < 1 {
 		in.Usage(usage)
 		return nil, nil, nil
 	}
 
 	var opts []command.Option[qubesome.Options]
 	opts = append(opts, qubesome.WithProfile(profile))
-	opts = append(opts, qubesome.WithExtraArgs(fs.Args()[1:]))
+	opts = append(opts, qubesome.WithExtraArgs(fs.Args()))
 
 	var cfg *types.Config
 	if profile != "" {
