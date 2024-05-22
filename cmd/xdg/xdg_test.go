@@ -51,8 +51,8 @@ func TestHandler(t *testing.T) {
 			name: "no profile config",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
 				cm.On("Args").Return([]string{"--profile", "bar", "open", "foo"})
-				cm.On("UserConfig").Return(nil)
 				cm.On("ProfileConfig", "bar").Return(nil)
+				cm.On("UserConfig").Return(nil)
 			},
 			action: cmd.New().(command.Action[qubesome.Options]),
 			opts: &qubesome.Options{
@@ -77,6 +77,7 @@ func TestHandler(t *testing.T) {
 			name: "profile + https://url",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
 				cm.On("Args").Return([]string{"--profile", "bar", "open", "https://url"})
+				cm.On("ProfileConfig", "bar").Return(nil)
 				cm.On("UserConfig").Return(&types.Config{})
 			},
 			action: cmd.New().(command.Action[qubesome.Options]),

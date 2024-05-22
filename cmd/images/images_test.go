@@ -65,7 +65,6 @@ func TestHandler(t *testing.T) {
 			name: "load profile config",
 			mockSetup: func(cm consoleMock) {
 				cm.On("Args").Return([]string{"--profile", "bar", "pull"})
-				cm.On("UserConfig").Return(nil)
 				cm.On("ProfileConfig", "bar").Return(&types.Config{
 					Profiles: map[string]*types.Profile{
 						"bar": {Name: "bar"},

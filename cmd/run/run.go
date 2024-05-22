@@ -6,6 +6,7 @@ import (
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/qubesome"
+	"github.com/qubesome/cli/internal/types"
 )
 
 const usage = `usage: %s run -profile untrusted chrome
@@ -38,9 +39,13 @@ func (c *handler) Handle(in command.App) (command.Action[qubesome.Options], []co
 	opts = append(opts, qubesome.WithWorkload(fs.Arg(0)))
 	opts = append(opts, qubesome.WithProfile(profile))
 
-	cfg := in.UserConfig()
-	if cfg == nil {
+	var cfg *types.Config
+	if profile != "" {
 		cfg = in.ProfileConfig(profile)
+	}
+
+	if cfg == nil {
+		cfg = in.UserConfig()
 	}
 
 	opts = append(opts, qubesome.WithConfig(cfg))

@@ -49,9 +49,10 @@ func (c *handler) Handle(in command.App) (command.Action[clipboard.Options], []c
 	}
 
 	toProfile := f.Arg(0)
-	cfg := in.UserConfig()
+
+	cfg := in.ProfileConfig(toProfile)
 	if cfg == nil {
-		cfg = in.ProfileConfig(toProfile)
+		cfg = in.UserConfig()
 	}
 
 	if cfg == nil {

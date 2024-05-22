@@ -56,6 +56,7 @@ func TestCommand(t *testing.T) {
 			name: "--from-host foo",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
 				cm.On("Args").Return([]string{"--from-host", "foo"})
+				cm.On("ProfileConfig", "foo").Return(nil)
 				cm.On("UserConfig").Return(&types.Config{
 					Profiles: map[string]*types.Profile{
 						"foo": {Name: "foo"},
@@ -73,6 +74,7 @@ func TestCommand(t *testing.T) {
 			name: "--from-host --type images/jpeg foo",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
 				cm.On("Args").Return([]string{"--from-host", "--type", "images/jpeg", "foo"})
+				cm.On("ProfileConfig", "foo").Return(nil)
 				cm.On("UserConfig").Return(&types.Config{
 					Profiles: map[string]*types.Profile{
 						"foo": {Name: "foo"},
@@ -91,6 +93,7 @@ func TestCommand(t *testing.T) {
 			name: "--from-profile foo bar",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
 				cm.On("Args").Return([]string{"--from-profile", "foo", "bar"})
+				cm.On("ProfileConfig", "bar").Return(nil)
 				cm.On("UserConfig").Return(&types.Config{
 					Profiles: map[string]*types.Profile{
 						"foo": {Name: "foo"},
@@ -109,6 +112,7 @@ func TestCommand(t *testing.T) {
 			name: "missing source profile",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
 				cm.On("Args").Return([]string{"--from-profile", "foo", "bar"})
+				cm.On("ProfileConfig", "bar").Return(nil)
 				cm.On("UserConfig").Return(&types.Config{
 					Profiles: map[string]*types.Profile{
 						"bar": {Name: "bar"},
@@ -127,6 +131,7 @@ func TestCommand(t *testing.T) {
 			name: "missing target profile",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
 				cm.On("Args").Return([]string{"--from-profile", "foo", "bar"})
+				cm.On("ProfileConfig", "bar").Return(nil)
 				cm.On("UserConfig").Return(&types.Config{
 					Profiles: map[string]*types.Profile{
 						"foo": {Name: "foo"},
@@ -145,7 +150,6 @@ func TestCommand(t *testing.T) {
 			name: "[profile config] --from-profile foo bar",
 			mockSetup: func(cm consoleMock, hm handlerMock) {
 				cm.On("Args").Return([]string{"--from-profile", "foo", "bar"})
-				cm.On("UserConfig").Return(nil)
 				cm.On("ProfileConfig", "bar").Return(&types.Config{
 					Profiles: map[string]*types.Profile{
 						"foo": {Name: "foo"},

@@ -38,7 +38,6 @@ func TestHandler(t *testing.T) {
 			mockSetup: func(cm consoleMock, hm handlerMock) {
 				cm.On("Args").Return([]string{"foo"})
 				cm.On("UserConfig").Return(nil)
-				cm.On("ProfileConfig", "").Return(nil)
 			},
 			action: cmd.New().(command.Action[qubesome.Options]),
 			opts: &qubesome.Options{

@@ -6,6 +6,7 @@ import (
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/qubesome"
+	"github.com/qubesome/cli/internal/types"
 )
 
 const usage = `usage:
@@ -40,9 +41,13 @@ func (c *handler) Handle(in command.App) (command.Action[qubesome.Options], []co
 	opts = append(opts, qubesome.WithProfile(profile))
 	opts = append(opts, qubesome.WithExtraArgs(fs.Args()[1:]))
 
-	cfg := in.UserConfig()
-	if cfg == nil && profile != "" {
+	var cfg *types.Config
+	if profile != "" {
 		cfg = in.ProfileConfig(profile)
+	}
+
+	if cfg == nil {
+		cfg = in.UserConfig()
 	}
 
 	opts = append(opts, qubesome.WithConfig(cfg))

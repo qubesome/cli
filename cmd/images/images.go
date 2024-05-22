@@ -6,6 +6,7 @@ import (
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/images"
+	"github.com/qubesome/cli/internal/types"
 )
 
 const usage = `usage:
@@ -35,9 +36,13 @@ func (c *handler) Handle(in command.App) (command.Action[images.Options], []comm
 	}
 
 	var opts []command.Option[images.Options]
-	cfg := in.UserConfig()
-	if cfg == nil && profile != "" {
+	var cfg *types.Config
+	if profile != "" {
 		cfg = in.ProfileConfig(profile)
+	}
+
+	if cfg == nil {
+		cfg = in.UserConfig()
 	}
 	if cfg == nil {
 		return nil, nil, fmt.Errorf("no config found")
