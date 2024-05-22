@@ -40,7 +40,7 @@ func runCmd(cfg *types.Config, p *types.Profile, args []string) error {
 }
 
 func xdgCmd(cfg *types.Config, p *types.Profile, args []string) error {
-	return XdgRun(WithProfile(p.Name), WithExtraArgs(args))
+	return XdgRun(WithConfig(cfg), WithProfile(p.Name), WithExtraArgs(args))
 }
 
 func XdgRun(opts ...command.Option[Options]) error {
