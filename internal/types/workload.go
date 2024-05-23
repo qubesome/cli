@@ -1,6 +1,10 @@
 package types
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
 
 type Workload struct {
 	Name           string   `yaml:"name"`
@@ -9,14 +13,9 @@ type Workload struct {
 	Args           []string `yaml:"args"`
 	SingleInstance bool     `yaml:"singleInstance"`
 	HostAccess     `yaml:"hostAccess"`
-	Paths          []string `yaml:"paths"`
-	Volumes        []string `yaml:"volumes"`
 	MimeApps       []string `yaml:"mimeApps"`
 
-	// TODO: Rename to USB Named Devices
-	// grep -R HID_NAME /sys/class/hidraw/*/device/uevent | cut -d'=' -f2 | sort -u
-	NamedDevices []string `yaml:"namedDevices"`
-	Runner       string   `yaml:"runner"`
+	Runner string `yaml:"runner"`
 }
 
 type HostAccess struct {
@@ -40,7 +39,14 @@ type HostAccess struct {
 	// local time as the host.
 	LocalTime bool `yaml:"localTime"`
 
-	Gpus string `yaml:"gpus"`
+	// USBDevices defines the USB devices to be made available to a
+	// container.
+	//
+	// For available device names:
+	// 	grep -R HID_NAME /sys/class/hidraw/*/device/uevent | cut -d'=' -f2 | sort -u
+	USBDevices []string `yaml:"usbDevices"`
+	Gpus       string   `yaml:"gpus"`
+	Paths      []string `yaml:"paths"`
 }
 
 type EffectiveWorkload struct {
@@ -69,11 +75,42 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e.Workload.LocalTime = w.LocalTime && p.HostAccess.LocalTime
 	e.Workload.Bluetooth = w.Bluetooth && p.HostAccess.Bluetooth
 	e.Workload.Mime = w.Mime && p.HostAccess.Mime
+	e.Workload.Privileged = w.Privileged && p.HostAccess.Privileged
 
-	want := w.NamedDevices
+	if p.Gpus == "" || w.Gpus != p.Gpus {
+		e.Workload.Gpus = ""
+	}
+
+	// If profile sets a network, that is enforced on all workloads.
+	// If a profile does not set a network, workloads can only set "none" as a network.
+	if p.Network != "" {
+		e.Workload.Network = p.Network
+	} else if w.Network != "" && w.Network != "none" {
+		e.Workload.Network = ""
+	}
+
+	if len(p.HostAccess.Paths) == 0 {
+		e.Workload.Paths = e.Workload.Paths[:0]
+	} else if len(w.Paths) > 0 {
+		paths := make([]string, 0, len(w.Paths))
+
+		for _, path := range w.Paths {
+			src := strings.Split(path, ":")[0]
+			if pathAllowed(src, p) {
+				paths = append(paths, path)
+			}
+		}
+
+		if len(paths) == 0 {
+			paths = e.Workload.Paths[:0]
+		}
+		e.Workload.Paths = paths
+	}
+
+	want := w.USBDevices
 	var get []string
 
-	for _, in := range p.NamedDevices {
+	for _, in := range p.USBDevices {
 		for _, nd := range want {
 			if in == nd {
 				get = append(get, nd)
@@ -81,9 +118,25 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 		}
 	}
 
-	e.Workload.NamedDevices = get
+	e.Workload.USBDevices = get
 
 	return e
+}
+
+func pathAllowed(path string, p *Profile) bool {
+	path = filepath.Clean(path)
+	for _, a := range p.HostAccess.Paths {
+		a = filepath.Clean(a)
+		if path == a {
+			return true
+		}
+		if len(path) > len(a) &&
+			strings.HasPrefix(path, a+string(filepath.Separator)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (w Workload) Validate() error {

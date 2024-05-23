@@ -446,49 +446,65 @@ func Test_ApplyProfile(t *testing.T) {
 			},
 		},
 		{
-			name: "NamedDevices: drop named devices not in profile",
+			name: "USBDevices: drop named devices not in profile",
 			workload: Workload{
-				NamedDevices: []string{"Foo and Bar"},
+				HostAccess: HostAccess{
+					USBDevices: []string{"Foo and Bar"},
+				},
 			},
 			profile: &Profile{
-				NamedDevices: []string{},
+				HostAccess: HostAccess{
+					USBDevices: []string{},
+				},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					NamedDevices: nil,
+					HostAccess: HostAccess{
+						USBDevices: nil,
+					},
 				},
 				Profile: &Profile{
-					NamedDevices: []string{},
+					HostAccess: HostAccess{
+						USBDevices: []string{},
+					},
 				},
 			},
 		},
 		{
-			name: "NamedDevices: add allowed named devices",
+			name: "USBDevices: add allowed named devices",
 			workload: Workload{
-				NamedDevices: []string{
-					"Foo and Bar",
-					"Foo",
-					"Bar",
+				HostAccess: HostAccess{
+					USBDevices: []string{
+						"Foo and Bar",
+						"Foo",
+						"Bar",
+					},
 				},
 			},
 			profile: &Profile{
-				NamedDevices: []string{
-					"Foo",
-					"FooBar",
+				HostAccess: HostAccess{
+					USBDevices: []string{
+						"Foo",
+						"FooBar",
+					},
 				},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					NamedDevices: []string{
-						"Foo",
+					HostAccess: HostAccess{
+						USBDevices: []string{
+							"Foo",
+						},
 					},
 				},
 				Profile: &Profile{
-					NamedDevices: []string{
-						"Foo",
-						"FooBar",
+					HostAccess: HostAccess{
+						USBDevices: []string{
+							"Foo",
+							"FooBar",
+						},
 					},
 				},
 			},
@@ -634,6 +650,366 @@ func Test_ApplyProfile(t *testing.T) {
 				},
 				Profile: &Profile{
 					HostAccess: HostAccess{LocalTime: false},
+				},
+			},
+		},
+		{
+			name: "GPUs All: workload all + profile All",
+			workload: Workload{
+				HostAccess: HostAccess{Gpus: "all"},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Gpus: "all"},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Gpus: "all"},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Gpus: "all"},
+				},
+			},
+		},
+		{
+			name: "GPUs empty: workload empty + profile All",
+			workload: Workload{
+				HostAccess: HostAccess{Gpus: ""},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Gpus: "all"},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Gpus: ""},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Gpus: "all"},
+				},
+			},
+		},
+		{
+			name: "GPUs empty: workload all + profile empty",
+			workload: Workload{
+				HostAccess: HostAccess{Gpus: "all"},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Gpus: ""},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Gpus: ""},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Gpus: ""},
+				},
+			},
+		},
+		{
+			name: "GPUs empty: workload empty + profile empty",
+			workload: Workload{
+				HostAccess: HostAccess{Gpus: ""},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Gpus: ""},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Gpus: ""},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Gpus: ""},
+				},
+			},
+		},
+		{
+			name: "Privileged ON: workload ON + profile ON",
+			workload: Workload{
+				HostAccess: HostAccess{Privileged: true},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Privileged: true},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Privileged: true},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Privileged: true},
+				},
+			},
+		},
+		{
+			name: "Privileged OFF: workload OFF + profile ON",
+			workload: Workload{
+				HostAccess: HostAccess{Privileged: false},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Privileged: true},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Privileged: false},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Privileged: true},
+				},
+			},
+		},
+		{
+			name: "Privileged OFF: workload ON + profile OFF",
+			workload: Workload{
+				HostAccess: HostAccess{Privileged: true},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Privileged: false},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Privileged: false},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Privileged: false},
+				},
+			},
+		},
+		{
+			name: "Privileged OFF: workload OFF + profile OFF",
+			workload: Workload{
+				HostAccess: HostAccess{Privileged: false},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Privileged: false},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Privileged: false},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Privileged: false},
+				},
+			},
+		},
+		{
+			name: "Network empty: workload empty + profile empty",
+			workload: Workload{
+				HostAccess: HostAccess{Network: ""},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Network: ""},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Network: ""},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Network: ""},
+				},
+			},
+		},
+		{
+			name: "Network none: workload empty + profile none",
+			workload: Workload{
+				HostAccess: HostAccess{Network: ""},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Network: "none"},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Network: "none"},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Network: "none"},
+				},
+			},
+		},
+		{
+			name: "Network none: workload none + profile empty",
+			workload: Workload{
+				HostAccess: HostAccess{Network: "none"},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Network: ""},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Network: "none"},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Network: ""},
+				},
+			},
+		},
+		{
+			name: "Network foo: workload foo + profile foo",
+			workload: Workload{
+				HostAccess: HostAccess{Network: "foo"},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Network: "foo"},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Network: "foo"},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Network: "foo"},
+				},
+			},
+		},
+		{
+			name: "Network foo: workload empty + profile foo",
+			workload: Workload{
+				HostAccess: HostAccess{Network: ""},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Network: "foo"},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Network: "foo"},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Network: "foo"},
+				},
+			},
+		},
+		{
+			name: "Network empty: workload foo + profile empty",
+			workload: Workload{
+				HostAccess: HostAccess{Network: "foo"},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Network: ""},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Network: ""},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Network: ""},
+				},
+			},
+		},
+		{
+			name: "Paths empty: workload /foo + profile empty",
+			workload: Workload{
+				HostAccess: HostAccess{Paths: []string{"/foo:/foo"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Paths: []string{}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Paths: []string{}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Paths: []string{}},
+				},
+			},
+		},
+		{
+			name: "Paths /foo: workload /foo + profile /foo",
+			workload: Workload{
+				HostAccess: HostAccess{Paths: []string{"/foo:/foo"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Paths: []string{"/foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Paths: []string{"/foo:/foo"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Paths: []string{"/foo"}},
+				},
+			},
+		},
+		{
+			name: "Paths empty: workload /foo + profile /foo1",
+			workload: Workload{
+				HostAccess: HostAccess{Paths: []string{"/foo:/foo"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Paths: []string{"/foo1"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Paths: []string{}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Paths: []string{"/foo1"}},
+				},
+			},
+		},
+		{
+			name: "Paths /foo: workload /foo + profile /foo/",
+			workload: Workload{
+				HostAccess: HostAccess{Paths: []string{"/foo:/foo"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Paths: []string{"/foo/"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Paths: []string{"/foo:/foo"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Paths: []string{"/foo/"}},
+				},
+			},
+		},
+		{
+			name: "Paths /foo/: workload /foo/ + profile /foo",
+			workload: Workload{
+				HostAccess: HostAccess{Paths: []string{"/foo/:/foo/"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Paths: []string{"/foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Paths: []string{"/foo/:/foo/"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Paths: []string{"/foo"}},
+				},
+			},
+		},
+		{
+			name: "Paths /foo/bar: workload /foo/bar + profile /foo",
+			workload: Workload{
+				HostAccess: HostAccess{Paths: []string{"/foo/bar:/foo/bar"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Paths: []string{"/foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Paths: []string{"/foo/bar:/foo/bar"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Paths: []string{"/foo"}},
 				},
 			},
 		},

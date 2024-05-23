@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/command"
+	"github.com/qubesome/cli/internal/dbus"
 	"github.com/qubesome/cli/internal/docker"
 	"github.com/qubesome/cli/internal/drive"
 	"github.com/qubesome/cli/internal/env"
@@ -172,6 +174,12 @@ func runner(in WorkloadInfo) error {
 	w.Name = in.Name
 
 	ew := w.ApplyProfile(profile)
+	if !reflect.DeepEqual(ew.Workload.HostAccess, w.HostAccess) {
+		err := fmt.Errorf("workload %s tries to access more than profile allows", in.Profile)
+		_ = dbus.Notify("qubesome: access denied", err.Error())
+		return err
+	}
+
 	ew.Workload.Args = append(ew.Workload.Args, in.Args...)
 
 	switch ew.Workload.Runner {

@@ -85,7 +85,7 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 	}
 
-	ndevs, err := namedDevices(wl.NamedDevices)
+	ndevs, err := namedDevices(wl.USBDevices)
 	if err != nil {
 		return fmt.Errorf("failed to get named devices: %w", err)
 	}
@@ -203,7 +203,7 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	// TODO: Find a way to not use /dev:/dev
-	if wl.Camera || len(wl.NamedDevices) > 0 || wl.Smartcard {
+	if wl.Camera || len(wl.USBDevices) > 0 || wl.Smartcard {
 		args = append(args, "-v=/dev:/dev")
 	}
 
@@ -238,18 +238,6 @@ func Run(ew types.EffectiveWorkload) error {
 
 		dst := ps[1]
 		args = append(args, fmt.Sprintf("-v=%s:%s", src, dst))
-	}
-
-	// TODO: Block by profile
-	for _, p := range wl.Volumes {
-		ps := strings.SplitN(p, ":", 2)
-		if len(ps) != 2 {
-			slog.Warn("failed to mount path", "path", p)
-			continue
-		}
-
-		// TODO: Create volume if not exist
-		args = append(args, "--mount", fmt.Sprintf("source=%s,target=%s", ps[0], ps[1]))
 	}
 
 	args = append(args, wl.Image)

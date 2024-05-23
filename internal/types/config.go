@@ -78,18 +78,28 @@ type Profile struct {
 	Path   string
 	Runner string // TODO: Better name runner
 
+	// HostAccess defines all the access request which are allowed for
+	// its workloads.
 	HostAccess `yaml:"hostAccess"`
 
-	// TODO: Rename to USB named devices
-	NamedDevices []string `yaml:"namedDevices"`
-
+	// Display holds the display to be created for this profile.
+	// All workloads running within this profile will share the same
+	// display.
 	Display uint8 `yaml:"display"`
 
-	Paths          []string `yaml:"paths"`
+	// Paths defines the paths to be mounted to the profile's container.
+	Paths []string `yaml:"paths"`
+
+	// ExternalDrives defines the required external drives to run the profile.
 	ExternalDrives []string `yaml:"externalDrives"`
 
+	// WindowManager holds the command to run the Window Manager once
+	// the X server is running.
+	//
+	// Example: exec awesome
 	WindowManager string `yaml:"windowManager"`
-	XephyrArgs    string `yaml:"xephyrArgs"`
+	// XephyrArgs defines additional args to be passed on to Xephyr.
+	XephyrArgs string `yaml:"xephyrArgs"`
 }
 
 func LoadConfig(path string) (*Config, error) {
