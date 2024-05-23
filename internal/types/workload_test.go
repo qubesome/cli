@@ -996,20 +996,20 @@ func Test_ApplyProfile(t *testing.T) {
 			},
 		},
 		{
-			name: "Paths /foo/bar: workload /foo/bar + profile /foo",
+			name: "Paths ${HOME}/bar: workload ${HOME}/bar + profile /home",
 			workload: Workload{
-				HostAccess: HostAccess{Paths: []string{"/foo/bar:/foo/bar"}},
+				HostAccess: HostAccess{Paths: []string{"${HOME}/bar:/home/bar"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Paths: []string{"/foo"}},
+				HostAccess: HostAccess{Paths: []string{"/home"}},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{Paths: []string{"/foo/bar:/foo/bar"}},
+					HostAccess: HostAccess{Paths: []string{"${HOME}/bar:/home/bar"}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Paths: []string{"/foo"}},
+					HostAccess: HostAccess{Paths: []string{"/home"}},
 				},
 			},
 		},

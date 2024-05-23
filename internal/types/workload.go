@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/qubesome/cli/internal/env"
 )
 
 type Workload struct {
@@ -124,9 +126,9 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 }
 
 func pathAllowed(path string, p *Profile) bool {
-	path = filepath.Clean(path)
+	path = filepath.Clean(env.Expand(path))
 	for _, a := range p.HostAccess.Paths {
-		a = filepath.Clean(a)
+		a = filepath.Clean(env.Expand(a))
 		if path == a {
 			return true
 		}
