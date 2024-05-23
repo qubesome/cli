@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/qubesome/cli/internal/command"
+	"github.com/qubesome/cli/internal/dbus"
 	"github.com/qubesome/cli/internal/drive"
 	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
@@ -184,6 +185,7 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 			}
 
 			if !ok {
+				_ = dbus.Notify("qubesome start error", fmt.Sprintf("required drive %q is not mounted at %q", split[0], split[1]))
 				return fmt.Errorf("required drive %q is not mounted at %q", split[0], split[1])
 			}
 
@@ -351,6 +353,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	//nolint
 	var paths []string
 	paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
+	paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
 	paths = append(paths, "-v=/tmp/.X11-unix:/tmp/.X11-unix:rw")
 	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver:ro", server))

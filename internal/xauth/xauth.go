@@ -1,3 +1,5 @@
+// Package xauth removes the need to shell out to xauth for managing
+// xauth cookies.
 package xauth
 
 import (

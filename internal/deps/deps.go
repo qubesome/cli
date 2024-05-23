@@ -32,6 +32,7 @@ var deps map[string][]string = map[string][]string{
 var optionalDeps map[string][]string = map[string][]string{
 	"run": {
 		files.FireCrackerBinary,
+		files.DbusBinary,
 	},
 	"xdg-open": {
 		files.FireCrackerBinary,
@@ -41,6 +42,7 @@ var optionalDeps map[string][]string = map[string][]string{
 	},
 	"profiles": {
 		files.FireCrackerBinary,
+		files.DbusBinary,
 	},
 }
 
