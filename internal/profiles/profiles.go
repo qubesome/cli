@@ -185,7 +185,9 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 			}
 
 			if !ok {
-				_ = dbus.Notify("qubesome start error", fmt.Sprintf("required drive %q is not mounted at %q", split[0], split[1]))
+				err = dbus.Notify("qubesome start error", fmt.Sprintf("required drive %s is not mounted at %s", split[0], split[1]))
+				slog.Debug("failed to notify", "error", err)
+
 				return fmt.Errorf("required drive %q is not mounted at %q", split[0], split[1])
 			}
 

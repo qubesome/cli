@@ -176,7 +176,11 @@ func runner(in WorkloadInfo) error {
 	ew := w.ApplyProfile(profile)
 	if !reflect.DeepEqual(ew.Workload.HostAccess, w.HostAccess) {
 		err := fmt.Errorf("workload %s tries to access more than profile allows", in.Profile)
-		_ = dbus.Notify("qubesome: access denied", err.Error())
+		msg := diffMessage(err, w, ew)
+
+		nErr := dbus.Notify("qubesome: access denied", msg)
+		slog.Debug("failed to notify", "error", nErr)
+
 		return err
 	}
 
@@ -189,4 +193,58 @@ func runner(in WorkloadInfo) error {
 	default:
 		return docker.Run(ew)
 	}
+}
+
+func diffMessage(err error, w types.Workload, ew types.EffectiveWorkload) string {
+	msg := err.Error() + ":<br/>"
+
+	if w.HostAccess.Bluetooth != ew.Workload.Bluetooth {
+		msg = msg + "- bluetooth<br/>"
+	}
+	if w.HostAccess.Camera != ew.Workload.Camera {
+		msg = msg + "- camera<br/>"
+	}
+	if w.HostAccess.LocalTime != ew.Workload.LocalTime {
+		msg = msg + "- localtime<br/>"
+	}
+	if w.HostAccess.MachineID != ew.Workload.MachineID {
+		msg = msg + "- machineID<br/>"
+	}
+	if w.HostAccess.Mime != ew.Workload.Mime {
+		msg = msg + "- mime<br/>"
+	}
+	if w.HostAccess.Privileged != ew.Workload.Privileged {
+		msg = msg + "- privileged<br/>"
+	}
+	if w.HostAccess.Smartcard != ew.Workload.Smartcard {
+		msg = msg + "- smartcard<br/>"
+	}
+	if w.HostAccess.Speakers != ew.Workload.Speakers {
+		msg = msg + "- speakers<br/>"
+	}
+	if w.HostAccess.VarRunUser != ew.Workload.VarRunUser {
+		msg = msg + "- VarRunUser<br/>"
+	}
+	if w.HostAccess.X11 != ew.Workload.X11 {
+		msg = msg + "- X11<br/>"
+	}
+	if w.HostAccess.Gpus != ew.Workload.Gpus {
+		msg = msg + "- gpus: " + w.HostAccess.Gpus + "<br/>"
+	}
+	if w.HostAccess.Network != ew.Workload.Network {
+		msg = msg + "- network: " + w.HostAccess.Network + "<br/>"
+	}
+	if !reflect.DeepEqual(w.HostAccess.Paths, ew.Workload.Paths) {
+		msg = msg + "- Paths<br/>"
+		for _, paths := range w.HostAccess.Paths {
+			msg = msg + "  - " + paths + "<br/>"
+		}
+	}
+	if !reflect.DeepEqual(w.HostAccess.USBDevices, ew.Workload.USBDevices) {
+		msg = msg + "- USBDevices:<br/>"
+		for _, usb := range w.HostAccess.USBDevices {
+			msg = msg + "  - " + usb + "<br/>"
+		}
+	}
+	return msg
 }
