@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/qubesome/cli/internal/dbus"
 	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/gpu"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
@@ -88,6 +90,13 @@ func Run(ew types.EffectiveWorkload) error {
 	ndevs, err := namedDevices(wl.USBDevices)
 	if err != nil {
 		return fmt.Errorf("failed to get named devices: %w", err)
+	}
+
+	if wl.Gpus != "" {
+		if !gpu.Supported() {
+			wl.Gpus = ""
+			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
+		}
 	}
 
 	var paths []string

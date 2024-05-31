@@ -55,3 +55,10 @@ func Notify(title, body string) error {
 
 	return nil
 }
+
+func NotifyOrLog(title, body string) {
+	err := Notify(title, body)
+	if err != nil {
+		slog.Error("cannot send notification", "error", err, "notification", body)
+	}
+}

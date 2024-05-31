@@ -178,8 +178,7 @@ func runner(in WorkloadInfo) error {
 		err := fmt.Errorf("workload %s tries to access more than profile allows", in.Profile)
 		msg := diffMessage(err, w, ew)
 
-		nErr := dbus.Notify("qubesome: access denied", msg)
-		slog.Debug("failed to notify", "error", nErr)
+		dbus.NotifyOrLog("qubesome: access denied", msg)
 
 		return err
 	}

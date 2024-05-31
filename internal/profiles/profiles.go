@@ -19,6 +19,7 @@ import (
 	"github.com/qubesome/cli/internal/drive"
 	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/gpu"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/resolution"
@@ -175,6 +176,13 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return fmt.Errorf("cannot pull profile image: %w", err)
 	}
 
+	if profile.Gpus != "" {
+		if !gpu.Supported() {
+			profile.Gpus = ""
+			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
+		}
+	}
+
 	// Block profile from starting if external drive is not available.
 	if len(profile.ExternalDrives) > 0 {
 		slog.Debug("profile has required external drives", "drives", profile.ExternalDrives)
@@ -191,8 +199,7 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 			}
 
 			if !ok {
-				err = dbus.Notify("qubesome start error", fmt.Sprintf("required drive %s is not mounted at %s", split[0], split[1]))
-				slog.Debug("failed to notify", "error", err)
+				dbus.NotifyOrLog("qubesome start error", fmt.Sprintf("required drive %s is not mounted at %s", split[0], split[1]))
 
 				return fmt.Errorf("required drive %q is not mounted at %q", split[0], split[1])
 			}

@@ -68,7 +68,7 @@ func HandleConnection(cfg *types.Config, p *types.Profile, conn net.Conn) {
 	n, err := conn.Read(buf)
 	if err != nil {
 		slog.Error("cannot read from socket", "error", err)
-		_ = dbus.Notify("inception error", fmt.Sprintf("cannot read from socket: %v", err))
+		dbus.NotifyOrLog("inception error", fmt.Sprintf("cannot read from socket: %v", err))
 		return
 	}
 
@@ -82,7 +82,7 @@ func HandleConnection(cfg *types.Config, p *types.Profile, conn net.Conn) {
 	cmd, ok := commands[fields[0]]
 	if !ok {
 		slog.Debug("command not supported", "fields", fields)
-		_ = dbus.Notify("inception error", fmt.Sprintf("command not supported: %v", fields))
+		dbus.NotifyOrLog("inception error", fmt.Sprintf("command not supported: %v", fields))
 		return
 	}
 
@@ -94,6 +94,6 @@ func HandleConnection(cfg *types.Config, p *types.Profile, conn net.Conn) {
 	err = cmd(cfg, p, args)
 	if err != nil {
 		slog.Debug("inception error: failed to run command", "fields", fields, "error", err)
-		_ = dbus.Notify("inception error", fmt.Sprintf("fail to run command: %v: %v", fields, err))
+		dbus.NotifyOrLog("inception error", fmt.Sprintf("fail to run command: %v: %v", fields, err))
 	}
 }
