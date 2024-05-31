@@ -19,6 +19,7 @@ import (
 	"github.com/qubesome/cli/internal/drive"
 	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/resolution"
 	"github.com/qubesome/cli/internal/socket"
@@ -167,6 +168,11 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 	if profile.Image == "" {
 		slog.Debug("no profile image set, using default instead", "default-image", defaultProfileImage)
 		profile.Image = defaultProfileImage
+	}
+
+	err = images.PullImageIfNotPresent(profile.Image)
+	if err != nil {
+		return fmt.Errorf("cannot pull profile image: %w", err)
 	}
 
 	// Block profile from starting if external drive is not available.

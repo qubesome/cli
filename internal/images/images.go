@@ -111,7 +111,7 @@ func PullAll(cfg *types.Config) error {
 		if _, ok := seen[w.Image]; !ok {
 			seen[w.Image] = struct{}{}
 
-			err = pull(w.Image)
+			err = PullImage(w.Image)
 			if err != nil {
 				slog.Error("cannot pull image %q: %w", w.Image, err)
 			}
@@ -121,9 +121,21 @@ func PullAll(cfg *types.Config) error {
 	return nil
 }
 
-func pull(image string) error {
-	slog.Debug("pulling workload image", "image", image)
+func PullImage(image string) error {
+	slog.Info("pulling container image", "image", image)
 	cmd := execabs.Command(files.DockerBinary, "pull", image) //nolint
 
 	return cmd.Run()
+}
+
+func PullImageIfNotPresent(image string) error {
+	slog.Debug("checking if container image is present", "image", image)
+	cmd := execabs.Command(files.DockerBinary, "images", "-q", image) //nolint
+
+	out, err := cmd.Output()
+	if len(out) > 0 && err == nil {
+		return nil
+	}
+
+	return PullImage(image)
 }
