@@ -93,11 +93,16 @@ type Profile struct {
 	// ExternalDrives defines the required external drives to run the profile.
 	ExternalDrives []string `yaml:"externalDrives"`
 
+	// Image is the container image name used for running the profile.
+	// It should contain Xephyr and any additional window managers required.
+	Image string
+
 	// WindowManager holds the command to run the Window Manager once
 	// the X server is running.
 	//
 	// Example: exec awesome
 	WindowManager string `yaml:"windowManager"`
+
 	// XephyrArgs defines additional args to be passed on to Xephyr.
 	XephyrArgs string `yaml:"xephyrArgs"`
 }

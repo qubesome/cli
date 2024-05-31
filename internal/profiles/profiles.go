@@ -29,8 +29,7 @@ import (
 
 var (
 	ContainerNameFormat = "qubesome-%s"
-
-	profileImage = "ghcr.io/qubesome/xorg:latest"
+	defaultProfileImage = "ghcr.io/qubesome/xorg:latest"
 )
 
 func Run(opts ...command.Option[Options]) error {
@@ -66,11 +65,7 @@ func validGitDir(path string) bool {
 
 	// Confirm the repository exists and is a valid Git repository.
 	_, err = git.PlainOpen(path)
-	if err != nil {
-		return false
-	}
-
-	return true
+	return err == nil
 }
 
 func StartFromGit(name, gitURL, path, local string) error {
@@ -90,7 +85,7 @@ func StartFromGit(name, gitURL, path, local string) error {
 		}
 	}
 
-	if local != "" && validGitDir(local) {
+	if local != "" && validGitDir(local) { //nolint
 		slog.Debug("start from local", "path", local)
 		dir = local
 	} else if validGitDir(dir) {
@@ -167,6 +162,11 @@ func StartFromGit(name, gitURL, path, local string) error {
 func Start(profile *types.Profile, cfg *types.Config) (err error) {
 	if cfg == nil {
 		return fmt.Errorf("cannot start profile: config is nil")
+	}
+
+	if profile.Image == "" {
+		slog.Debug("no profile image set, using default instead", "default-image", defaultProfileImage)
+		profile.Image = defaultProfileImage
 	}
 
 	// Block profile from starting if external drive is not available.
@@ -382,7 +382,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	dockerArgs = append(dockerArgs, paths...)
 
 	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(ContainerNameFormat, profile.Name)))
-	dockerArgs = append(dockerArgs, profileImage)
+	dockerArgs = append(dockerArgs, profile.Image)
 	dockerArgs = append(dockerArgs, command)
 	dockerArgs = append(dockerArgs, cArgs...)
 
