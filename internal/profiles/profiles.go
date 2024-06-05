@@ -384,7 +384,6 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"--rm",
 		"-d",
 		"-e", "DISPLAY=:0",
-		"--network=none",
 		"--security-opt=no-new-privileges",
 		"--cap-drop=ALL",
 	}
@@ -392,6 +391,16 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		dockerArgs = append(dockerArgs, "--gpus", profile.HostAccess.Gpus)
 	}
 
+	if profile.DNS != "" {
+		dockerArgs = append(dockerArgs, "--dns", profile.DNS)
+	}
+	
+	if profile.Network == "" {
+		dockerArgs = append(dockerArgs, "--network=none")
+	} else {
+		dockerArgs = append(dockerArgs, "--network="+profile.Network)
+	}
+	
 	dockerArgs = append(dockerArgs, paths...)
 
 	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(ContainerNameFormat, profile.Name)))

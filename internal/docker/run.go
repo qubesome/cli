@@ -199,6 +199,10 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
 	}
 
+	if ew.Profile.DNS != "" {
+		args = append(args, "--dns", ew.Profile.DNS)
+	}
+
 	// Set hostname to be the same as the container name
 	args = append(args, "-h", ew.Name)
 
