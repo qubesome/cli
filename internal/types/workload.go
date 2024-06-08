@@ -114,9 +114,9 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	}
 
 	if len(p.CapsAdd) == 0 {
-		e.Workload.CapsAdd = p.CapsAdd[:0]
+		e.Workload.CapsAdd = e.Workload.CapsAdd[:0]
 	} else {
-		caps := make([]string, 0, len(w.CapsAdd))
+		caps := make([]string, 0)
 
 		for _, cap := range w.CapsAdd {
 			if slices.Contains(p.CapsAdd, cap) {
@@ -127,7 +127,7 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	}
 
 	if len(p.HostAccess.Devices) == 0 {
-		e.Workload.Devices = e.Workload.Devices[:0]
+		e.Workload.Devices = p.Devices[:0]
 	} else if len(w.Devices) > 0 {
 		devs := make([]string, 0, len(w.Devices))
 

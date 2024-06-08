@@ -175,12 +175,14 @@ func runner(in WorkloadInfo) error {
 
 	ew := w.ApplyProfile(profile)
 	if !reflect.DeepEqual(ew.Workload.HostAccess, w.HostAccess) {
-		err := fmt.Errorf("workload %s tries to access more than profile allows", in.Profile)
-		msg := diffMessage(err, w, ew)
+		msg := diffMessage(w, ew)
+		if len(msg) > 0 {
+			err := fmt.Errorf("workload %s tries to access more than profile allows", in.Profile)
+			dbus.NotifyOrLog("qubesome: access denied", err.Error()+":<br/>"+msg)
 
-		dbus.NotifyOrLog("qubesome: access denied", msg)
-
-		return err
+			return err
+		}
+		slog.Debug("unknown objects mismatch", "w", w, "ew", ew)
 	}
 
 	ew.Workload.Args = append(ew.Workload.Args, in.Args...)
@@ -194,9 +196,8 @@ func runner(in WorkloadInfo) error {
 	}
 }
 
-func diffMessage(err error, w types.Workload, ew types.EffectiveWorkload) string {
-	msg := err.Error() + ":<br/>"
-
+func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
+	var msg string
 	if w.HostAccess.Bluetooth != ew.Workload.Bluetooth {
 		msg = msg + "- bluetooth<br/>"
 	}
@@ -243,6 +244,19 @@ func diffMessage(err error, w types.Workload, ew types.EffectiveWorkload) string
 		msg = msg + "- USBDevices:<br/>"
 		for _, usb := range w.HostAccess.USBDevices {
 			msg = msg + "  - " + usb + "<br/>"
+		}
+	}
+	if !reflect.DeepEqual(w.HostAccess.Devices, ew.Workload.Devices) {
+		msg = msg + "- Devices requested:<br/>"
+		for _, dev := range w.HostAccess.Devices {
+			msg = msg + "  - " + dev + "<br/>"
+		}
+	}
+	if len(w.HostAccess.CapsAdd) > 0 &&
+		!reflect.DeepEqual(w.HostAccess.CapsAdd, ew.Workload.CapsAdd) {
+		msg = msg + "- CapsAdd:<br/>"
+		for _, cap := range w.HostAccess.CapsAdd {
+			msg = msg + "  - " + cap + "<br/>"
 		}
 	}
 	return msg

@@ -1121,7 +1121,6 @@ func Test_ApplyProfile(t *testing.T) {
 				},
 			},
 		},
-
 		{
 			name: "Devices empty: workload /foo + profile empty",
 			workload: Workload{
@@ -1137,6 +1136,24 @@ func Test_ApplyProfile(t *testing.T) {
 				},
 				Profile: &Profile{
 					HostAccess: HostAccess{Devices: []string{}},
+				},
+			},
+		},
+		{
+			name: "Devices empty: workload empty + profile /foo",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Devices: []string{"/foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Devices: []string{"/foo"}},
 				},
 			},
 		},
