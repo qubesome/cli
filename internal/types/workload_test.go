@@ -1013,6 +1013,241 @@ func Test_ApplyProfile(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "CapsAdd empty: workload FOO + profile empty",
+			workload: Workload{
+				HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{CapsAdd: []string{}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{CapsAdd: []string{}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{CapsAdd: []string{}},
+				},
+			},
+		},
+		{
+			name: "CapsAdd FOO: workload FOO + profile FOO",
+			workload: Workload{
+				HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
+				},
+			},
+		},
+		{
+			name: "CapsAdd empty: workload FOO + profile FOOB",
+			workload: Workload{
+				HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{CapsAdd: []string{"FOOB"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{CapsAdd: []string{}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{CapsAdd: []string{"FOOB"}},
+				},
+			},
+		},
+		{
+			name: "CapsAdd foo: workload foo + profile foo",
+			workload: Workload{
+				HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+				},
+			},
+		},
+		{
+			name: "CapsAdd bar: workload bar + profile foo and bar",
+			workload: Workload{
+				HostAccess: HostAccess{CapsAdd: []string{"bar"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{CapsAdd: []string{"foo", "bar"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{CapsAdd: []string{"bar"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{CapsAdd: []string{"foo", "bar"}},
+				},
+			},
+		},
+		{
+			name: "CapsAdd empty: workload bar + profile foo",
+			workload: Workload{
+				HostAccess: HostAccess{CapsAdd: []string{"bar"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{CapsAdd: []string{}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+				},
+			},
+		},
+
+		{
+			name: "Devices empty: workload /foo + profile empty",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/foo"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Devices: []string{}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Devices: []string{}},
+				},
+			},
+		},
+		{
+			name: "Devices /foo: workload /foo + profile /foo",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/foo"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Devices: []string{"/foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{"/foo"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Devices: []string{"/foo"}},
+				},
+			},
+		},
+		{
+			name: "Devices /foo/: workload /foo/ + profile /foo",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/foo/"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Devices: []string{"/foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{"/foo/"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Devices: []string{"/foo"}},
+				},
+			},
+		},
+		{
+			name: "Devices empty: workload /foo + profile /foob",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/foo"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Devices: []string{"/foob"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Devices: []string{"/foob"}},
+				},
+			},
+		},
+		{
+			name: "Devices /foo: workload /foo + profile /foo",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/foo"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Devices: []string{"/foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{"/foo"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Devices: []string{"/foo"}},
+				},
+			},
+		},
+		{
+			name: "Devices /bar: workload /bar + profile /foo and /bar",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/bar"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Devices: []string{"/foo", "/bar"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{"/bar"}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Devices: []string{"/foo", "/bar"}},
+				},
+			},
+		},
+		{
+			name: "Devices empty: workload /bar + profile /foo",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/bar"}},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Devices: []string{"/foo"}},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{}},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Devices: []string{"/foo"}},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {

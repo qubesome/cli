@@ -137,6 +137,13 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, "--gpus", wl.HostAccess.Gpus)
 	}
 
+	for _, cap := range wl.CapsAdd {
+		args = append(args, "--cap-add="+cap)
+	}
+	for _, dev := range wl.Devices {
+		args = append(args, "--device="+dev)
+	}
+
 	// TODO: Split
 	if wl.Microphone || wl.Speakers {
 		args = append(args, audioParams()...)

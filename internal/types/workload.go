@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/qubesome/cli/internal/env"
@@ -49,6 +50,9 @@ type HostAccess struct {
 	USBDevices []string `yaml:"usbDevices"`
 	Gpus       string   `yaml:"gpus"`
 	Paths      []string `yaml:"paths"`
+
+	CapsAdd []string `yaml:"capsAdd"`
+	Devices []string `yaml:"devices"`
 }
 
 type EffectiveWorkload struct {
@@ -98,7 +102,7 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 
 		for _, path := range w.Paths {
 			src := strings.Split(path, ":")[0]
-			if pathAllowed(src, p) {
+			if pathAllowed(src, p.HostAccess.Paths) {
 				paths = append(paths, path)
 			}
 		}
@@ -107,6 +111,36 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 			paths = e.Workload.Paths[:0]
 		}
 		e.Workload.Paths = paths
+	}
+
+	if len(p.CapsAdd) == 0 {
+		e.Workload.CapsAdd = p.CapsAdd[:0]
+	} else {
+		caps := make([]string, 0, len(w.CapsAdd))
+
+		for _, cap := range w.CapsAdd {
+			if slices.Contains(p.CapsAdd, cap) {
+				caps = append(caps, cap)
+			}
+		}
+		e.Workload.CapsAdd = caps
+	}
+
+	if len(p.HostAccess.Devices) == 0 {
+		e.Workload.Devices = e.Workload.Devices[:0]
+	} else if len(w.Devices) > 0 {
+		devs := make([]string, 0, len(w.Devices))
+
+		for _, path := range w.Devices {
+			if pathAllowed(path, p.HostAccess.Devices) {
+				devs = append(devs, path)
+			}
+		}
+
+		if len(devs) == 0 {
+			devs = e.Workload.Devices[:0]
+		}
+		e.Workload.Devices = devs
 	}
 
 	want := w.USBDevices
@@ -125,9 +159,9 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	return e
 }
 
-func pathAllowed(path string, p *Profile) bool {
+func pathAllowed(path string, list []string) bool {
 	path = filepath.Clean(env.Expand(path))
-	for _, a := range p.HostAccess.Paths {
+	for _, a := range list {
 		a = filepath.Clean(env.Expand(a))
 		if path == a {
 			return true
