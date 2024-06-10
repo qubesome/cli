@@ -66,7 +66,7 @@ func ContainerID(name string) (string, bool) {
 }
 
 func exec(id string, ew types.EffectiveWorkload) error {
-	args := []string{"exec", id, ew.Workload.Command}
+	args := []string{"exec", "--detach", id, ew.Workload.Command}
 	args = append(args, ew.Workload.Args...)
 
 	slog.Debug(files.DockerBinary+" exec", "container-id", id, "cmd", ew.Workload.Command, "args", ew.Workload.Args)
@@ -123,6 +123,10 @@ func Run(ew types.EffectiveWorkload) error {
 		"-d",
 		"--security-opt", "seccomp=unconfined",
 		"-v=/dev/shm:/dev/shm", // TODO: bind it with ipc?
+	}
+
+	if ew.Workload.User != nil {
+		args = append(args, fmt.Sprintf("--user=%d", *ew.Workload.User))
 	}
 
 	args = append(args, paths...)

@@ -19,6 +19,7 @@ type Workload struct {
 	MimeApps       []string `yaml:"mimeApps"`
 
 	Runner string `yaml:"runner"`
+	User   *int   `yaml:"user"`
 }
 
 type HostAccess struct {
@@ -82,6 +83,9 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e.Workload.Bluetooth = w.Bluetooth && p.HostAccess.Bluetooth
 	e.Workload.Mime = w.Mime && p.HostAccess.Mime
 	e.Workload.Privileged = w.Privileged && p.HostAccess.Privileged
+
+	// TODO: Consider restraining user on workloads.
+	e.Workload.User = w.User
 
 	if p.Gpus == "" || w.Gpus != p.Gpus {
 		e.Workload.Gpus = ""
