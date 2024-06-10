@@ -394,13 +394,13 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	if profile.DNS != "" {
 		dockerArgs = append(dockerArgs, "--dns", profile.DNS)
 	}
-	
+
 	if profile.Network == "" {
 		dockerArgs = append(dockerArgs, "--network=none")
 	} else {
 		dockerArgs = append(dockerArgs, "--network="+profile.Network)
 	}
-	
+
 	dockerArgs = append(dockerArgs, paths...)
 
 	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(ContainerNameFormat, profile.Name)))

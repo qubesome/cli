@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -108,6 +109,21 @@ func runner(in WorkloadInfo) error {
 	profile, exists := in.Config.Profiles[in.Profile]
 	if !exists {
 		return fmt.Errorf("profile %q does not exist", in.Profile)
+	}
+
+	path := files.ProfileConfig(in.Profile)
+	target, err := os.Readlink(path)
+	if err != nil {
+		slog.Debug("not able find profile path", "path", path, "error", err)
+		return nil
+	}
+
+	gitdir := strings.TrimSuffix(target,
+		filepath.Join("qubesome", "qubesome.config"))
+
+	err = env.Update("GITDIR", gitdir)
+	if err != nil {
+		return err
 	}
 
 	// TODO: Add tests/validation on profile format.
