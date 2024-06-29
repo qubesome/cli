@@ -62,6 +62,11 @@ func ClientCookiePath(profile string) (string, error) {
 	return securejoin.SecureJoin(base, fmt.Sprintf("%s/.Xclient-cookie", profile))
 }
 
+func IsolatedRunUserPath(profile string) (string, error) {
+	base := RunUserQubesome()
+	return securejoin.SecureJoin(base, fmt.Sprintf("%s/user", profile))
+}
+
 // ServerCookiePath returns the path to the server cookie file for the given profile.
 func ServerCookiePath(profile string) (string, error) {
 	base := RunUserQubesome()

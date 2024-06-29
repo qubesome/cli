@@ -157,16 +157,29 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 	if wl.X11 {
 		args = append(args, x11Params()...)
-		args = append(args, fmt.Sprintf("-e=DISPLAY=:%d", ew.Profile.Display))
-
-		pp, err := files.ClientCookiePath(ew.Profile.Name)
+	} else {
+		userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
 		}
-		args = append(args, fmt.Sprintf("-v=%s:/tmp/.Xauthority:ro", pp))
-		args = append(args, "-e=XAUTHORITY=/tmp/.Xauthority")
-		args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", ew.Profile.Display))
+
+		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
+
+		machineIDPath := filepath.Join(files.ProfileDir(ew.Profile.Name), "machine-id")
+		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
 	}
+
+	args = append(args, "--device=/dev/dri")
+
+	// Display is used for all qubesome applications.
+	args = append(args, fmt.Sprintf("-e=DISPLAY=:%d", ew.Profile.Display))
+	pp, err := files.ClientCookiePath(ew.Profile.Name)
+	if err != nil {
+		return err
+	}
+	args = append(args, fmt.Sprintf("-v=%s:/tmp/.Xauthority:ro", pp))
+	args = append(args, "-e=XAUTHORITY=/tmp/.Xauthority")
+	args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", ew.Profile.Display))
 
 	//nolint
 	if wl.Mime {
@@ -297,8 +310,6 @@ func getHomeDir(image string) (string, error) {
 
 func x11Params() []string {
 	return []string{
-		"--device=/dev/dri",
-
 		"-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket",
 		"-v=/run/user/1000/bus:/run/user/1000/bus",
 		"-v=/var/lib/dbus:/var/lib/dbus",

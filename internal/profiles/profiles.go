@@ -14,6 +14,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/google/uuid"
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/dbus"
 	"github.com/qubesome/cli/internal/drive"
@@ -239,6 +240,14 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 	}
 
 	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
+
+	if !profile.X11 {
+		err = startDbus(name)
+		if err != nil {
+			return err
+		}
+	}
+
 	err = startWindowManager(name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
 	if err != nil {
 		return err
@@ -292,6 +301,28 @@ func createMagicCookie(profile *types.Profile) error {
 
 func startWindowManager(name, display, wm string) error {
 	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s %s", display, wm)}
+
+	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
+	cmd := execabs.Command(files.DockerBinary, args...) //nolint
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w", output, err)
+	}
+	return nil
+}
+
+func startDbus(name string) error {
+	args := []string{
+		"exec",
+		"--detach",
+		name,
+		"/usr/bin/dbus-daemon",
+		"--session",
+		"--fork",
+		"--nopidfile",
+		"--address=unix:path=/run/user/1000/bus",
+	}
 
 	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
 	cmd := execabs.Command(files.DockerBinary, args...) //nolint
@@ -368,7 +399,6 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	//nolint
 	var paths []string
 	paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
-	paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
 	paths = append(paths, "-v=/tmp/.X11-unix:/tmp/.X11-unix:rw")
 	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver:ro", server))
@@ -383,7 +413,8 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"run",
 		"--rm",
 		"-d",
-		"-e", "DISPLAY=:0",
+		// rely on currently set DISPLAY.
+		"-e", "DISPLAY",
 		"--security-opt=no-new-privileges",
 		"--cap-drop=ALL",
 	}
@@ -396,9 +427,33 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	}
 
 	if profile.Network == "" {
+		// Generally, xorg does not require network access so by
+		// default sets network to none.
 		dockerArgs = append(dockerArgs, "--network=none")
 	} else {
 		dockerArgs = append(dockerArgs, "--network="+profile.Network)
+	}
+
+	if profile.X11 {
+		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
+	} else {
+		userDir, err := files.IsolatedRunUserPath(profile.Name)
+		if err != nil {
+			return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
+		}
+		err = setupRunUserDir(userDir)
+		if err != nil {
+			return err
+		}
+
+		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
+
+		machineIDPath := filepath.Join(files.ProfileDir(profile.Name), "machine-id")
+		err = writeMachineID(machineIDPath)
+		if err != nil {
+			return fmt.Errorf("failed to write machine-id: %w", err)
+		}
+		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
 	}
 
 	dockerArgs = append(dockerArgs, paths...)
@@ -414,6 +469,26 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %w", output, err)
+	}
+	return nil
+}
+
+func setupRunUserDir(dir string) error {
+	err := os.MkdirAll(dir, files.DirMode)
+	if err != nil {
+		return fmt.Errorf("failed to create isolated <qubesome>/user path: %w", err)
+	}
+
+	return nil
+}
+
+func writeMachineID(path string) error {
+	newUUID := uuid.New()
+	uuidString := strings.ReplaceAll(newUUID.String(), "-", "")
+
+	err := os.WriteFile(path, []byte(uuidString), files.FileMode)
+	if err != nil {
+		return fmt.Errorf("failed to write to %s: %w", path, err)
 	}
 	return nil
 }
