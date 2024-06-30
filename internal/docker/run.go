@@ -117,7 +117,8 @@ func Run(ew types.EffectiveWorkload) error {
 		"run",
 		"--rm",
 		"-d",
-		"--security-opt", "seccomp=unconfined",
+		"--security-opt=seccomp=unconfined",
+		"--security-opt=no-new-privileges:true",
 		"-v=/dev/shm:/dev/shm", // TODO: bind it with ipc?
 	}
 

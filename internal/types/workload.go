@@ -26,15 +26,21 @@ type HostAccess struct {
 	// Dbus controls access to the dbus session running at the host.
 	// If false, a new dbus session for the specific Qubesome profile
 	// will be created.
-	Dbus       bool   `yaml:"dbus"`
-	Camera     bool   `yaml:"camera"`
-	Microphone bool   `yaml:"microphone"`
-	Speakers   bool   `yaml:"speakers"`
-	Smartcard  bool   `yaml:"smartcard"`
-	Network    string `yaml:"network"`
-	VarRunUser bool   `yaml:"varRunUser"`
-	Privileged bool   `yaml:"privileged"`
-	Mime       bool   `yaml:"mime"`
+	Dbus bool `yaml:"dbus"`
+
+	// Network defines what container network the workload should be
+	// bound to. If empty, uses default bridge network.
+	// When set at profile level, the workload must either have the
+	// same network set, or set it to 'none'.
+	Network string `yaml:"network"`
+
+	Camera     bool `yaml:"camera"`
+	Microphone bool `yaml:"microphone"`
+	Speakers   bool `yaml:"speakers"`
+	Smartcard  bool `yaml:"smartcard"`
+	VarRunUser bool `yaml:"varRunUser"`
+	Privileged bool `yaml:"privileged"`
+	Mime       bool `yaml:"mime"`
 
 	Bluetooth bool `yaml:"bluetooth"`
 
@@ -43,7 +49,7 @@ type HostAccess struct {
 	LocalTime bool `yaml:"localTime"`
 
 	// USBDevices defines the USB devices to be made available to a
-	// container.
+	// workload.
 	//
 	// For available device names:
 	// 	grep -R HID_NAME /sys/class/hidraw/*/device/uevent | cut -d'=' -f2 | sort -u

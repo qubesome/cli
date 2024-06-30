@@ -415,7 +415,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"-d",
 		// rely on currently set DISPLAY.
 		"-e", "DISPLAY",
-		"--security-opt=no-new-privileges",
+		"--security-opt=no-new-privileges:true",
 		"--cap-drop=ALL",
 	}
 	if profile.HostAccess.Gpus != "" {
