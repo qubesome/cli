@@ -23,7 +23,10 @@ type Workload struct {
 }
 
 type HostAccess struct {
-	X11        bool   `yaml:"x11"`
+	// Dbus controls access to the dbus session running at the host.
+	// If false, a new dbus session for the specific Qubesome profile
+	// will be created.
+	Dbus       bool   `yaml:"dbus"`
 	Camera     bool   `yaml:"camera"`
 	Microphone bool   `yaml:"microphone"`
 	Speakers   bool   `yaml:"speakers"`
@@ -34,10 +37,6 @@ type HostAccess struct {
 	Mime       bool   `yaml:"mime"`
 
 	Bluetooth bool `yaml:"bluetooth"`
-
-	// MachineID defines whether the workload should share the same
-	// machine id as the host.
-	MachineID bool `yaml:"machineId"`
 
 	// LocalTime defines whether the workload should share the same
 	// local time as the host.
@@ -76,9 +75,8 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e.Workload.Smartcard = w.Smartcard && p.HostAccess.Smartcard
 	e.Workload.Microphone = w.Microphone && p.HostAccess.Microphone
 	e.Workload.Speakers = w.Speakers && p.HostAccess.Speakers
-	e.Workload.X11 = w.X11 && p.HostAccess.X11
+	e.Workload.Dbus = w.Dbus && p.HostAccess.Dbus
 	e.Workload.VarRunUser = w.VarRunUser && p.HostAccess.VarRunUser
-	e.Workload.MachineID = w.MachineID && p.HostAccess.MachineID
 	e.Workload.LocalTime = w.LocalTime && p.HostAccess.LocalTime
 	e.Workload.Bluetooth = w.Bluetooth && p.HostAccess.Bluetooth
 	e.Workload.Mime = w.Mime && p.HostAccess.Mime

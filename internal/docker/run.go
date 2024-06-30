@@ -113,10 +113,6 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 	}
 
-	if wl.HostAccess.MachineID {
-		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
-	}
-
 	args := []string{
 		"run",
 		"--rm",
@@ -155,8 +151,8 @@ func Run(ew types.EffectiveWorkload) error {
 	if wl.Camera {
 		args = append(args, cameraParams()...)
 	}
-	if wl.X11 {
-		args = append(args, x11Params()...)
+	if wl.Dbus {
+		args = append(args, hostDbusParams()...)
 	} else {
 		userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
 		if err != nil {
@@ -305,10 +301,7 @@ func getHomeDir(image string) (string, error) {
 	return filepath.Join("/home", string(bytes.TrimSpace(out))), nil
 }
 
-// Map capability vs Env, device, maps required.
-// This should enable easier support for podman, docker and microVM
-
-func x11Params() []string {
+func hostDbusParams() []string {
 	return []string{
 		"-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket",
 		"-v=/run/user/1000/bus:/run/user/1000/bus",

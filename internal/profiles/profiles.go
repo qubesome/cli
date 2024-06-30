@@ -241,7 +241,7 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 
 	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
 
-	if !profile.X11 {
+	if !profile.Dbus {
 		err = startDbus(name)
 		if err != nil {
 			return err
@@ -434,7 +434,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		dockerArgs = append(dockerArgs, "--network="+profile.Network)
 	}
 
-	if profile.X11 {
+	if profile.Dbus {
 		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
 	} else {
 		userDir, err := files.IsolatedRunUserPath(profile.Name)

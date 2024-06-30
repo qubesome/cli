@@ -86,74 +86,74 @@ func Test_ApplyProfile(t *testing.T) {
 			},
 		},
 		{
-			name: "X11 ON: workload ON + profile ON",
+			name: "Dbus ON: workload ON + profile ON",
 			workload: Workload{
-				HostAccess: HostAccess{X11: true},
+				HostAccess: HostAccess{Dbus: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{X11: true},
+				HostAccess: HostAccess{Dbus: true},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{X11: true},
+					HostAccess: HostAccess{Dbus: true},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{X11: true},
+					HostAccess: HostAccess{Dbus: true},
 				},
 			},
 		},
 		{
-			name: "X11 OFF: workload OFF + profile ON",
+			name: "Dbus OFF: workload OFF + profile ON",
 			workload: Workload{
-				HostAccess: HostAccess{X11: false},
+				HostAccess: HostAccess{Dbus: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{X11: true},
+				HostAccess: HostAccess{Dbus: true},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{X11: false},
+					HostAccess: HostAccess{Dbus: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{X11: true},
+					HostAccess: HostAccess{Dbus: true},
 				},
 			},
 		},
 		{
-			name: "X11 OFF: workload ON + profile OFF",
+			name: "Dbus OFF: workload ON + profile OFF",
 			workload: Workload{
-				HostAccess: HostAccess{X11: true},
+				HostAccess: HostAccess{Dbus: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{X11: false},
+				HostAccess: HostAccess{Dbus: false},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{X11: false},
+					HostAccess: HostAccess{Dbus: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{X11: false},
+					HostAccess: HostAccess{Dbus: false},
 				},
 			},
 		},
 		{
-			name: "X11 OFF: workload OFF + profile OFF",
+			name: "Dbus OFF: workload OFF + profile OFF",
 			workload: Workload{
-				HostAccess: HostAccess{X11: false},
+				HostAccess: HostAccess{Dbus: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{X11: false},
+				HostAccess: HostAccess{Dbus: false},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{X11: false},
+					HostAccess: HostAccess{Dbus: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{X11: false},
+					HostAccess: HostAccess{Dbus: false},
 				},
 			},
 		},
@@ -506,78 +506,6 @@ func Test_ApplyProfile(t *testing.T) {
 							"FooBar",
 						},
 					},
-				},
-			},
-		},
-		{
-			name: "MachineID ON: workload ON + profile ON",
-			workload: Workload{
-				HostAccess: HostAccess{MachineID: true},
-			},
-			profile: &Profile{
-				HostAccess: HostAccess{MachineID: true},
-			},
-			want: EffectiveWorkload{
-				Name: "-",
-				Workload: Workload{
-					HostAccess: HostAccess{MachineID: true},
-				},
-				Profile: &Profile{
-					HostAccess: HostAccess{MachineID: true},
-				},
-			},
-		},
-		{
-			name: "MachineID OFF: workload OFF + profile ON",
-			workload: Workload{
-				HostAccess: HostAccess{MachineID: false},
-			},
-			profile: &Profile{
-				HostAccess: HostAccess{MachineID: true},
-			},
-			want: EffectiveWorkload{
-				Name: "-",
-				Workload: Workload{
-					HostAccess: HostAccess{MachineID: false},
-				},
-				Profile: &Profile{
-					HostAccess: HostAccess{MachineID: true},
-				},
-			},
-		},
-		{
-			name: "MachineID OFF: workload ON + profile OFF",
-			workload: Workload{
-				HostAccess: HostAccess{MachineID: true},
-			},
-			profile: &Profile{
-				HostAccess: HostAccess{MachineID: false},
-			},
-			want: EffectiveWorkload{
-				Name: "-",
-				Workload: Workload{
-					HostAccess: HostAccess{MachineID: false},
-				},
-				Profile: &Profile{
-					HostAccess: HostAccess{MachineID: false},
-				},
-			},
-		},
-		{
-			name: "MachineID OFF: workload OFF + profile OFF",
-			workload: Workload{
-				HostAccess: HostAccess{MachineID: false},
-			},
-			profile: &Profile{
-				HostAccess: HostAccess{MachineID: false},
-			},
-			want: EffectiveWorkload{
-				Name: "-",
-				Workload: Workload{
-					HostAccess: HostAccess{MachineID: false},
-				},
-				Profile: &Profile{
-					HostAccess: HostAccess{MachineID: false},
 				},
 			},
 		},

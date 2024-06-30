@@ -223,9 +223,6 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 	if w.HostAccess.LocalTime != ew.Workload.LocalTime {
 		msg = msg + "- localtime<br/>"
 	}
-	if w.HostAccess.MachineID != ew.Workload.MachineID {
-		msg = msg + "- machineID<br/>"
-	}
 	if w.HostAccess.Mime != ew.Workload.Mime {
 		msg = msg + "- mime<br/>"
 	}
@@ -241,8 +238,8 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 	if w.HostAccess.VarRunUser != ew.Workload.VarRunUser {
 		msg = msg + "- VarRunUser<br/>"
 	}
-	if w.HostAccess.X11 != ew.Workload.X11 {
-		msg = msg + "- X11<br/>"
+	if w.HostAccess.Dbus != ew.Workload.Dbus {
+		msg = msg + "- Dbus<br/>"
 	}
 	if w.HostAccess.Gpus != ew.Workload.Gpus {
 		msg = msg + "- gpus: " + w.HostAccess.Gpus + "<br/>"
