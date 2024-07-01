@@ -146,13 +146,13 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	// TODO: Split
-	if wl.Microphone || wl.Speakers {
+	if wl.HostAccess.Microphone || wl.HostAccess.Speakers {
 		args = append(args, audioParams()...)
 	}
-	if wl.Camera {
+	if wl.HostAccess.Camera {
 		args = append(args, cameraParams()...)
 	}
-	if wl.Dbus {
+	if wl.HostAccess.Dbus {
 		args = append(args, hostDbusParams()...)
 	} else {
 		userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
@@ -309,6 +309,7 @@ func hostDbusParams() []string {
 		"-v=/var/lib/dbus:/var/lib/dbus",
 		"-v=/usr/share/dbus-1:/usr/share/dbus-1",
 		"-v=/run/user/1000/dbus-1:/run/user/1000/dbus-1",
+		"-v=/etc/machine-id:/etc/machine-id:ro",
 		"-e=DBUS_SESSION_BUS_ADDRESS",
 		"-e=XDG_RUNTIME_DIR",
 		"-e=XDG_SESSION_ID",
