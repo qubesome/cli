@@ -119,7 +119,6 @@ func Run(ew types.EffectiveWorkload) error {
 		"-d",
 		"--security-opt=seccomp=unconfined",
 		"--security-opt=no-new-privileges:true",
-		"-v=/dev/shm:/dev/shm", // TODO: bind it with ipc?
 	}
 
 	if ew.Workload.User != nil {
