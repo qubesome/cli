@@ -37,7 +37,6 @@ type HostAccess struct {
 	Camera     bool `yaml:"camera"`
 	Microphone bool `yaml:"microphone"`
 	Speakers   bool `yaml:"speakers"`
-	Smartcard  bool `yaml:"smartcard"`
 	VarRunUser bool `yaml:"varRunUser"`
 	Privileged bool `yaml:"privileged"`
 	Mime       bool `yaml:"mime"`
@@ -49,10 +48,10 @@ type HostAccess struct {
 	LocalTime bool `yaml:"localTime"`
 
 	// USBDevices defines the USB devices to be made available to a
-	// workload.
+	// workload, based on the USB product name.
 	//
-	// For available device names:
-	// 	grep -R HID_NAME /sys/class/hidraw/*/device/uevent | cut -d'=' -f2 | sort -u
+	// To list all USB product names for the current machine use:
+	//  cat /sys/bus/usb/devices/*/product | sort -u
 	USBDevices []string `yaml:"usbDevices"`
 	Gpus       string   `yaml:"gpus"`
 	Paths      []string `yaml:"paths"`
@@ -78,7 +77,6 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e.Name = fmt.Sprintf("%s-%s", w.Name, p.Name)
 
 	e.Workload.Camera = w.Camera && p.HostAccess.Camera
-	e.Workload.Smartcard = w.Smartcard && p.HostAccess.Smartcard
 	e.Workload.Microphone = w.Microphone && p.HostAccess.Microphone
 	e.Workload.Speakers = w.Speakers && p.HostAccess.Speakers
 	e.Workload.Dbus = w.Dbus && p.HostAccess.Dbus

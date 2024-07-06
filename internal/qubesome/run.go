@@ -229,9 +229,6 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 	if w.HostAccess.Privileged != ew.Workload.Privileged {
 		msg = msg + "- privileged<br/>"
 	}
-	if w.HostAccess.Smartcard != ew.Workload.Smartcard {
-		msg = msg + "- smartcard<br/>"
-	}
 	if w.HostAccess.Speakers != ew.Workload.Speakers {
 		msg = msg + "- speakers<br/>"
 	}

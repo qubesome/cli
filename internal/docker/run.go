@@ -235,25 +235,24 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, "-v=/sys/class/bluetooth:/sys/class/bluetooth:ro")
 	}
 
-	// TODO: Find a way to not use /dev:/dev
-	if wl.Camera || len(wl.USBDevices) > 0 || wl.Smartcard {
-		args = append(args, "-v=/dev:/dev")
-	}
-
 	if wl.Network != "" {
 		args = append(args, fmt.Sprintf("--network=%s", wl.Network))
 	}
 
-	// TODO: Block by profile
 	if wl.Privileged {
 		args = append(args, "--privileged")
 	}
 
-	for _, ndev := range ndevs {
-		args = append(args, fmt.Sprintf("--device=%s", ndev))
-	}
 	if len(ndevs) > 0 {
-		args = append(args, "-v=/sys/class/usbmisc:/sys/class/usbmisc")
+		// Some USB devices, such as YubiKeys, requires --device pointing to both
+		// the hidraw device as well as the respective /dev/usb. The latter by
+		// itself would enable things such as  "ykinfo -a". However, use of SK keys
+		// fails with operation not permitted unless /dev:/dev is also mapped.
+		args = append(args, "-v=/dev/:/dev/:ro")
+
+		for _, ndev := range ndevs {
+			args = append(args, fmt.Sprintf("--device=%s", ndev))
+		}
 	}
 
 	for _, p := range wl.Paths {
