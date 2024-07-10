@@ -118,9 +118,7 @@ func runner(in WorkloadInfo) error {
 		return nil
 	}
 
-	gitdir := strings.TrimSuffix(target,
-		filepath.Join("qubesome", "qubesome.config"))
-
+	gitdir := filepath.Dir(filepath.Dir(target))
 	err = env.Update("GITDIR", gitdir)
 	if err != nil {
 		return err
