@@ -178,6 +178,8 @@ func Run(ew types.EffectiveWorkload) error {
 	args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", ew.Profile.Display))
 	args = append(args, fmt.Sprintf("-e=QUBESOME_PROFILE=%s", ew.Profile.Name))
 
+	args = append(args, "--init")
+
 	//nolint
 	if wl.Mime {
 		pdir := files.ProfileDir(ew.Profile.Name)
