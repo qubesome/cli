@@ -125,8 +125,6 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, fmt.Sprintf("--user=%d", *ew.Workload.User))
 	}
 
-	args = append(args, paths...)
-
 	// Single instance workloads share the name of the workload, which
 	// must be unique. Otherwise, let docker assign a new name.
 	if wl.SingleInstance {
@@ -151,20 +149,26 @@ func Run(ew types.EffectiveWorkload) error {
 	if wl.HostAccess.Camera {
 		args = append(args, cameraParams()...)
 	}
-	if wl.HostAccess.Dbus {
+
+	if wl.HostAccess.Dbus || wl.Bluetooth || wl.VarRunUser {
+		args = append(args, "-v=/run/user/1000:/run/user/1000")
+	}
+
+	userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
+	}
+	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
+	if wl.HostAccess.Dbus || wl.Bluetooth || wl.VarRunUser {
 		args = append(args, hostDbusParams()...)
 	} else {
-		userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
-		if err != nil {
-			return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
-		}
-
 		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
 
 		machineIDPath := filepath.Join(files.ProfileDir(ew.Profile.Name), "machine-id")
 		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
 	}
 
+	args = append(args, paths...)
 	args = append(args, "--device=/dev/dri")
 
 	// Display is used for all qubesome applications.
@@ -179,6 +183,8 @@ func Run(ew types.EffectiveWorkload) error {
 	args = append(args, fmt.Sprintf("-e=QUBESOME_PROFILE=%s", ew.Profile.Name))
 
 	args = append(args, "--init")
+	// Link to the profiles IPC.
+	// args = append(args, fmt.Sprintf("--ipc=container:qubesome-%s", ew.Profile.Name))
 
 	//nolint
 	if wl.Mime {
@@ -229,11 +235,6 @@ func Run(ew types.EffectiveWorkload) error {
 	// Set hostname to be the same as the container name
 	args = append(args, "-h", ew.Name)
 
-	// TODO: what exactly needs to be shared here?
-	if wl.Bluetooth || wl.VarRunUser {
-		args = append(args, "-v=/run/user/1000:/run/user/1000")
-	}
-
 	if wl.Bluetooth {
 		args = append(args, "-v=/sys/class/bluetooth:/sys/class/bluetooth:ro")
 	}
@@ -251,7 +252,7 @@ func Run(ew types.EffectiveWorkload) error {
 		// the hidraw device as well as the respective /dev/usb. The latter by
 		// itself would enable things such as  "ykinfo -a". However, use of SK keys
 		// fails with operation not permitted unless /dev:/dev is also mapped.
-		args = append(args, "-v=/dev/:/dev/:ro")
+		args = append(args, "-v=/dev/:/dev/")
 
 		for _, ndev := range ndevs {
 			args = append(args, fmt.Sprintf("--device=%s", ndev))
@@ -306,10 +307,13 @@ func getHomeDir(image string) (string, error) {
 func hostDbusParams() []string {
 	return []string{
 		"-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket",
-		"-v=/run/user/1000/bus:/run/user/1000/bus",
 		"-v=/var/lib/dbus:/var/lib/dbus",
 		"-v=/usr/share/dbus-1:/usr/share/dbus-1",
-		"-v=/run/user/1000/dbus-1:/run/user/1000/dbus-1",
+		// At the moment we are mapping /run/user/1000 when
+		// the host Dbus is being used. Therefore, there is no
+		// point in mounting descending dirs.
+		// "-v=/run/user/1000/bus:/run/user/1000/bus",
+		// "-v=/run/user/1000/dbus-1:/run/user/1000/dbus-1",
 		"-v=/etc/machine-id:/etc/machine-id:ro",
 		"-e=DBUS_SESSION_BUS_ADDRESS",
 		"-e=XDG_RUNTIME_DIR",

@@ -434,29 +434,36 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		dockerArgs = append(dockerArgs, "--network="+profile.Network)
 	}
 
+	// Write the machine-id file regardless of the profile using host dbus or not,
+	// as this will enable workloads to use either approach.
+	machineIDPath := filepath.Join(files.ProfileDir(profile.Name), "machine-id")
+	err = writeMachineID(machineIDPath)
+	if err != nil {
+		return fmt.Errorf("failed to write machine-id: %w", err)
+	}
+
+	userDir, err := files.IsolatedRunUserPath(profile.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
+	}
+	err = setupRunUserDir(userDir)
+	if err != nil {
+		return err
+	}
+
+	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
 	if profile.Dbus {
 		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
 	} else {
-		userDir, err := files.IsolatedRunUserPath(profile.Name)
-		if err != nil {
-			return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
-		}
-		err = setupRunUserDir(userDir)
-		if err != nil {
-			return err
-		}
-
 		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
-
-		machineIDPath := filepath.Join(files.ProfileDir(profile.Name), "machine-id")
-		err = writeMachineID(machineIDPath)
-		if err != nil {
-			return fmt.Errorf("failed to write machine-id: %w", err)
-		}
 		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
 	}
 
 	dockerArgs = append(dockerArgs, paths...)
+
+	// Share IPC from the profile container to its workloads.
+	// dockerArgs = append(dockerArgs, "--ipc=shareable")
+	dockerArgs = append(dockerArgs, "--shm-size=128m")
 
 	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(ContainerNameFormat, profile.Name)))
 	dockerArgs = append(dockerArgs, profile.Image)
@@ -477,6 +484,17 @@ func setupRunUserDir(dir string) error {
 	err := os.MkdirAll(dir, files.DirMode)
 	if err != nil {
 		return fmt.Errorf("failed to create isolated <qubesome>/user path: %w", err)
+	}
+
+	shm := filepath.Join(dir, "shm")
+	err = os.MkdirAll(shm, 0o777)
+	if err != nil {
+		return fmt.Errorf("failed to create profile shm dir: %w", err)
+	}
+
+	err = os.Chmod(shm, 0o1777)
+	if err != nil {
+		return fmt.Errorf("failed to chmod profile shm dir: %w", err)
 	}
 
 	return nil
