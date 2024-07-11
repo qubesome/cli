@@ -65,7 +65,7 @@ func Listen(p *types.Profile, cfg *types.Config, handler ConnectionHandler) erro
 		os.Exit(1)
 	}()
 
-	fmt.Printf("listening at: %s\n", fn)
+	slog.Debug("listening profile socket", "path", fn)
 	for {
 		// Accept an incoming connection.
 		conn, err := socket.Accept()
