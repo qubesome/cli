@@ -237,10 +237,6 @@ func Run(ew types.EffectiveWorkload) error {
 	// Set hostname to be the same as the container name
 	args = append(args, "-h", ew.Name)
 
-	if wl.Bluetooth {
-		args = append(args, "-v=/sys/class/bluetooth:/sys/class/bluetooth:ro")
-	}
-
 	if wl.Network != "" {
 		args = append(args, fmt.Sprintf("--network=%s", wl.Network))
 	}
