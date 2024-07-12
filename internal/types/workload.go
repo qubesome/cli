@@ -43,10 +43,6 @@ type HostAccess struct {
 
 	Bluetooth bool `yaml:"bluetooth"`
 
-	// LocalTime defines whether the workload should share the same
-	// local time as the host.
-	LocalTime bool `yaml:"localTime"`
-
 	// USBDevices defines the USB devices to be made available to a
 	// workload, based on the USB product name.
 	//
@@ -81,7 +77,6 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e.Workload.Speakers = w.Speakers && p.HostAccess.Speakers
 	e.Workload.Dbus = w.Dbus && p.HostAccess.Dbus
 	e.Workload.VarRunUser = w.VarRunUser && p.HostAccess.VarRunUser
-	e.Workload.LocalTime = w.LocalTime && p.HostAccess.LocalTime
 	e.Workload.Bluetooth = w.Bluetooth && p.HostAccess.Bluetooth
 	e.Workload.Mime = w.Mime && p.HostAccess.Mime
 	e.Workload.Privileged = w.Privileged && p.HostAccess.Privileged

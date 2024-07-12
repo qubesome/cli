@@ -97,6 +97,8 @@ type Profile struct {
 	// It should contain Xephyr and any additional window managers required.
 	Image string
 
+	Timezone string `yaml:"timezone"`
+
 	DNS string `yaml:"dns"`
 
 	// WindowManager holds the command to run the Window Manager once

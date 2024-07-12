@@ -218,9 +218,6 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 	if w.HostAccess.Camera != ew.Workload.Camera {
 		msg = msg + "- camera<br/>"
 	}
-	if w.HostAccess.LocalTime != ew.Workload.LocalTime {
-		msg = msg + "- localtime<br/>"
-	}
 	if w.HostAccess.Mime != ew.Workload.Mime {
 		msg = msg + "- mime<br/>"
 	}

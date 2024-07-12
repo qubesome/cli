@@ -100,16 +100,14 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	var paths []string
-	if wl.HostAccess.LocalTime {
-		// Mount localtime into container. This file may be a symlink, if so,
-		// mount the underlying file as well.
-		file := "/etc/localtime"
-		if _, err := os.Stat(file); err == nil {
-			paths = append(paths, fmt.Sprintf("-v=%[1]s:%[1]s:ro", file))
+	// Mount localtime into container. This file may be a symlink, if so,
+	// mount the underlying file as well.
+	file := "/etc/localtime"
+	if _, err := os.Stat(file); err == nil {
+		paths = append(paths, fmt.Sprintf("-v=%[1]s:%[1]s:ro", file))
 
-			if target, err := os.Readlink(file); err == nil {
-				paths = append(paths, fmt.Sprintf("-v=%[1]s:%[1]s:ro", target))
-			}
+		if target, err := os.Readlink(file); err == nil {
+			paths = append(paths, fmt.Sprintf("-v=%[1]s:%[1]s:ro", target))
 		}
 	}
 
@@ -181,6 +179,10 @@ func Run(ew types.EffectiveWorkload) error {
 	args = append(args, "-e=XAUTHORITY=/tmp/.Xauthority")
 	args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", ew.Profile.Display))
 	args = append(args, fmt.Sprintf("-e=QUBESOME_PROFILE=%s", ew.Profile.Name))
+
+	if ew.Profile.Timezone != "" {
+		args = append(args, "-e=TZ="+ew.Profile.Timezone)
+	}
 
 	args = append(args, "--init")
 	// Link to the profiles IPC.
