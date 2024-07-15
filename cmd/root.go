@@ -10,7 +10,7 @@ import (
 var (
 	// DefaultLogLevel defines the initial log level, which is overridden
 	// by any LogLevel defined at the user-level configuration file.
-	DefaultLogLevel             = "DEBUG"
+	DefaultLogLevel             = "INFO"
 	ConsoleApp      command.App = newConsole()
 )
 
