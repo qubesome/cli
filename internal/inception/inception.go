@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/qubesome/cli/internal/dbus"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
+	"github.com/qubesome/cli/internal/util/dbus"
 )
 
 var (

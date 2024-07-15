@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/qubesome/cli/internal/dbus"
 	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
-	"github.com/qubesome/cli/internal/gpu"
 	"github.com/qubesome/cli/internal/types"
+	"github.com/qubesome/cli/internal/util/dbus"
+	"github.com/qubesome/cli/internal/util/gpu"
 	"golang.org/x/sys/execabs"
 )
 
