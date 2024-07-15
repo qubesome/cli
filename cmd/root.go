@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"fmt"
 	"log/slog"
+	"os"
+	"runtime"
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/log"
@@ -15,6 +18,11 @@ var (
 )
 
 func Exec(args []string) {
+	if runtime.GOOS != "linux" {
+		fmt.Println("unsupported OS:", runtime.GOOS)
+		os.Exit(2)
+	}
+
 	if len(args) == 0 {
 		return
 	}
