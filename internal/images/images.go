@@ -124,6 +124,7 @@ func PullAll(cfg *types.Config) error {
 func PullImage(image string) error {
 	slog.Info("pulling container image", "image", image)
 	cmd := execabs.Command(files.DockerBinary, "pull", image) //nolint
+	cmd.Stdout = os.Stdout
 
 	return cmd.Run()
 }

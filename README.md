@@ -68,31 +68,32 @@ For more information on each command, run `qubesome <command> --help`.
 
 #### Minimum
 
-Qubesome requires `docker`, `xhost` and `xrandr` installed on a machine
-running Xorg:
+Qubesome requires `docker` and `xrandr` installed on a machine
+running Xorg. To install them using zypper:
 ```
-sudo zypper install -y docker xhost xrandr
-```
-
-By default, docker run its daemon as root. For it to have access to a given
-user's X11, `xhost` must be installed and the user needs to provide local
-access to their X session to `root`:
-```
-xhost +local:root
+sudo zypper install -y docker xrandr
 ```
 
 #### GPU pass-through
 
-To enable GPU workloads (e.g. to enable meetups with background filters),
+To enable GPU workloads (e.g. Google meet with background filters),
 install NVidia's [container-toolkit].
 
-And make sure that NVIDIA drivers are installed correctly.
-For Tumbleweed users, that may look like this:
+First install the [NVIDIA drivers]. For Tumbleweed users:
 ```
 zypper install openSUSE-repos-Tumbleweed-NVIDIA
-zypper install-new-recommends --repo NVIDIA
+zypper install-new-recommends --repo repo-non-free
 ```
 
+Followed up by installing and configuring the nvidia container toolkit:
+```
+zypper modifyrepo --enable nvidia-container-toolkit-experimental
+zypper ar https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo
+nvidia-ctk runtime configure --runtime=docker
+systemctl restart docker
+```
+
+[NVIDIA drivers]: https://en.opensuse.org/SDB:NVIDIA_drivers
 [container-toolkit]: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installing-with-zypper
 
 ### FAQ
@@ -120,6 +121,16 @@ workloads are trying to access things they should not.
 
 #### Is Rootless docker support?
 Not at this point, potentially this could be introduced in the future.
+
+### Why do I need to run xhost +SI:localuser:${USER}?
+Some Linux distros (e.g. Tumbleweed) have X11 access controls enabled
+by default. Just the local current user will need to be granted access
+for qubesome to work:
+```
+xhost +SI:localuser:${USER}
+```
+
+If `xhost` is not present, it can be installed with `sudo zypper install xhost`.
 
 ### License
 This project is licensed under the Apache 2.0 License. Refer to the [LICENSE](LICENSE)

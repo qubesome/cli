@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"os"
@@ -241,6 +242,14 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 
 	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
 
+	// If xhost access control is enabled, it may block qubesome
+	// execution. A tail sign is the profile container dying early.
+	if !containerRunning(name) {
+		msg := os.ExpandEnv("run xhost +SI:localhost:${USER} and try again")
+		dbus.NotifyOrLog("qubesome start error", msg)
+		return fmt.Errorf("failed to start profile: %s", msg)
+	}
+
 	if !profile.Dbus {
 		err = startDbus(name)
 		if err != nil {
@@ -255,6 +264,21 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 
 	wg.Wait()
 	return nil
+}
+
+func containerRunning(name string) bool {
+	args := fmt.Sprintf("ps -q -f name=%s", name)
+	fmt.Println(args)
+	cmd := execabs.Command(files.DockerBinary, //nolint:gosec
+		strings.Split(args, " ")...)
+
+	out, err := cmd.Output()
+	id := string(bytes.TrimSuffix(out, []byte("\n")))
+	if err != nil || id == "" {
+		return false
+	}
+
+	return true
 }
 
 func createMagicCookie(profile *types.Profile) error {
