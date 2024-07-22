@@ -131,6 +131,7 @@ func Run(ew types.EffectiveWorkload) error {
 
 	if wl.HostAccess.Gpus != "" {
 		args = append(args, "--gpus", wl.HostAccess.Gpus)
+		args = append(args, "--runtime=nvidia")
 	}
 
 	for _, cap := range wl.CapsAdd {
