@@ -202,7 +202,7 @@ func runner(in WorkloadInfo) error {
 	ew.Workload.Args = append(ew.Workload.Args, in.Args...)
 
 	switch ew.Workload.Runner {
-	case "fire-cracker":
+	case "firecracker":
 		return firecracker.Run(ew)
 
 	default:
