@@ -173,6 +173,10 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		profile.Image = defaultProfileImage
 	}
 
+	if err := profile.Validate(); err != nil {
+		return err
+	}
+
 	err = images.PullImageIfNotPresent(profile.Image)
 	if err != nil {
 		return fmt.Errorf("cannot pull profile image: %w", err)

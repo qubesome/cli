@@ -10,6 +10,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var (
+	// IANA Time Zone format, not for its content.
+	timezoneRegex     = regexp.MustCompile(`^[A-Za-z]+/[A-Za-z_]+$`)
+	gpusRegex         = regexp.MustCompile(`^all$`)
+	nameRegex         = regexp.MustCompile(`^[a-zA-Z0-9\-]+$`)
+	imageRegex        = regexp.MustCompile(`^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+\/)?(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+(?:[:/][a-z0-9]+(?:[._-][a-z0-9]+)*)+$`)
+	ipRegex           = regexp.MustCompile(`^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
+	runnerRegex       = regexp.MustCompile(`^(docker|firecracker)$`)
+	externalPathRegex = regexp.MustCompile(`^[a-zA-Z0-9\-]+:/[^:]+:/[^:]+$`)
+	pathRegex         = regexp.MustCompile(`^(\${[a-zA-Z0-9\-]+}){0,1}/[^:]+:/[^:]+(:ro){0,1}$`)
+)
+
 type Config struct {
 	Logging Logging `yaml:"logging"`
 
@@ -109,6 +121,57 @@ type Profile struct {
 
 	// XephyrArgs defines additional args to be passed on to Xephyr.
 	XephyrArgs string `yaml:"xephyrArgs"`
+}
+
+func valid(val, field string, maxLen int, allowEmpty bool, format *regexp.Regexp) error {
+	if val == "" {
+		if allowEmpty {
+			return nil
+		}
+		return fmt.Errorf("%s cannot be empty", field)
+	}
+	if len(val) > maxLen {
+		return fmt.Errorf("%s is too long: max length is %d", field, maxLen)
+	}
+	if format != nil && !format.MatchString(val) {
+		return fmt.Errorf("%q in %s does not match format: %s", val, field, format.String())
+	}
+	return nil
+}
+
+func (p Profile) Validate() error {
+	if err := valid(p.Name, "name", 50, false, nameRegex); err != nil {
+		return err
+	}
+	if err := valid(p.Timezone, "timezone", 25, true, timezoneRegex); err != nil {
+		return err
+	}
+	if err := valid(p.Image, "image", 100, true, imageRegex); err != nil {
+		return err
+	}
+	if err := valid(p.DNS, "dns", 15, true, ipRegex); err != nil {
+		return err
+	}
+	if err := valid(p.WindowManager, "windowManager", 50, false, nil); err != nil {
+		return err
+	}
+	if err := valid(p.XephyrArgs, "xephyrArgs", 50, true, nil); err != nil {
+		return err
+	}
+	if err := valid(p.Runner, "runner", 20, true, runnerRegex); err != nil {
+		return err
+	}
+	for _, path := range p.Paths {
+		if err := valid(path, "paths", 500, false, pathRegex); err != nil {
+			return err
+		}
+	}
+	for _, ed := range p.ExternalDrives {
+		if err := valid(ed, "externalDrives", 500, false, externalPathRegex); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func LoadConfig(path string) (*Config, error) {

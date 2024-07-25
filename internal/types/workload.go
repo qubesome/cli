@@ -10,13 +10,13 @@ import (
 )
 
 type Workload struct {
-	Name           string   `yaml:"name"`
-	Image          string   `yaml:"image"`
-	Command        string   `yaml:"command"`
-	Args           []string `yaml:"args"`
-	SingleInstance bool     `yaml:"singleInstance"`
+	Name           string     `yaml:"name"`
+	Image          string     `yaml:"image"`
+	Command        string     `yaml:"command"`
+	Args           []string   `yaml:"args"`
+	SingleInstance bool       `yaml:"singleInstance"`
 	HostAccess     HostAccess `yaml:"hostAccess"`
-	MimeApps       []string `yaml:"mimeApps"`
+	MimeApps       []string   `yaml:"mimeApps"`
 
 	Runner string `yaml:"runner"`
 	User   *int   `yaml:"user"`
@@ -177,9 +177,41 @@ func pathAllowed(path string, list []string) bool {
 }
 
 func (w Workload) Validate() error {
+	if err := valid(w.Name, "name", 50, false, nameRegex); err != nil {
+		return err
+	}
+	if err := valid(w.HostAccess.Gpus, "gpus", 5, true, gpusRegex); err != nil {
+		return err
+	}
+	if err := valid(w.Command, "command", 100, true, nil); err != nil {
+		return err
+	}
+	if err := valid(w.Image, "image", 100, false, imageRegex); err != nil {
+		return err
+	}
+	if err := valid(w.Runner, "runner", 20, true, runnerRegex); err != nil {
+		return err
+	}
+	for _, mime := range w.MimeApps {
+		if err := valid(mime, "mime", 100, false, nil); err != nil {
+			return err
+		}
+	}
+	for _, arg := range w.Args {
+		if err := valid(arg, "args", 100, false, nil); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func (w EffectiveWorkload) Validate() error {
-	return nil
+	if w.Profile != nil {
+		err := w.Profile.Validate()
+		if err != nil {
+			return err
+		}
+	}
+
+	return w.Workload.Validate()
 }

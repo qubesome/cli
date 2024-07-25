@@ -1,6 +1,7 @@
 package types
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1058,6 +1059,195 @@ func Test_ApplyProfile(t *testing.T) {
 			got := tc.workload.ApplyProfile(tc.profile)
 
 			assert.Equal(tc.want, got)
+		})
+	}
+}
+
+func TestWorkloadValidate(t *testing.T) {
+	tests := []struct {
+		name     string
+		workload Workload
+		wantErr  bool
+	}{
+		{
+			"gpus: valid all",
+			Workload{
+				Name:  "valid",
+				Image: "valid/valid",
+				HostAccess: HostAccess{
+					Gpus: "all",
+				},
+			},
+			false,
+		},
+		{
+			"gpus: valid empty",
+			Workload{
+				Name:  "valid",
+				Image: "valid/valid",
+				HostAccess: HostAccess{
+					Gpus: "",
+				},
+			},
+			false,
+		},
+		{
+			"gpus: invalid foo-bar",
+			Workload{
+				Name:  "valid",
+				Image: "valid/valid",
+				HostAccess: HostAccess{
+					Gpus: "foo-bar",
+				},
+			},
+			true,
+		},
+		{
+			"command: valid empty",
+			Workload{
+				Name:    "valid",
+				Command: "",
+				Image:   "valid/valid",
+			},
+			false,
+		},
+		{
+			"command: valid 100 len",
+			Workload{
+				Name:    "valid",
+				Command: strings.Repeat("1", 100),
+				Image:   "valid/valid",
+			},
+			false,
+		},
+		{
+			"command: invalid 101 len",
+			Workload{
+				Name:    "valid",
+				Command: strings.Repeat("1", 101),
+				Image:   "valid/valid",
+			},
+			true,
+		},
+		{
+			"image: valid",
+			Workload{
+				Name:  "valid",
+				Image: "test/abc:v1.2.3",
+			},
+			false,
+		},
+		{
+			"image: invalid empty",
+			Workload{
+				Name:  "valid",
+				Image: "",
+			},
+			true,
+		},
+		{
+			"runner: valid empty",
+			Workload{
+				Name:   "valid",
+				Image:  "valid/valid",
+				Runner: "",
+			},
+			false,
+		},
+		{
+			"runner: valid docker",
+			Workload{
+				Name:   "valid",
+				Image:  "valid/valid",
+				Runner: "docker",
+			},
+			false,
+		},
+		{
+			"runner: valid firecracker",
+			Workload{
+				Name:   "valid",
+				Image:  "valid/valid",
+				Runner: "firecracker",
+			},
+			false,
+		},
+		{
+			"runner: invalid foobar",
+			Workload{
+				Name:   "valid",
+				Image:  "valid/valid",
+				Runner: "foobar",
+			},
+			true,
+		},
+		{
+			"name: valid",
+			Workload{
+				Name:  "FOO-bar-321",
+				Image: "valid/valid",
+			},
+			false,
+		},
+		{
+			"name: valid long",
+			Workload{
+				Name:  strings.Repeat("a", 50),
+				Image: "valid/valid",
+			},
+			false,
+		},
+		{
+			"name: invalid space",
+			Workload{
+				Name:  "in valid",
+				Image: "valid/valid",
+			},
+			true,
+		},
+		{
+			"name: invalid '",
+			Workload{
+				Name:  "in'valid",
+				Image: "valid/valid",
+			},
+			true,
+		},
+		{
+			"name: invalid \"",
+			Workload{
+				Name:  "in\"valid",
+				Image: "valid/valid",
+			},
+			true,
+		},
+		{
+			"name: invalid empty",
+			Workload{
+				Name:  "",
+				Image: "valid/valid",
+			},
+			true,
+		},
+		{
+			"name: invalid too long",
+			Workload{
+				Name:  strings.Repeat("a", 51),
+				Image: "valid/valid",
+			},
+			true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.workload.Validate()
+			if tc.wantErr && err == nil {
+				t.Errorf("expected an error but got nil: %+v", tc.workload)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("did not expect an error but got %v: %+v", err, tc.workload)
+			}
 		})
 	}
 }
