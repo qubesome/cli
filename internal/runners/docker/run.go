@@ -87,14 +87,14 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 	}
 
-	ndevs, err := namedDevices(wl.USBDevices)
+	ndevs, err := namedDevices(wl.HostAccess.USBDevices)
 	if err != nil {
 		return fmt.Errorf("failed to get named devices: %w", err)
 	}
 
-	if wl.Gpus != "" {
+	if wl.HostAccess.Gpus != "" {
 		if !gpu.Supported() {
-			wl.Gpus = ""
+			wl.HostAccess.Gpus = ""
 			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
 		}
 	}
@@ -134,10 +134,10 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, "--runtime=nvidia")
 	}
 
-	for _, cap := range wl.CapsAdd {
+	for _, cap := range wl.HostAccess.CapsAdd {
 		args = append(args, "--cap-add="+cap)
 	}
-	for _, dev := range wl.Devices {
+	for _, dev := range wl.HostAccess.Devices {
 		args = append(args, "--device="+dev)
 	}
 
@@ -149,7 +149,7 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, cameraParams()...)
 	}
 
-	if wl.HostAccess.Dbus || wl.Bluetooth || wl.VarRunUser {
+	if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
 		args = append(args, "-v=/run/user/1000:/run/user/1000")
 	}
 
@@ -158,7 +158,7 @@ func Run(ew types.EffectiveWorkload) error {
 		return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
 	}
 	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
-	if wl.HostAccess.Dbus || wl.Bluetooth || wl.VarRunUser {
+	if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
 		args = append(args, hostDbusParams()...)
 	} else {
 		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
@@ -190,7 +190,7 @@ func Run(ew types.EffectiveWorkload) error {
 	// args = append(args, fmt.Sprintf("--ipc=container:qubesome-%s", ew.Profile.Name))
 
 	//nolint
-	if wl.Mime {
+	if wl.HostAccess.Mime {
 		pdir := files.ProfileDir(ew.Profile.Name)
 		homedir, err := getHomeDir(wl.Image)
 		if err != nil {
@@ -238,11 +238,11 @@ func Run(ew types.EffectiveWorkload) error {
 	// Set hostname to be the same as the container name
 	args = append(args, "-h", ew.Name)
 
-	if wl.Network != "" {
-		args = append(args, fmt.Sprintf("--network=%s", wl.Network))
+	if wl.HostAccess.Network != "" {
+		args = append(args, fmt.Sprintf("--network=%s", wl.HostAccess.Network))
 	}
 
-	if wl.Privileged {
+	if wl.HostAccess.Privileged {
 		args = append(args, "--privileged")
 	}
 
@@ -258,7 +258,7 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 	}
 
-	for _, p := range wl.Paths {
+	for _, p := range wl.HostAccess.Paths {
 		ps := strings.SplitN(p, ":", 2)
 		if len(ps) != 2 {
 			slog.Warn("failed to mount path", "path", p)

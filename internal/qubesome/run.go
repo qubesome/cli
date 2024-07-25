@@ -212,53 +212,53 @@ func runner(in WorkloadInfo) error {
 
 func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 	var msg string
-	if w.HostAccess.Bluetooth != ew.Workload.Bluetooth {
+	if w.HostAccess.Bluetooth != ew.Workload.HostAccess.Bluetooth {
 		msg = msg + "- bluetooth<br/>"
 	}
-	if w.HostAccess.Camera != ew.Workload.Camera {
+	if w.HostAccess.Camera != ew.Workload.HostAccess.Camera {
 		msg = msg + "- camera<br/>"
 	}
-	if w.HostAccess.Mime != ew.Workload.Mime {
+	if w.HostAccess.Mime != ew.Workload.HostAccess.Mime {
 		msg = msg + "- mime<br/>"
 	}
-	if w.HostAccess.Privileged != ew.Workload.Privileged {
+	if w.HostAccess.Privileged != ew.Workload.HostAccess.Privileged {
 		msg = msg + "- privileged<br/>"
 	}
-	if w.HostAccess.Speakers != ew.Workload.Speakers {
+	if w.HostAccess.Speakers != ew.Workload.HostAccess.Speakers {
 		msg = msg + "- speakers<br/>"
 	}
-	if w.HostAccess.VarRunUser != ew.Workload.VarRunUser {
+	if w.HostAccess.VarRunUser != ew.Workload.HostAccess.VarRunUser {
 		msg = msg + "- VarRunUser<br/>"
 	}
-	if w.HostAccess.Dbus != ew.Workload.Dbus {
+	if w.HostAccess.Dbus != ew.Workload.HostAccess.Dbus {
 		msg = msg + "- Dbus<br/>"
 	}
-	if w.HostAccess.Gpus != ew.Workload.Gpus {
+	if w.HostAccess.Gpus != ew.Workload.HostAccess.Gpus {
 		msg = msg + "- gpus: " + w.HostAccess.Gpus + "<br/>"
 	}
-	if w.HostAccess.Network != ew.Workload.Network {
+	if w.HostAccess.Network != ew.Workload.HostAccess.Network {
 		msg = msg + "- network: " + w.HostAccess.Network + "<br/>"
 	}
-	if !reflect.DeepEqual(w.HostAccess.Paths, ew.Workload.Paths) {
+	if !reflect.DeepEqual(w.HostAccess.Paths, ew.Workload.HostAccess.Paths) {
 		msg = msg + "- Paths<br/>"
 		for _, paths := range w.HostAccess.Paths {
 			msg = msg + "  - " + paths + "<br/>"
 		}
 	}
-	if !reflect.DeepEqual(w.HostAccess.USBDevices, ew.Workload.USBDevices) {
+	if !reflect.DeepEqual(w.HostAccess.USBDevices, ew.Workload.HostAccess.USBDevices) {
 		msg = msg + "- USBDevices:<br/>"
 		for _, usb := range w.HostAccess.USBDevices {
 			msg = msg + "  - " + usb + "<br/>"
 		}
 	}
-	if !reflect.DeepEqual(w.HostAccess.Devices, ew.Workload.Devices) {
+	if !reflect.DeepEqual(w.HostAccess.Devices, ew.Workload.HostAccess.Devices) {
 		msg = msg + "- Devices requested:<br/>"
 		for _, dev := range w.HostAccess.Devices {
 			msg = msg + "  - " + dev + "<br/>"
 		}
 	}
 	if len(w.HostAccess.CapsAdd) > 0 &&
-		!reflect.DeepEqual(w.HostAccess.CapsAdd, ew.Workload.CapsAdd) {
+		!reflect.DeepEqual(w.HostAccess.CapsAdd, ew.Workload.HostAccess.CapsAdd) {
 		msg = msg + "- CapsAdd:<br/>"
 		for _, cap := range w.HostAccess.CapsAdd {
 			msg = msg + "  - " + cap + "<br/>"

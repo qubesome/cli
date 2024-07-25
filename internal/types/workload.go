@@ -15,7 +15,7 @@ type Workload struct {
 	Command        string   `yaml:"command"`
 	Args           []string `yaml:"args"`
 	SingleInstance bool     `yaml:"singleInstance"`
-	HostAccess     `yaml:"hostAccess"`
+	HostAccess     HostAccess `yaml:"hostAccess"`
 	MimeApps       []string `yaml:"mimeApps"`
 
 	Runner string `yaml:"runner"`
@@ -72,36 +72,36 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 
 	e.Name = fmt.Sprintf("%s-%s", w.Name, p.Name)
 
-	e.Workload.Camera = w.Camera && p.HostAccess.Camera
-	e.Workload.Microphone = w.Microphone && p.HostAccess.Microphone
-	e.Workload.Speakers = w.Speakers && p.HostAccess.Speakers
-	e.Workload.Dbus = w.Dbus && p.HostAccess.Dbus
-	e.Workload.VarRunUser = w.VarRunUser && p.HostAccess.VarRunUser
-	e.Workload.Bluetooth = w.Bluetooth && p.HostAccess.Bluetooth
-	e.Workload.Mime = w.Mime && p.HostAccess.Mime
-	e.Workload.Privileged = w.Privileged && p.HostAccess.Privileged
+	e.Workload.HostAccess.Camera = w.HostAccess.Camera && p.HostAccess.Camera
+	e.Workload.HostAccess.Microphone = w.HostAccess.Microphone && p.HostAccess.Microphone
+	e.Workload.HostAccess.Speakers = w.HostAccess.Speakers && p.HostAccess.Speakers
+	e.Workload.HostAccess.Dbus = w.HostAccess.Dbus && p.HostAccess.Dbus
+	e.Workload.HostAccess.VarRunUser = w.HostAccess.VarRunUser && p.HostAccess.VarRunUser
+	e.Workload.HostAccess.Bluetooth = w.HostAccess.Bluetooth && p.HostAccess.Bluetooth
+	e.Workload.HostAccess.Mime = w.HostAccess.Mime && p.HostAccess.Mime
+	e.Workload.HostAccess.Privileged = w.HostAccess.Privileged && p.HostAccess.Privileged
 
 	// TODO: Consider restraining user on workloads.
 	e.Workload.User = w.User
 
-	if p.Gpus == "" || w.Gpus != p.Gpus {
-		e.Workload.Gpus = ""
+	if p.Gpus == "" || w.HostAccess.Gpus != p.Gpus {
+		e.Workload.HostAccess.Gpus = ""
 	}
 
 	// If profile sets a network, that is enforced on all workloads.
 	// If a profile does not set a network, workloads can only set "none" as a network.
 	if p.Network != "" {
-		e.Workload.Network = p.Network
-	} else if w.Network != "" && w.Network != "none" {
-		e.Workload.Network = ""
+		e.Workload.HostAccess.Network = p.Network
+	} else if w.HostAccess.Network != "" && w.HostAccess.Network != "none" {
+		e.Workload.HostAccess.Network = ""
 	}
 
 	if len(p.HostAccess.Paths) == 0 {
-		e.Workload.Paths = e.Workload.Paths[:0]
-	} else if len(w.Paths) > 0 {
-		paths := make([]string, 0, len(w.Paths))
+		e.Workload.HostAccess.Paths = e.Workload.HostAccess.Paths[:0]
+	} else if len(w.HostAccess.Paths) > 0 {
+		paths := make([]string, 0, len(w.HostAccess.Paths))
 
-		for _, path := range w.Paths {
+		for _, path := range w.HostAccess.Paths {
 			src := strings.Split(path, ":")[0]
 			if pathAllowed(src, p.HostAccess.Paths) {
 				paths = append(paths, path)
@@ -109,42 +109,42 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 		}
 
 		if len(paths) == 0 {
-			paths = e.Workload.Paths[:0]
+			paths = e.Workload.HostAccess.Paths[:0]
 		}
-		e.Workload.Paths = paths
+		e.Workload.HostAccess.Paths = paths
 	}
 
 	if len(p.CapsAdd) == 0 {
-		e.Workload.CapsAdd = e.Workload.CapsAdd[:0]
+		e.Workload.HostAccess.CapsAdd = e.Workload.HostAccess.CapsAdd[:0]
 	} else {
 		caps := make([]string, 0)
 
-		for _, cap := range w.CapsAdd {
+		for _, cap := range w.HostAccess.CapsAdd {
 			if slices.Contains(p.CapsAdd, cap) {
 				caps = append(caps, cap)
 			}
 		}
-		e.Workload.CapsAdd = caps
+		e.Workload.HostAccess.CapsAdd = caps
 	}
 
 	if len(p.HostAccess.Devices) == 0 {
-		e.Workload.Devices = p.Devices[:0]
-	} else if len(w.Devices) > 0 {
-		devs := make([]string, 0, len(w.Devices))
+		e.Workload.HostAccess.Devices = p.Devices[:0]
+	} else if len(w.HostAccess.Devices) > 0 {
+		devs := make([]string, 0, len(w.HostAccess.Devices))
 
-		for _, path := range w.Devices {
+		for _, path := range w.HostAccess.Devices {
 			if pathAllowed(path, p.HostAccess.Devices) {
 				devs = append(devs, path)
 			}
 		}
 
 		if len(devs) == 0 {
-			devs = e.Workload.Devices[:0]
+			devs = e.Workload.HostAccess.Devices[:0]
 		}
-		e.Workload.Devices = devs
+		e.Workload.HostAccess.Devices = devs
 	}
 
-	want := w.USBDevices
+	want := w.HostAccess.USBDevices
 	var get []string
 
 	for _, in := range p.USBDevices {
@@ -155,7 +155,7 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 		}
 	}
 
-	e.Workload.USBDevices = get
+	e.Workload.HostAccess.USBDevices = get
 
 	return e
 }
