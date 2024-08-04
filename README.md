@@ -17,9 +17,14 @@ storage, etc).
 
 ### Quick Start
 #### Install
-
+##### Using Go
 ```
-go install https://github.com/qubesome/cli@latest
+go install github.com/qubesome/cli@latest
+```
+
+##### For Tumbleweed users
+```
+zypper install qubesome
 ```
 
 #### Start Profile
