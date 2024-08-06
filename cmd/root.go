@@ -70,12 +70,13 @@ func checkNil(err error) {
 const usage = `usage: %s <command> [flags]
 
 Supported commands:
-  run: 	 	  Execute qubesome workloads
-  xdg:   Opens a file or URL in the user's configured workload
-  images:	  Manage workload images
-  start:	  Start qubesome profiles.
+  run:        Execute qubesome workloads
+  xdg:        Opens a file or URL in the user's configured workload
+  images:     Manage workload images
+  start:      Start qubesome profiles.
   clipboard:  Enable copying of clipboard from host and between profiles
-  deps: 	  Shows status of all dependencies
+  deps:       Shows status of all dependencies
+  version:    Shows version and build information
 `
 
 func rootUsage(name string) {

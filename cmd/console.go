@@ -11,6 +11,7 @@ import (
 	imagesCmd "github.com/qubesome/cli/cmd/images"
 	runCmd "github.com/qubesome/cli/cmd/run"
 	startCmd "github.com/qubesome/cli/cmd/start"
+	versionCmd "github.com/qubesome/cli/cmd/version"
 	xdgCmd "github.com/qubesome/cli/cmd/xdg-open"
 	clip "github.com/qubesome/cli/internal/clipboard"
 	"github.com/qubesome/cli/internal/command"
@@ -30,6 +31,7 @@ func newConsole() *Console {
 			"start":     startCmd.New(),
 			"clipboard": clipCmd.New(),
 			"deps":      depsCmd.New(),
+			"version":   versionCmd.New(),
 		},
 		args: os.Args,
 	}
