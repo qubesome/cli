@@ -198,7 +198,7 @@ func (w Workload) Validate() error {
 		}
 	}
 	for _, arg := range w.Args {
-		if err := valid(arg, "args", 100, false, nil); err != nil {
+		if err := valid(arg, "args", 250, false, nil); err != nil {
 			return err
 		}
 	}
