@@ -254,13 +254,6 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return fmt.Errorf("failed to start profile: %s", msg)
 	}
 
-	// if !profile.Dbus {
-	// 	err = startDbus(name)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
-
 	err = startWindowManager(name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
 	if err != nil {
 		return err
@@ -329,28 +322,6 @@ func createMagicCookie(profile *types.Profile) error {
 
 func startWindowManager(name, display, wm string) error {
 	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s %s", display, wm)}
-
-	slog.Debug(files.ContainerRunnerBinary+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(files.ContainerRunnerBinary, args...) //nolint
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %w", output, err)
-	}
-	return nil
-}
-
-func startDbus(name string) error {
-	args := []string{
-		"exec",
-		"--detach",
-		name,
-		"/usr/bin/dbus-daemon",
-		"--session",
-		"--fork",
-		"--nopidfile",
-		"--address=unix:path=/run/user/1000/bus",
-	}
 
 	slog.Debug(files.ContainerRunnerBinary+" exec", "container-name", name, "args", args)
 	cmd := execabs.Command(files.ContainerRunnerBinary, args...) //nolint
