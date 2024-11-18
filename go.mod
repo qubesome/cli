@@ -1,6 +1,6 @@
 module github.com/qubesome/cli
 
-go 1.22.4
+go 1.23.3
 
 require (
 	github.com/cyphar/filepath-securejoin v0.3.4
