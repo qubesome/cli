@@ -12,9 +12,9 @@ build: ## build qubesome to the path set on TARGET_BIN.
 
 .PHONY: test
 test: ## run golang tests.
-	go test -race ./...
+	go test -race -parallel 10 ./...
 
-validate: validate-lint validate-dirty ## Run validation checks.
+verify: verify-lint verify-dirty ## Run verification checks.
 
-validate-lint: $(GOLANGCI)
+verify-lint: $(GOLANGCI)
 	$(GOLANGCI) run

@@ -5,7 +5,7 @@ import (
 	"os/exec"
 )
 
-func init() {
+func init() { //nolint
 	p, err := exec.LookPath("podman")
 	if err != nil {
 		p2, err := exec.LookPath("docker")

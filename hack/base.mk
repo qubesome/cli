@@ -16,7 +16,7 @@ GOBIN=$(TOOLS_BIN) go install $(2) ;\
 }
 endef
 
-validate-dirty:
+verify-dirty:
 ifneq ($(shell git status --porcelain --untracked-files=no),)
 	@echo worktree is dirty
 	@git --no-pager status
