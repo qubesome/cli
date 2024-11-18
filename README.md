@@ -19,7 +19,7 @@ storage, etc).
 #### Install
 ##### Using Go
 ```
-go install github.com/qubesome/cli@latest
+go install github.com/qubesome/cli/cmd/qubesome@latest
 ```
 
 ##### For Tumbleweed users
@@ -73,7 +73,7 @@ For more information on each command, run `qubesome <command> --help`.
 
 #### Minimum
 
-Qubesome requires `docker` and `xrandr` installed on a machine
+Qubesome requires `docker` (or `podman`) and `xrandr` installed on a machine
 running Xorg. To install them using zypper:
 ```
 sudo zypper install -y docker xrandr
