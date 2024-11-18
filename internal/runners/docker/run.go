@@ -52,7 +52,7 @@ x-scheme-handler/snap=snap-handle-link.desktop;
 
 func ContainerID(name string) (string, bool) {
 	args := fmt.Sprintf("ps -a -q -f name=%s", name)
-	cmd := execabs.Command(files.DockerBinary, //nolint:gosec
+	cmd := execabs.Command(files.ContainerRunnerBinary, //nolint:gosec
 		strings.Split(args, " ")...)
 
 	out, err := cmd.Output()
@@ -69,8 +69,8 @@ func exec(id string, ew types.EffectiveWorkload) error {
 	args := []string{"exec", "--detach", id, ew.Workload.Command}
 	args = append(args, ew.Workload.Args...)
 
-	slog.Debug(files.DockerBinary+" exec", "container-id", id, "cmd", ew.Workload.Command, "args", ew.Workload.Args)
-	cmd := execabs.Command(files.DockerBinary, args...) //nolint
+	slog.Debug(files.ContainerRunnerBinary+" exec", "container-id", id, "cmd", ew.Workload.Command, "args", ew.Workload.Args)
+	cmd := execabs.Command(files.ContainerRunnerBinary, args...) //nolint
 
 	return cmd.Run()
 }
@@ -116,7 +116,8 @@ func Run(ew types.EffectiveWorkload) error {
 		"--rm",
 		"-d",
 		"--security-opt=seccomp=unconfined",
-		"--security-opt=no-new-privileges:true",
+		"--security-opt=no-new-privileges=true",
+		"--group-add=keep-groups",
 	}
 
 	if ew.Workload.User != nil {
@@ -150,7 +151,7 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
-		args = append(args, "-v=/run/user/1000:/run/user/1000")
+		args = append(args, "-v=/run/user/1000:/run/user/1000:z")
 	}
 
 	userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
@@ -161,7 +162,7 @@ func Run(ew types.EffectiveWorkload) error {
 	if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
 		args = append(args, hostDbusParams()...)
 	} else {
-		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
+		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000:z", userDir))
 
 		machineIDPath := filepath.Join(files.ProfileDir(ew.Profile.Name), "machine-id")
 		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
@@ -272,15 +273,15 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 
 		dst := ps[1]
-		args = append(args, fmt.Sprintf("-v=%s:%s", src, dst))
+		args = append(args, fmt.Sprintf("-v=%s:%s:z", src, dst))
 	}
 
 	args = append(args, wl.Image)
 	args = append(args, wl.Command)
 	args = append(args, wl.Args...)
 
-	slog.Debug(fmt.Sprintf("exec: %s", files.DockerBinary), "args", args)
-	cmd := execabs.Command(files.DockerBinary, args...) //nolint
+	slog.Debug(fmt.Sprintf("exec: %s", files.ContainerRunnerBinary), "args", args)
+	cmd := execabs.Command(files.ContainerRunnerBinary, args...) //nolint
 
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -292,8 +293,8 @@ func Run(ew types.EffectiveWorkload) error {
 func getHomeDir(image string) (string, error) {
 	args := []string{"run", "--rm", image, "ls", "/home"}
 
-	slog.Debug(files.DockerBinary + " " + strings.Join(args, " "))
-	cmd := execabs.Command(files.DockerBinary, args...) //nolint
+	slog.Debug(files.ContainerRunnerBinary + " " + strings.Join(args, " "))
+	cmd := execabs.Command(files.ContainerRunnerBinary, args...) //nolint
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -305,9 +306,9 @@ func getHomeDir(image string) (string, error) {
 
 func hostDbusParams() []string {
 	return []string{
-		"-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket",
-		"-v=/var/lib/dbus:/var/lib/dbus",
-		"-v=/usr/share/dbus-1:/usr/share/dbus-1",
+		"-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket:z",
+		"-v=/var/lib/dbus:/var/lib/dbus:z",
+		"-v=/usr/share/dbus-1:/usr/share/dbus-1:z",
 		// At the moment we are mapping /run/user/1000 when
 		// the host Dbus is being used. Therefore, there is no
 		// point in mounting descending dirs.
@@ -322,7 +323,7 @@ func hostDbusParams() []string {
 
 func cameraParams() []string {
 	params := []string{
-		"--group-add=video",
+		// "--group-add=video",
 	}
 
 	vds, _ := filepath.Glob("/dev/video*")
@@ -336,8 +337,8 @@ func cameraParams() []string {
 func audioParams() []string {
 	return []string{
 		// TODO: For Bluetooth (Apple AirPods) you may require /run/user/1000 shared via VarRunUser
-		"-v=/run/user/1000/pipewire-0:/run/user/1000/pipewire-0",
+		"-v=/run/user/1000/pipewire-0:/run/user/1000/pipewire-0:z",
 		"--device=/dev/snd",
-		"--group-add=audio",
+		// "--group-add=audio",
 	}
 }

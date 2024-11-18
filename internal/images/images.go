@@ -123,7 +123,7 @@ func PullAll(cfg *types.Config) error {
 
 func PullImage(image string) error {
 	slog.Info("pulling container image", "image", image)
-	cmd := execabs.Command(files.DockerBinary, "pull", image) //nolint
+	cmd := execabs.Command(files.ContainerRunnerBinary, "pull", image) //nolint
 	cmd.Stdout = os.Stdout
 
 	return cmd.Run()
@@ -131,7 +131,7 @@ func PullImage(image string) error {
 
 func PullImageIfNotPresent(image string) error {
 	slog.Debug("checking if container image is present", "image", image)
-	cmd := execabs.Command(files.DockerBinary, "images", "-q", image) //nolint
+	cmd := execabs.Command(files.ContainerRunnerBinary, "images", "-q", image) //nolint
 
 	out, err := cmd.Output()
 	if len(out) > 0 && err == nil {

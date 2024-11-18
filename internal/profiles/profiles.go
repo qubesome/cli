@@ -254,12 +254,12 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return fmt.Errorf("failed to start profile: %s", msg)
 	}
 
-	if !profile.Dbus {
-		err = startDbus(name)
-		if err != nil {
-			return err
-		}
-	}
+	// if !profile.Dbus {
+	// 	err = startDbus(name)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	err = startWindowManager(name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
 	if err != nil {
@@ -273,7 +273,7 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 func containerRunning(name string) bool {
 	args := fmt.Sprintf("ps -q -f name=%s", name)
 	fmt.Println(args)
-	cmd := execabs.Command(files.DockerBinary, //nolint:gosec
+	cmd := execabs.Command(files.ContainerRunnerBinary, //nolint:gosec
 		strings.Split(args, " ")...)
 
 	out, err := cmd.Output()
@@ -330,8 +330,8 @@ func createMagicCookie(profile *types.Profile) error {
 func startWindowManager(name, display, wm string) error {
 	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s %s", display, wm)}
 
-	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(files.DockerBinary, args...) //nolint
+	slog.Debug(files.ContainerRunnerBinary+" exec", "container-name", name, "args", args)
+	cmd := execabs.Command(files.ContainerRunnerBinary, args...) //nolint
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -352,8 +352,8 @@ func startDbus(name string) error {
 		"--address=unix:path=/run/user/1000/bus",
 	}
 
-	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(files.DockerBinary, args...) //nolint
+	slog.Debug(files.ContainerRunnerBinary+" exec", "container-name", name, "args", args)
+	cmd := execabs.Command(files.ContainerRunnerBinary, args...) //nolint
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -499,7 +499,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	dockerArgs = append(dockerArgs, cArgs...)
 
 	slog.Debug("exec: docker", "args", dockerArgs)
-	cmd := execabs.Command(files.DockerBinary, dockerArgs...) //nolint
+	cmd := execabs.Command(files.ContainerRunnerBinary, dockerArgs...) //nolint
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
