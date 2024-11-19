@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/qubesome/cli/internal/env"
@@ -154,36 +155,55 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, cameraParams()...)
 	}
 
-	if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
-		args = append(args, "-v=/run/user/1000:/run/user/1000:z")
-	}
+	display := ew.Profile.Display
+	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") { //nolint
+		fmt.Println("WARN: running qubesome in Wayland (experimental)")
+		display = 0
 
-	userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
-	if err != nil {
-		return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
-	}
-	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
-	if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
-		args = append(args, hostDbusParams()...)
+		xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR")
+		if xdgRuntimeDir == "" {
+			uid := os.Getuid()
+			if uid < 1000 {
+				return fmt.Errorf("qubesome does not support running under privileged users")
+			}
+			xdgRuntimeDir = "/run/user/" + strconv.Itoa(uid)
+		}
+
+		// TODO: Investigate ways to avoid sharing /run/user/1000 on Wayland.
+		args = append(args, "-e XDG_RUNTIME_DIR")
+		args = append(args, "-v="+xdgRuntimeDir+":/run/user/1000")
 	} else {
-		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000:z", userDir))
+		if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
+			args = append(args, "-v=/run/user/1000:/run/user/1000:z")
+		}
 
-		machineIDPath := filepath.Join(files.ProfileDir(ew.Profile.Name), "machine-id")
-		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
+		userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
+		if err != nil {
+			return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
+		}
+		paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
+		if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
+			args = append(args, hostDbusParams()...)
+		} else {
+			paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000:z", userDir))
+
+			machineIDPath := filepath.Join(files.ProfileDir(ew.Profile.Name), "machine-id")
+			paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
+		}
 	}
 
 	args = append(args, paths...)
 	args = append(args, "--device=/dev/dri")
 
 	// Display is used for all qubesome applications.
-	args = append(args, fmt.Sprintf("-e=DISPLAY=:%d", ew.Profile.Display))
+	args = append(args, fmt.Sprintf("-e=DISPLAY=:%d", display))
 	pp, err := files.ClientCookiePath(ew.Profile.Name)
 	if err != nil {
 		return err
 	}
 	args = append(args, fmt.Sprintf("-v=%s:/tmp/.Xauthority:ro", pp))
 	args = append(args, "-e=XAUTHORITY=/tmp/.Xauthority")
-	args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", ew.Profile.Display))
+	args = append(args, fmt.Sprintf("-v=/tmp/.X11-unix/X%[1]d:/tmp/.X11-unix/X%[1]d", display))
 	args = append(args, fmt.Sprintf("-e=QUBESOME_PROFILE=%s", ew.Profile.Name))
 
 	if ew.Profile.Timezone != "" {

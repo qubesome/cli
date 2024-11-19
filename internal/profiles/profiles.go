@@ -361,7 +361,16 @@ func createNewDisplay(profile *types.Profile, display string) error {
 
 	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
 		command = "xwayland-run"
-		cArgs = []string{"-host-grab", "-geometry", res, "--",
+		cArgs = []string{
+			"-host-grab",
+			"-geometry", res,
+			"-extension", "MIT-SHM",
+			"-extension", "XTEST",
+			"-nopn",
+			"-tst",
+			"-nolisten", "tcp",
+			"-auth", "/home/xorg-user/.Xserver",
+			"--",
 			strings.TrimPrefix(profile.WindowManager, "exec ")}
 	}
 
@@ -411,8 +420,8 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
 	paths = append(paths, "-v=/tmp/.X11-unix:/tmp/.X11-unix:rw")
 	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
-	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver:ro", server))
-	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority:ro", workload))
+	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver", server))
+	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority", workload))
 	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
 
 	for _, p := range profile.Paths {
