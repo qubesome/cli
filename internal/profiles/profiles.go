@@ -244,19 +244,24 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return err
 	}
 
-	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
+	// In Wayland, Xephyr is replaced by xwayland-run, which can
+	// run the Window Manager directly, without the need of a exec
+	// into the container to trigger it.
+	if !strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		name := fmt.Sprintf(ContainerNameFormat, profile.Name)
 
-	// If xhost access control is enabled, it may block qubesome
-	// execution. A tail sign is the profile container dying early.
-	if !containerRunning(name) {
-		msg := os.ExpandEnv("run xhost +SI:localhost:${USER} and try again")
-		dbus.NotifyOrLog("qubesome start error", msg)
-		return fmt.Errorf("failed to start profile: %s", msg)
-	}
+		// If xhost access control is enabled, it may block qubesome
+		// execution. A tail sign is the profile container dying early.
+		if !containerRunning(name) {
+			msg := os.ExpandEnv("run xhost +SI:localhost:${USER} and try again")
+			dbus.NotifyOrLog("qubesome start error", msg)
+			return fmt.Errorf("failed to start profile: %s", msg)
+		}
 
-	err = startWindowManager(name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
-	if err != nil {
-		return err
+		err = startWindowManager(name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
+		if err != nil {
+			return err
+		}
 	}
 
 	wg.Wait()
@@ -354,6 +359,12 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		cArgs = append(cArgs, strings.Split(profile.XephyrArgs, " ")...)
 	}
 
+	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		command = "xwayland-run"
+		cArgs = []string{"-host-grab", "-geometry", res, "--",
+			strings.TrimPrefix(profile.WindowManager, "exec ")}
+	}
+
 	server, err := files.ServerCookiePath(profile.Name)
 	if err != nil {
 		return err
@@ -414,8 +425,14 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"-d",
 		// rely on currently set DISPLAY.
 		"-e", "DISPLAY",
+		"-e", "XDG_SESSION_TYPE=X11",
+		"--device", "/dev/dri",
 		"--security-opt=no-new-privileges:true",
 		"--cap-drop=ALL",
+	}
+
+	if strings.HasSuffix(files.ContainerRunnerBinary, "podman") {
+		dockerArgs = append(dockerArgs, "--userns=keep-id")
 	}
 	if profile.HostAccess.Gpus != "" {
 		dockerArgs = append(dockerArgs, "--gpus", profile.HostAccess.Gpus)

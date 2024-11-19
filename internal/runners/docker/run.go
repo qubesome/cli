@@ -120,6 +120,10 @@ func Run(ew types.EffectiveWorkload) error {
 		"--group-add=keep-groups",
 	}
 
+	if strings.HasSuffix(files.ContainerRunnerBinary, "podman") {
+		args = append(args, "--userns=keep-id")
+	}
+
 	if ew.Workload.User != nil {
 		args = append(args, fmt.Sprintf("--user=%d", *ew.Workload.User))
 	}
