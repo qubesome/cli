@@ -270,7 +270,6 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 
 func containerRunning(name string) bool {
 	args := fmt.Sprintf("ps -q -f name=%s", name)
-	fmt.Println(args)
 	cmd := execabs.Command(files.ContainerRunnerBinary, //nolint:gosec
 		strings.Split(args, " ")...)
 
@@ -510,6 +509,10 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	dockerArgs = append(dockerArgs, command)
 	dockerArgs = append(dockerArgs, cArgs...)
 
+	fmt.Println(
+		"INFO: For best experience use input grabber shortcuts:",
+		grabberShortcut())
+
 	slog.Debug("exec: docker", "args", dockerArgs)
 	cmd := execabs.Command(files.ContainerRunnerBinary, dockerArgs...) //nolint
 
@@ -518,6 +521,14 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		return fmt.Errorf("%s: %w", output, err)
 	}
 	return nil
+}
+
+func grabberShortcut() string {
+	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		return "<Super> + <Esc>"
+	}
+
+	return "<Ctrl> + <Shift>"
 }
 
 func setupRunUserDir(dir string) error {
