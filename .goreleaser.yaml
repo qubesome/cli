@@ -2,7 +2,7 @@ project_name: qubesome
 builds:
   - id: qubesome
     binary: qubesome
-    main: main.go
+    main: cmd/qubesome/main.go
     flags:
     - -trimpath
     ldflags:
