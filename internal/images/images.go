@@ -1,9 +1,7 @@
 package images
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"sync"
@@ -53,7 +51,7 @@ func pullExpired() (bool, error) {
 	fn := files.ImagesLastCheckedPath()
 	fi, err := os.Stat(fn)
 	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
+		if !os.IsNotExist(err) {
 			return false, fmt.Errorf("cannot stat %q: %w", fn, err)
 		}
 		if err := os.WriteFile(fn, []byte{}, files.FileMode); err != nil {
@@ -74,6 +72,19 @@ func pullExpired() (bool, error) {
 	}
 
 	return false, nil
+}
+
+func PreemptWorkloadImages(cfg *types.Config) {
+	slog.Debug("Check need for the preemptive pull of workload images")
+	fn := files.ImagesLastCheckedPath()
+
+	_, err := os.Stat(fn)
+	if err != nil && os.IsNotExist(err) {
+		fmt.Println("INFO: Preemptively pulling workload images. This only happens on first execution and aims to avoid delays opening apps.")
+
+		_ = PullAll(cfg)
+		_ = os.WriteFile(fn, []byte{}, files.FileMode)
+	}
 }
 
 func PullAll(cfg *types.Config) error {
@@ -123,7 +134,7 @@ func PullAll(cfg *types.Config) error {
 
 func PullImage(image string) error {
 	slog.Info("pulling container image", "image", image)
-	cmd := execabs.Command(files.DockerBinary, "pull", image) //nolint
+	cmd := execabs.Command(files.ContainerRunnerBinary, "pull", image) //nolint
 	cmd.Stdout = os.Stdout
 
 	return cmd.Run()
@@ -131,7 +142,7 @@ func PullImage(image string) error {
 
 func PullImageIfNotPresent(image string) error {
 	slog.Debug("checking if container image is present", "image", image)
-	cmd := execabs.Command(files.DockerBinary, "images", "-q", image) //nolint
+	cmd := execabs.Command(files.ContainerRunnerBinary, "images", "-q", image) //nolint
 
 	out, err := cmd.Output()
 	if len(out) > 0 && err == nil {

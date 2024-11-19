@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/qubesome/cli/internal/files"
 	"golang.org/x/sys/execabs"
@@ -57,6 +58,10 @@ func Notify(title, body string) error {
 }
 
 func NotifyOrLog(title, body string) {
+	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		slog.Error("logging notification (sending not supported on wayland)", "title", title, "body", body)
+	}
+
 	err := Notify(title, body)
 	if err != nil {
 		slog.Error("cannot send notification", "error", err, "notification", body)

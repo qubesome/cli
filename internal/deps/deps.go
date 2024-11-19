@@ -14,16 +14,16 @@ var deps map[string][]string = map[string][]string{
 		files.ShBinary,
 	},
 	"run": {
-		files.DockerBinary,
+		files.ContainerRunnerBinary,
 	},
 	"xdg-open": {
-		files.DockerBinary,
+		files.ContainerRunnerBinary,
 	},
 	"images": {
-		files.DockerBinary,
+		files.ContainerRunnerBinary,
 	},
 	"profiles": {
-		files.DockerBinary,
+		files.ContainerRunnerBinary,
 		files.ShBinary,
 		files.XrandrBinary,
 	},

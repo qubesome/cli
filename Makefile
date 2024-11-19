@@ -8,13 +8,13 @@ help: ## display Makefile's help.
 
 .PHONY: build
 build: ## build qubesome to the path set on TARGET_BIN.
-	go build -trimpath -tags 'netgo,osusergo,static_build' -ldflags '-extldflags -static -s -w' -o $(TARGET_BIN) main.go
+	go build -trimpath -tags 'netgo,osusergo,static_build' -ldflags '-extldflags -static -s -w' -o $(TARGET_BIN) cmd/qubesome/main.go
 
 .PHONY: test
 test: ## run golang tests.
-	go test -race ./...
+	go test -race -parallel 10 ./...
 
-validate: validate-lint validate-dirty ## Run validation checks.
+verify: verify-lint verify-dirty ## Run verification checks.
 
-validate-lint: $(GOLANGCI)
+verify-lint: $(GOLANGCI)
 	$(GOLANGCI) run

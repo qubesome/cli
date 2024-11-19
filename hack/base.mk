@@ -1,4 +1,4 @@
-GOLANGCI_VERSION ?= v1.57.2
+GOLANGCI_VERSION ?= v1.62.0
 TOOLS_BIN := $(shell mkdir -p build/tools && realpath build/tools)
 
 GOLANGCI = $(TOOLS_BIN)/golangci-lint-$(GOLANGCI_VERSION)
@@ -16,7 +16,7 @@ GOBIN=$(TOOLS_BIN) go install $(2) ;\
 }
 endef
 
-validate-dirty:
+verify-dirty:
 ifneq ($(shell git status --porcelain --untracked-files=no),)
 	@echo worktree is dirty
 	@git --no-pager status

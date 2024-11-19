@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"embed"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,6 +19,10 @@ func TestCommandWiring(t *testing.T) {
 
 	c := newConsole()
 	for _, entry := range entries {
+		if strings.EqualFold(entry.Name(), "qubesome") {
+			continue
+		}
+
 		if !entry.IsDir() {
 			continue
 		}

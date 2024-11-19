@@ -74,8 +74,15 @@ func validGitDir(path string) bool {
 
 func StartFromGit(name, gitURL, path, local string) error {
 	ln := files.ProfileConfig(name)
+
 	if _, err := os.Lstat(ln); err == nil {
-		return fmt.Errorf("profile %q is already started", name)
+		// Wayland is not cleaning up profile state after closure.
+		if !strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+			return fmt.Errorf("profile %q is already started", name)
+		}
+		if err = os.Remove(ln); err != nil {
+			return fmt.Errorf("failed to remove leftover profile symlink: %w", err)
+		}
 	}
 
 	dir, err := files.GitDirPath(gitURL)
@@ -177,10 +184,17 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return err
 	}
 
+	fi, err := os.Lstat(files.ContainerRunnerBinary)
+	if err != nil || !fi.Mode().IsRegular() {
+		return fmt.Errorf("could not find docker or podman")
+	}
+
 	err = images.PullImageIfNotPresent(profile.Image)
 	if err != nil {
 		return fmt.Errorf("cannot pull profile image: %w", err)
 	}
+
+	go images.PreemptWorkloadImages(cfg)
 
 	if profile.Gpus != "" {
 		if !gpu.Supported() {
@@ -225,6 +239,7 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 				err = err1
 			}
 		}
+
 		wg.Done()
 	}()
 
@@ -244,26 +259,24 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return err
 	}
 
-	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
+	// In Wayland, Xephyr is replaced by xwayland-run, which can
+	// run the Window Manager directly, without the need of a exec
+	// into the container to trigger it.
+	if !strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		name := fmt.Sprintf(ContainerNameFormat, profile.Name)
 
-	// If xhost access control is enabled, it may block qubesome
-	// execution. A tail sign is the profile container dying early.
-	if !containerRunning(name) {
-		msg := os.ExpandEnv("run xhost +SI:localhost:${USER} and try again")
-		dbus.NotifyOrLog("qubesome start error", msg)
-		return fmt.Errorf("failed to start profile: %s", msg)
-	}
+		// If xhost access control is enabled, it may block qubesome
+		// execution. A tail sign is the profile container dying early.
+		if !containerRunning(name) {
+			msg := os.ExpandEnv("run xhost +SI:localhost:${USER} and try again")
+			dbus.NotifyOrLog("qubesome start error", msg)
+			return fmt.Errorf("failed to start profile: %s", msg)
+		}
 
-	if !profile.Dbus {
-		err = startDbus(name)
+		err = startWindowManager(name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
 		if err != nil {
 			return err
 		}
-	}
-
-	err = startWindowManager(name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
-	if err != nil {
-		return err
 	}
 
 	wg.Wait()
@@ -272,8 +285,7 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 
 func containerRunning(name string) bool {
 	args := fmt.Sprintf("ps -q -f name=%s", name)
-	fmt.Println(args)
-	cmd := execabs.Command(files.DockerBinary, //nolint:gosec
+	cmd := execabs.Command(files.ContainerRunnerBinary, //nolint:gosec
 		strings.Split(args, " ")...)
 
 	out, err := cmd.Output()
@@ -330,30 +342,8 @@ func createMagicCookie(profile *types.Profile) error {
 func startWindowManager(name, display, wm string) error {
 	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s %s", display, wm)}
 
-	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(files.DockerBinary, args...) //nolint
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %w", output, err)
-	}
-	return nil
-}
-
-func startDbus(name string) error {
-	args := []string{
-		"exec",
-		"--detach",
-		name,
-		"/usr/bin/dbus-daemon",
-		"--session",
-		"--fork",
-		"--nopidfile",
-		"--address=unix:path=/run/user/1000/bus",
-	}
-
-	slog.Debug(files.DockerBinary+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(files.DockerBinary, args...) //nolint
+	slog.Debug(files.ContainerRunnerBinary+" exec", "container-name", name, "args", args)
+	cmd := execabs.Command(files.ContainerRunnerBinary, args...) //nolint
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -381,6 +371,21 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	}
 	if profile.XephyrArgs != "" {
 		cArgs = append(cArgs, strings.Split(profile.XephyrArgs, " ")...)
+	}
+
+	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		command = "xwayland-run"
+		cArgs = []string{
+			"-host-grab",
+			"-geometry", res,
+			"-extension", "MIT-SHM",
+			"-extension", "XTEST",
+			"-nopn",
+			"-tst",
+			"-nolisten", "tcp",
+			"-auth", "/home/xorg-user/.Xserver",
+			"--",
+			strings.TrimPrefix(profile.WindowManager, "exec ")}
 	}
 
 	server, err := files.ServerCookiePath(profile.Name)
@@ -429,8 +434,8 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
 	paths = append(paths, "-v=/tmp/.X11-unix:/tmp/.X11-unix:rw")
 	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
-	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver:ro", server))
-	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority:ro", workload))
+	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver", server))
+	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority", workload))
 	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
 
 	for _, p := range profile.Paths {
@@ -443,8 +448,29 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"-d",
 		// rely on currently set DISPLAY.
 		"-e", "DISPLAY",
+		"-e", "XDG_SESSION_TYPE=X11",
+		"--device", "/dev/dri",
 		"--security-opt=no-new-privileges:true",
 		"--cap-drop=ALL",
+	}
+
+	if strings.HasSuffix(files.ContainerRunnerBinary, "podman") {
+		dockerArgs = append(dockerArgs, "--userns=keep-id")
+	}
+	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		fmt.Println("WARN: running qubesome in Wayland (experimental)")
+		xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR")
+		if xdgRuntimeDir == "" {
+			uid := os.Getuid()
+			if uid < 1000 {
+				return fmt.Errorf("qubesome does not support running under privileged users")
+			}
+			xdgRuntimeDir = "/run/user/" + strconv.Itoa(uid)
+		}
+
+		// TODO: Investigate ways to avoid sharing /run/user/1000 on Wayland.
+		dockerArgs = append(dockerArgs, "-e XDG_RUNTIME_DIR")
+		dockerArgs = append(dockerArgs, "-v="+xdgRuntimeDir+":/run/user/1000")
 	}
 	if profile.HostAccess.Gpus != "" {
 		dockerArgs = append(dockerArgs, "--gpus", profile.HostAccess.Gpus)
@@ -498,14 +524,26 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	dockerArgs = append(dockerArgs, command)
 	dockerArgs = append(dockerArgs, cArgs...)
 
+	fmt.Println(
+		"INFO: For best experience use input grabber shortcuts:",
+		grabberShortcut())
+
 	slog.Debug("exec: docker", "args", dockerArgs)
-	cmd := execabs.Command(files.DockerBinary, dockerArgs...) //nolint
+	cmd := execabs.Command(files.ContainerRunnerBinary, dockerArgs...) //nolint
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %w", output, err)
 	}
 	return nil
+}
+
+func grabberShortcut() string {
+	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		return "<Super> + <Esc>"
+	}
+
+	return "<Ctrl> + <Shift>"
 }
 
 func setupRunUserDir(dir string) error {

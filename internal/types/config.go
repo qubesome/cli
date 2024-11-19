@@ -187,6 +187,8 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("cannot unmarshal qubesome config %q: %w", path, err)
 	}
 
+	cfg.RootDir = filepath.Dir(path)
+
 	// To avoid names being defined twice on the profiles, the name
 	// is only defined when referring to a profile which results
 	// on the .name field of Profiles not being populated.
