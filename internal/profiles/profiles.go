@@ -74,8 +74,15 @@ func validGitDir(path string) bool {
 
 func StartFromGit(name, gitURL, path, local string) error {
 	ln := files.ProfileConfig(name)
+
 	if _, err := os.Lstat(ln); err == nil {
-		return fmt.Errorf("profile %q is already started", name)
+		// Wayland is not cleaning up profile state after closure.
+		if !strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+			return fmt.Errorf("profile %q is already started", name)
+		}
+		if err = os.Remove(ln); err != nil {
+			return fmt.Errorf("failed to remove leftover profile symlink: %w", err)
+		}
 	}
 
 	dir, err := files.GitDirPath(gitURL)
@@ -177,10 +184,17 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return err
 	}
 
+	fi, err := os.Lstat(files.ContainerRunnerBinary)
+	if err != nil || !fi.Mode().IsRegular() {
+		return fmt.Errorf("could not find docker or podman")
+	}
+
 	err = images.PullImageIfNotPresent(profile.Image)
 	if err != nil {
 		return fmt.Errorf("cannot pull profile image: %w", err)
 	}
+
+	go images.PreemptWorkloadImages(cfg)
 
 	if profile.Gpus != "" {
 		if !gpu.Supported() {
@@ -225,6 +239,7 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 				err = err1
 			}
 		}
+
 		wg.Done()
 	}()
 
