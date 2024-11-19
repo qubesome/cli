@@ -434,6 +434,21 @@ func createNewDisplay(profile *types.Profile, display string) error {
 	if strings.HasSuffix(files.ContainerRunnerBinary, "podman") {
 		dockerArgs = append(dockerArgs, "--userns=keep-id")
 	}
+	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		fmt.Println("WARN: running qubesome in Wayland (experimental)")
+		xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR")
+		if xdgRuntimeDir == "" {
+			uid := os.Getuid()
+			if uid < 1000 {
+				return fmt.Errorf("qubesome does not support running under privileged users")
+			}
+			xdgRuntimeDir = "/run/user/" + strconv.Itoa(uid)
+		}
+
+		// TODO: Investigate ways to avoid sharing /run/user/1000 on Wayland.
+		dockerArgs = append(dockerArgs, "-e XDG_RUNTIME_DIR")
+		dockerArgs = append(dockerArgs, "-v="+xdgRuntimeDir+":/run/user/1000")
+	}
 	if profile.HostAccess.Gpus != "" {
 		dockerArgs = append(dockerArgs, "--gpus", profile.HostAccess.Gpus)
 	}
