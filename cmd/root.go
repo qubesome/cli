@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/log"
@@ -16,6 +17,13 @@ var (
 	DefaultLogLevel             = "INFO"
 	ConsoleApp      command.App = newConsole()
 )
+
+func init() { //nolint
+	val := os.Getenv("QS_DEBUG")
+	if strings.EqualFold(val, "true") {
+		DefaultLogLevel = "DEBUG"
+	}
+}
 
 func Exec(args []string) {
 	if runtime.GOOS != "linux" {
