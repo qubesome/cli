@@ -3,12 +3,14 @@ name: tests
 on:
   push:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   tests:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout

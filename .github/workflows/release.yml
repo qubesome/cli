@@ -5,13 +5,16 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write # create GH releases
-  id-token: write # ephemeral keys (a.k.a. "keyless") signing
+permissions: {}
 
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # create GH releases
+      id-token: write # ephemeral keys (a.k.a. "keyless") signing
+      attestations: write # write GH attestations
 
     steps:
       - name: Checkout
@@ -24,8 +27,8 @@ jobs:
         with:
           go-version: stable
 
-      - uses: anchore/sbom-action/download-syft@v0.15.0
-      - uses: sigstore/cosign-installer@v3.4.0
+      - uses: anchore/sbom-action/download-syft@v0.17.7
+      - uses: sigstore/cosign-installer@v3.7.0
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -35,3 +38,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest release artefacts
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "dist/qubesome*"
