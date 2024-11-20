@@ -1,6 +1,11 @@
 GOLANGCI_VERSION ?= v1.62.0
 TOOLS_BIN := $(shell mkdir -p build/tools && realpath build/tools)
 
+ifneq ($(shell git status --porcelain --untracked-files=no),)
+	DIRTY = -dirty
+endif
+VERSION = $(shell git rev-parse --short HEAD)$(DIRTY)
+
 GOLANGCI = $(TOOLS_BIN)/golangci-lint-$(GOLANGCI_VERSION)
 $(GOLANGCI):
 	rm -f $(TOOLS_BIN)/golangci-lint*

@@ -7,7 +7,7 @@ builds:
     - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/qubesome/cli/cmd/version.version={{.Version}}
+      - -X github.com/qubesome/cli/cmd/cli.version={{.Version}}
     goos:
       - linux
     goarch:
