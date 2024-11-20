@@ -45,7 +45,7 @@ To transfer clipboards between profiles use `qubesome clipboard`.
 
 Check whether dependency requirements are met:
 ```
-qubesome deps show
+qubesome deps
 ```
 
 Use a local copy, and if not found fallback to a fresh clone:

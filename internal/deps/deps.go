@@ -2,14 +2,24 @@ package deps
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+
+	"text/tabwriter"
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
 )
 
+var (
+	red   = "\033[31m"
+	green = "\033[32m"
+	amber = "\033[33m"
+	reset = "\033[0m"
+)
+
 var deps map[string][]string = map[string][]string{
-	"clipboard": {
+	"clip": {
 		files.XclipBinary,
 		files.ShBinary,
 	},
@@ -22,7 +32,7 @@ var deps map[string][]string = map[string][]string{
 	"images": {
 		files.ContainerRunnerBinary,
 	},
-	"profiles": {
+	"start": {
 		files.ContainerRunnerBinary,
 		files.ShBinary,
 		files.XrandrBinary,
@@ -40,46 +50,42 @@ var optionalDeps map[string][]string = map[string][]string{
 	"images": {
 		files.FireCrackerBinary,
 	},
-	"profiles": {
+	"start": {
 		files.FireCrackerBinary,
 		files.DbusBinary,
 	},
 }
 
 func Run(_ ...command.Option[interface{}]) error {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 5, ' ', 0)
+	fmt.Fprintln(writer, "Command\tDependency\tStatus")
+	fmt.Fprintln(writer, "-------\t----------\t------")
+
 	for name, d := range deps {
-		fmt.Printf("%s: ", name)
-
-		if len(d) == 0 {
-			fmt.Println("OK")
-			continue
-		} else {
-			fmt.Println()
-		}
-
 		for _, dn := range d {
 			_, err := exec.LookPath(dn)
-			status := "OK"
+			status := green + "OK" + reset
 			if err != nil {
-				status = "NOT FOUND"
+				status = red + "NOT FOUND" + reset
 			}
 
-			fmt.Printf("- %s: %s\n", dn, status)
+			fmt.Fprintf(writer, "%s\t%s\t%s\n", name, dn, status)
 		}
 
 		if opt, ok := optionalDeps[name]; ok {
 			for _, dn := range opt {
 				_, err := exec.LookPath(dn)
-				status := "OK"
+				status := green + "OK" + reset
 				if err != nil {
-					status = "NOT FOUND (Optional)"
+					status = amber + "NOT FOUND (Optional)" + reset
 				}
 
-				fmt.Printf("- %s: %s\n", dn, status)
+				fmt.Fprintf(writer, "%s\t%s\t%s\n", name, dn, status)
 			}
 		}
-
-		fmt.Println()
 	}
+
+	writer.Flush()
+
 	return nil
 }
