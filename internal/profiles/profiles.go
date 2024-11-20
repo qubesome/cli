@@ -1,7 +1,6 @@
 package profiles
 
 import (
-	"bytes"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,6 +21,7 @@ import (
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/inception"
+	"github.com/qubesome/cli/internal/runners/util/container"
 	"github.com/qubesome/cli/internal/socket"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
@@ -43,7 +43,7 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	if o.GitURL != "" {
-		return StartFromGit(o.Profile, o.GitURL, o.Path, o.Local)
+		return StartFromGit(o.Runner, o.Profile, o.GitURL, o.Path, o.Local)
 	}
 
 	if o.Config == nil {
@@ -54,7 +54,7 @@ func Run(opts ...command.Option[Options]) error {
 		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
 	}
 
-	return Start(profile, o.Config)
+	return Start(o.Runner, profile, o.Config)
 }
 
 func validGitDir(path string) bool {
@@ -72,7 +72,7 @@ func validGitDir(path string) bool {
 	return err == nil
 }
 
-func StartFromGit(name, gitURL, path, local string) error {
+func StartFromGit(runner, name, gitURL, path, local string) error {
 	ln := files.ProfileConfig(name)
 
 	if _, err := os.Lstat(ln); err == nil {
@@ -167,10 +167,10 @@ func StartFromGit(name, gitURL, path, local string) error {
 
 	slog.Debug("start from git", "profile", p.Name, "p", path, "path", p.Path, "config", cfgPath)
 
-	return Start(p, cfg)
+	return Start(runner, p, cfg)
 }
 
-func Start(profile *types.Profile, cfg *types.Config) (err error) {
+func Start(runner string, profile *types.Profile, cfg *types.Config) (err error) {
 	if cfg == nil {
 		return fmt.Errorf("cannot start profile: config is nil")
 	}
@@ -184,17 +184,18 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return err
 	}
 
-	fi, err := os.Lstat(files.ContainerRunnerBinary)
+	binary := files.ContainerRunnerBinary(runner)
+	fi, err := os.Lstat(binary)
 	if err != nil || !fi.Mode().IsRegular() {
-		return fmt.Errorf("could not find docker or podman")
+		return fmt.Errorf("could not find container runner %q", binary)
 	}
 
-	err = images.PullImageIfNotPresent(profile.Image)
+	err = images.PullImageIfNotPresent(binary, profile.Image)
 	if err != nil {
 		return fmt.Errorf("cannot pull profile image: %w", err)
 	}
 
-	go images.PreemptWorkloadImages(cfg)
+	go images.PreemptWorkloadImages(binary, cfg)
 
 	if profile.Gpus != "" {
 		if !gpu.Supported() {
@@ -254,7 +255,7 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 		return err
 	}
 
-	err = createNewDisplay(profile, strconv.Itoa(int(profile.Display)))
+	err = createNewDisplay(binary, profile, strconv.Itoa(int(profile.Display)))
 	if err != nil {
 		return err
 	}
@@ -267,13 +268,13 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 
 		// If xhost access control is enabled, it may block qubesome
 		// execution. A tail sign is the profile container dying early.
-		if !containerRunning(name) {
+		if !container.Running(binary, name) {
 			msg := os.ExpandEnv("run xhost +SI:localhost:${USER} and try again")
 			dbus.NotifyOrLog("qubesome start error", msg)
 			return fmt.Errorf("failed to start profile: %s", msg)
 		}
 
-		err = startWindowManager(name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
+		err = startWindowManager(binary, name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
 		if err != nil {
 			return err
 		}
@@ -281,20 +282,6 @@ func Start(profile *types.Profile, cfg *types.Config) (err error) {
 
 	wg.Wait()
 	return nil
-}
-
-func containerRunning(name string) bool {
-	args := fmt.Sprintf("ps -q -f name=%s", name)
-	cmd := execabs.Command(files.ContainerRunnerBinary, //nolint:gosec
-		strings.Split(args, " ")...)
-
-	out, err := cmd.Output()
-	id := string(bytes.TrimSuffix(out, []byte("\n")))
-	if err != nil || id == "" {
-		return false
-	}
-
-	return true
 }
 
 func createMagicCookie(profile *types.Profile) error {
@@ -339,11 +326,11 @@ func createMagicCookie(profile *types.Profile) error {
 	return xauth.AuthPair(profile.Display, parent, server, client)
 }
 
-func startWindowManager(name, display, wm string) error {
+func startWindowManager(bin, name, display, wm string) error {
 	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s %s", display, wm)}
 
-	slog.Debug(files.ContainerRunnerBinary+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(files.ContainerRunnerBinary, args...) //nolint
+	slog.Debug(bin+" exec", "container-name", name, "args", args)
+	cmd := execabs.Command(bin, args...) 
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -352,7 +339,7 @@ func startWindowManager(name, display, wm string) error {
 	return nil
 }
 
-func createNewDisplay(profile *types.Profile, display string) error {
+func createNewDisplay(bin string, profile *types.Profile, display string) error {
 	command := "Xephyr"
 	res, err := resolution.Primary()
 	if err != nil {
@@ -454,7 +441,7 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"--cap-drop=ALL",
 	}
 
-	if strings.HasSuffix(files.ContainerRunnerBinary, "podman") {
+	if strings.HasSuffix(bin, "podman") {
 		dockerArgs = append(dockerArgs, "--userns=keep-id")
 	}
 	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
@@ -528,8 +515,8 @@ func createNewDisplay(profile *types.Profile, display string) error {
 		"INFO: For best experience use input grabber shortcuts:",
 		grabberShortcut())
 
-	slog.Debug("exec: docker", "args", dockerArgs)
-	cmd := execabs.Command(files.ContainerRunnerBinary, dockerArgs...) //nolint
+	slog.Debug("exec: "+bin, "args", dockerArgs)
+	cmd := execabs.Command(bin, dockerArgs...) 
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

@@ -24,16 +24,20 @@ var deps map[string][]string = map[string][]string{
 		files.ShBinary,
 	},
 	"run": {
-		files.ContainerRunnerBinary,
+		files.PodmanBinary,
+		files.DockerBinary,
 	},
 	"xdg-open": {
-		files.ContainerRunnerBinary,
+		files.PodmanBinary,
+		files.DockerBinary,
 	},
 	"images": {
-		files.ContainerRunnerBinary,
+		files.PodmanBinary,
+		files.DockerBinary,
 	},
 	"start": {
-		files.ContainerRunnerBinary,
+		files.PodmanBinary,
+		files.DockerBinary,
 		files.ShBinary,
 		files.XrandrBinary,
 	},

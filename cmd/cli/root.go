@@ -18,6 +18,7 @@ var (
 	workload      string
 	path          string
 	local         string
+	runner        string
 	debug         bool
 )
 

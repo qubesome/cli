@@ -18,6 +18,7 @@ import (
 	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/runners/docker"
 	"github.com/qubesome/cli/internal/runners/firecracker"
+	"github.com/qubesome/cli/internal/runners/podman"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"gopkg.in/yaml.v3"
@@ -66,7 +67,7 @@ func XdgRun(opts ...command.Option[Options]) error {
 		Config:  o.Config,
 	}
 
-	return q.HandleMime(in, o.ExtraArgs)
+	return q.HandleMime(in, o.ExtraArgs, o.Runner)
 }
 
 func Run(opts ...command.Option[Options]) error {
@@ -86,7 +87,8 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	wg := sync.WaitGroup{}
-	if err := images.Pull(o.Config, &wg); err != nil {
+	bin := files.ContainerRunnerBinary(o.Runner)
+	if err := images.Pull(bin, o.Config, &wg); err != nil {
 		return err
 	}
 	in := WorkloadInfo{
@@ -98,10 +100,10 @@ func Run(opts ...command.Option[Options]) error {
 
 	// Wait for any background operation that is in-flight.
 	defer wg.Wait()
-	return runner(in)
+	return runner(in, o.Runner)
 }
 
-func runner(in WorkloadInfo) error {
+func runner(in WorkloadInfo, runnerOverride string) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
@@ -214,9 +216,15 @@ func runner(in WorkloadInfo) error {
 
 	ew.Workload.Args = append(ew.Workload.Args, in.Args...)
 
+	if runnerOverride != "" {
+		ew.Workload.Runner = runnerOverride
+	}
+
 	switch ew.Workload.Runner {
 	case "firecracker":
 		return firecracker.Run(ew)
+	case "podman":
+		return podman.Run(ew)
 
 	default:
 		return docker.Run(ew)

@@ -24,6 +24,10 @@ func runCommand() *cli.Command {
 				Name:        "profile",
 				Destination: &targetProfile,
 			},
+			&cli.StringFlag{
+				Name:        "runner",
+				Destination: &runner,
+			},
 		},
 		Usage: "execute workloads",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -33,6 +37,7 @@ func runCommand() *cli.Command {
 				qubesome.WithWorkload(workload),
 				qubesome.WithProfile(targetProfile),
 				qubesome.WithConfig(cfg),
+				qubesome.WithRunner(runner),
 				qubesome.WithExtraArgs(cmd.Args().Slice()),
 			)
 		},

@@ -23,7 +23,8 @@ type configParams struct {
 func createRootFs(dir, img string) (string, error) {
 	slog.Info("creating root fs")
 	rootfs := filepath.Join(dir, "roofs.ext4")
-	cmd := execabs.Command(files.ContainerRunnerBinary, //nolint
+	bin := files.ContainerRunnerBinary("")
+	cmd := execabs.Command(bin, 
 		"run", "--rm", "--privileged",
 		"-v", "/tmp/:/tmp/",
 		img,

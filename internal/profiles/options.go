@@ -10,6 +10,7 @@ type Options struct {
 	Path    string
 	Local   string
 	Profile string
+	Runner  string
 	Config  *types.Config
 }
 
@@ -39,5 +40,11 @@ func WithProfile(profile string) command.Option[Options] {
 func WithConfig(config *types.Config) command.Option[Options] {
 	return func(o *Options) {
 		o.Config = config
+	}
+}
+
+func WithRunner(runner string) command.Option[Options] {
+	return func(o *Options) {
+		o.Runner = runner
 	}
 }
