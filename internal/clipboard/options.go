@@ -7,6 +7,7 @@ import (
 
 type Options struct {
 	FromHost      bool
+	ToHost        bool
 	SourceProfile *types.Profile
 	TargetProfile *types.Profile
 	ContentType   string
@@ -29,8 +30,15 @@ func WithTargetProfile(p *types.Profile) command.Option[Options] {
 		o.TargetProfile = p
 	}
 }
+
 func WithContentType(t string) command.Option[Options] {
 	return func(o *Options) {
 		o.ContentType = t
+	}
+}
+
+func WithTargetHost() command.Option[Options] {
+	return func(o *Options) {
+		o.ToHost = true
 	}
 }

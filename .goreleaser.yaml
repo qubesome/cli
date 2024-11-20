@@ -2,12 +2,12 @@ project_name: qubesome
 builds:
   - id: qubesome
     binary: qubesome
-    main: main.go
+    main: cmd/qubesome/main.go
     flags:
     - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/qubesome/cli/cmd/version.version={{.Version}}
+      - -X github.com/qubesome/cli/cmd/cli.version={{.Version}}
     goos:
       - linux
     goarch:

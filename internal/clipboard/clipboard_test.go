@@ -30,6 +30,11 @@ func TestCopy(t *testing.T) {
 			target:  "foo",
 			wantErr: "unsupported copy type",
 		},
+		{
+			name:    "no target",
+			from:    &types.Profile{Display: 0},
+			wantErr: "target profile cannot be nil when ToHost is false",
+		},
 	}
 
 	for _, tc := range tests {
