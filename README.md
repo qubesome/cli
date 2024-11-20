@@ -55,14 +55,19 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles -local <local_gi
 
 Copy clipboard from the host to the i3 profile:
 ```
-qubesome clipboard --from-host i3
+qubesome clip from-host i3
+```
+
+Copy clipboard from the i3 profile to the host:
+```
+qubesome clip to-host i3
 ```
 
 #### Available Commands
 
 - `qubesome start`: Start a qubesome environment for a given profile.
 - `qubesome run`: Run qubesome workloads.
-- `qubesome clipboard`: Manage the images within your workloads.
+- `qubesome clip`: Manage the images within your workloads.
 - `qubesome images`: Manage the images within your workloads.
 - `qubesome xdg`: Handle xdg-open based via qubesome.
 

@@ -28,7 +28,8 @@ func clipboardCommand() *cli.Command {
 		Usage:   "enable sharing of clipboard across profiles and the host",
 		Commands: []*cli.Command{
 			{
-				Name: "from-host",
+				Name:  "from-host",
+				Usage: "copies the clipboard contents from the host to a profile",
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:        "target_profile",
@@ -64,7 +65,8 @@ func clipboardCommand() *cli.Command {
 				},
 			},
 			{
-				Name: "from-profile",
+				Name:  "from-profile",
+				Usage: "copies the clipboard contents between profiles",
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:        "source_profile",
@@ -98,6 +100,43 @@ func clipboardCommand() *cli.Command {
 					opts := []command.Option[clipboard.Options]{
 						clipboard.WithSourceProfile(source),
 						clipboard.WithTargetProfile(target),
+					}
+
+					if typ := c.String("type"); typ != "" {
+						fmt.Println(typ)
+						opts = append(opts, clipboard.WithContentType(typ))
+					}
+
+					return clipboard.Run(
+						opts...,
+					)
+				},
+			},
+			{
+				Name:  "to-host",
+				Usage: "copies the clipboard contents from a profile to the host",
+				Arguments: []cli.Argument{
+					&cli.StringArg{
+						Name:        "source_profile",
+						Min:         1,
+						Max:         1,
+						Destination: &sourceProfile,
+					},
+				},
+				Flags: []cli.Flag{
+					clipType,
+				},
+				Action: func(ctx context.Context, c *cli.Command) error {
+					cfg := profileConfigOrDefault(sourceProfile)
+
+					target, ok := cfg.Profiles[sourceProfile]
+					if !ok {
+						return fmt.Errorf("no active profile %q found", sourceProfile)
+					}
+
+					opts := []command.Option[clipboard.Options]{
+						clipboard.WithSourceProfile(target),
+						clipboard.WithTargetHost(),
 					}
 
 					if typ := c.String("type"); typ != "" {
