@@ -32,6 +32,7 @@ func RootCommand() *cli.Command {
 			xdgCommand(),
 			depsCommand(),
 			versionCommand(),
+			completionCommand(),
 		},
 	}
 
