@@ -24,7 +24,7 @@ go install github.com/qubesome/cli/cmd/qubesome@latest
 
 ##### For Tumbleweed users
 ```
-zypper install qubesome
+zypper install -y qubesome
 ```
 
 #### Start Profile
@@ -45,7 +45,7 @@ To transfer clipboards between profiles use `qubesome clipboard`.
 
 Check whether dependency requirements are met:
 ```
-qubesome deps show
+qubesome deps
 ```
 
 Use a local copy, and if not found fallback to a fresh clone:
@@ -129,8 +129,8 @@ Ability to control network/internet access for each workload, and run the window
 manager without internet access. Auditing access violations, for visibility of when
 workloads are trying to access things they should not.
 
-#### Is Rootless docker support?
-Not at this point, potentially this could be introduced in the future.
+#### Is rootless supported?
+Yes, but only with podman.
 
 ### Why do I need to run xhost +SI:localuser:${USER}?
 Some Linux distros (e.g. Tumbleweed) have X11 access controls enabled

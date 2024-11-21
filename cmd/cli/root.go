@@ -18,6 +18,7 @@ var (
 	workload      string
 	path          string
 	local         string
+	runner        string
 	debug         bool
 )
 
@@ -31,6 +32,7 @@ func RootCommand() *cli.Command {
 			xdgCommand(),
 			depsCommand(),
 			versionCommand(),
+			completionCommand(),
 		},
 	}
 

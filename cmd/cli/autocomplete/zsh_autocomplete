@@ -1,0 +1,23 @@
+#compdef qubesome
+compdef _qubesome qubesome
+
+_qubesome() {
+	local -a opts
+	local cur
+	cur=${words[-1]}
+	if [[ "$cur" == "-"* ]]; then
+		opts=("${(@f)$(${words[@]:0:#words[@]-1} ${cur} --generate-shell-completion)}")
+	else
+		opts=("${(@f)$(${words[@]:0:#words[@]-1} --generate-shell-completion)}")
+	fi
+
+	if [[ "${opts[1]}" != "" ]]; then
+		_describe 'values' opts
+	else
+		_files
+	fi
+}
+
+if [ "$funcstack[1]" = "_qubesome" ]; then
+	_qubesome
+fi

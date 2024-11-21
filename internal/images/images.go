@@ -20,17 +20,19 @@ func Run(opts ...command.Option[Options]) error {
 		opt(o)
 	}
 
+	bin := files.ContainerRunnerBinary(o.Runner)
+
 	slog.Debug("images.Run", "options", o)
-	return PullAll(o.Config)
+	return PullAll(bin, o.Config)
 }
 
-func Pull(cfg *types.Config, wg *sync.WaitGroup) error {
+func Pull(bin string, cfg *types.Config, wg *sync.WaitGroup) error {
 	switch cfg.WorkloadPullMode {
 	case types.Background:
 		wg.Add(1)
 		go func() {
 			if exp, _ := pullExpired(); exp {
-				err := PullAll(cfg)
+				err := PullAll(bin, cfg)
 				if err != nil {
 					slog.Error("error pulling images", "error", err)
 				}
@@ -74,7 +76,7 @@ func pullExpired() (bool, error) {
 	return false, nil
 }
 
-func PreemptWorkloadImages(cfg *types.Config) {
+func PreemptWorkloadImages(bin string, cfg *types.Config) {
 	slog.Debug("Check need for the preemptive pull of workload images")
 	fn := files.ImagesLastCheckedPath()
 
@@ -82,12 +84,12 @@ func PreemptWorkloadImages(cfg *types.Config) {
 	if err != nil && os.IsNotExist(err) {
 		fmt.Println("INFO: Preemptively pulling workload images. This only happens on first execution and aims to avoid delays opening apps.")
 
-		_ = PullAll(cfg)
+		_ = PullAll(bin, cfg)
 		_ = os.WriteFile(fn, []byte{}, files.FileMode)
 	}
 }
 
-func PullAll(cfg *types.Config) error {
+func PullAll(bin string, cfg *types.Config) error {
 	wf, err := cfg.WorkloadFiles()
 	if err != nil {
 		return fmt.Errorf("cannot get workloads files: %w", err)
@@ -122,7 +124,7 @@ func PullAll(cfg *types.Config) error {
 		if _, ok := seen[w.Image]; !ok {
 			seen[w.Image] = struct{}{}
 
-			err = PullImage(w.Image)
+			err = PullImage(bin, w.Image)
 			if err != nil {
 				slog.Error("cannot pull image %q: %w", w.Image, err)
 			}
@@ -132,22 +134,22 @@ func PullAll(cfg *types.Config) error {
 	return nil
 }
 
-func PullImage(image string) error {
+func PullImage(bin, image string) error {
 	slog.Info("pulling container image", "image", image)
-	cmd := execabs.Command(files.ContainerRunnerBinary, "pull", image) //nolint
+	cmd := execabs.Command(bin, "pull", image)
 	cmd.Stdout = os.Stdout
 
 	return cmd.Run()
 }
 
-func PullImageIfNotPresent(image string) error {
+func PullImageIfNotPresent(bin, image string) error {
 	slog.Debug("checking if container image is present", "image", image)
-	cmd := execabs.Command(files.ContainerRunnerBinary, "images", "-q", image) //nolint
+	cmd := execabs.Command(bin, "images", "-q", image)
 
 	out, err := cmd.Output()
 	if len(out) > 0 && err == nil {
 		return nil
 	}
 
-	return PullImage(image)
+	return PullImage(bin, image)
 }

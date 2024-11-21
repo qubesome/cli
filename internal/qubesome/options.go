@@ -11,6 +11,7 @@ type Options struct {
 	Workload  string
 	Config    *types.Config
 	Profile   string
+	Runner    string
 	ExtraArgs []string
 }
 
@@ -23,6 +24,12 @@ func WithExtraArgs(args []string) command.Option[Options] {
 func WithProfile(profile string) command.Option[Options] {
 	return func(o *Options) {
 		o.Profile = profile
+	}
+}
+
+func WithRunner(runner string) command.Option[Options] {
+	return func(o *Options) {
+		o.Runner = runner
 	}
 }
 

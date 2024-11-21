@@ -143,13 +143,13 @@ func Test_HandleMime(t *testing.T) {
 			called := 0
 
 			q := New()
-			q.runner = func(wi WorkloadInfo) error {
+			q.runner = func(wi WorkloadInfo, _ string) error {
 				actual = &wi
 				called++
 				return nil
 			}
 
-			err := q.HandleMime(&WorkloadInfo{Config: tc.cfg, Profile: tc.profile}, tc.args)
+			err := q.HandleMime(&WorkloadInfo{Config: tc.cfg, Profile: tc.profile}, tc.args, "")
 
 			if tc.errContains == "" {
 				assert.Nil(err)

@@ -27,6 +27,10 @@ func startCommand() *cli.Command {
 				Usage:       "local is the local path for a git repository. This is to be used in combination with --git.",
 				Destination: &local,
 			},
+			&cli.StringFlag{
+				Name:        "runner",
+				Destination: &runner,
+			},
 		},
 		Arguments: []cli.Argument{
 			&cli.StringArg{
@@ -46,6 +50,7 @@ func startCommand() *cli.Command {
 				profiles.WithGitURL(gitURL),
 				profiles.WithPath(path),
 				profiles.WithLocal(local),
+				profiles.WithRunner(runner),
 			)
 		},
 	}

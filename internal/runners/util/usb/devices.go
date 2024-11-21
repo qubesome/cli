@@ -1,4 +1,4 @@
-package docker
+package usb
 
 import (
 	"bufio"
@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func namedDevices(names []string) ([]string, error) {
+func NamedDevices(names []string) ([]string, error) {
 	devs := []string{}
 
 	products, err := filepath.Glob("/sys/bus/usb/devices/*/product")

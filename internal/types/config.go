@@ -17,7 +17,7 @@ var (
 	nameRegex         = regexp.MustCompile(`^[a-zA-Z0-9\-]+$`)
 	imageRegex        = regexp.MustCompile(`^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+\/)?(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+(?:[:/][a-z0-9]+(?:[._-][a-z0-9]+)*)+$`)
 	ipRegex           = regexp.MustCompile(`^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
-	runnerRegex       = regexp.MustCompile(`^(docker|firecracker)$`)
+	runnerRegex       = regexp.MustCompile(`^(docker|podman|firecracker)$`)
 	externalPathRegex = regexp.MustCompile(`^[a-zA-Z0-9\-]+:/[^:]+:/[^:]+$`)
 	pathRegex         = regexp.MustCompile(`^(\${[a-zA-Z0-9\-]+}){0,1}/[^:]+:/[^:]+(:ro){0,1}$`)
 )
