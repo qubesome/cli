@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+option go_package = "github.com/qubesome/cli/pkg/inception/proto";
+
+package qubesome;
+
+service QubesomeHost {
+  rpc XdgOpen (XdgOpenRequest) returns (XdgOpenReply) {}
+  rpc RunWorkload (RunWorkloadRequest) returns (RunWorkloadReply) {}
+}
+
+message XdgOpenRequest {
+  string url = 1;
+}
+
+message XdgOpenReply {
+}
+
+message RunWorkloadRequest {
+  string workload = 1;
+  string args = 2;
+}
+
+message RunWorkloadReply {
+}

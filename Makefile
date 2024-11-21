@@ -2,6 +2,8 @@ include hack/base.mk
 
 TARGET_BIN ?= build/bin/qubesome
 
+PROTO = pkg/inception/proto
+
 GO_TAGS = -tags 'netgo,osusergo,static_build'
 LDFLAGS = -ldflags '-extldflags -static -s -w -X \
 	github.com/qubesome/cli/cmd/cli.version=$(VERSION)'
@@ -18,7 +20,13 @@ build: ## build qubesome to the path set by TARGET_BIN.
 test: ## run golang tests.
 	go test -race -parallel 10 ./...
 
-verify: verify-lint verify-dirty ## Run verification checks.
+verify: generate verify-lint verify-dirty ## Run verification checks.
 
 verify-lint: $(GOLANGCI)
 	$(GOLANGCI) run
+
+generate: $(PROTOC)
+	rm $(PROTO)/*.pb.go || true
+	PATH=$(TOOLS_BIN) $(PROTOC) --go_out=. --go_opt=paths=source_relative \
+    	--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		$(PROTO)/host.proto
