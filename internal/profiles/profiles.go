@@ -330,7 +330,7 @@ func startWindowManager(bin, name, display, wm string) error {
 	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s %s", display, wm)}
 
 	slog.Debug(bin+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(bin, args...) 
+	cmd := execabs.Command(bin, args...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -516,7 +516,7 @@ func createNewDisplay(bin string, profile *types.Profile, display string) error 
 		grabberShortcut())
 
 	slog.Debug("exec: "+bin, "args", dockerArgs)
-	cmd := execabs.Command(bin, dockerArgs...) 
+	cmd := execabs.Command(bin, dockerArgs...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

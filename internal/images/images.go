@@ -136,7 +136,7 @@ func PullAll(bin string, cfg *types.Config) error {
 
 func PullImage(bin, image string) error {
 	slog.Info("pulling container image", "image", image)
-	cmd := execabs.Command(bin, "pull", image) 
+	cmd := execabs.Command(bin, "pull", image)
 	cmd.Stdout = os.Stdout
 
 	return cmd.Run()
@@ -144,7 +144,7 @@ func PullImage(bin, image string) error {
 
 func PullImageIfNotPresent(bin, image string) error {
 	slog.Debug("checking if container image is present", "image", image)
-	cmd := execabs.Command(bin, "images", "-q", image) 
+	cmd := execabs.Command(bin, "images", "-q", image)
 
 	out, err := cmd.Output()
 	if len(out) > 0 && err == nil {
