@@ -2,6 +2,7 @@ package env
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 )
 
@@ -16,6 +17,7 @@ var mapping = map[string]string{
 }
 
 func Update(k, v string) error {
+	slog.Debug("setting env", k, v)
 	if _, ok := mapping[k]; ok {
 		mapping[k] = v
 		return nil
