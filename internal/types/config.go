@@ -107,7 +107,7 @@ type Profile struct {
 	// config is being consumed. When sourcing from git, it descends
 	// from the git repository directory.
 	Path   string `yaml:"path"`
-	Runner string // TODO: Better name runner
+	Runner string `yaml:"runner"`
 
 	// HostAccess defines all the access request which are allowed for
 	// its workloads.

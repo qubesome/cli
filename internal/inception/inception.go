@@ -1,6 +1,7 @@
 package inception
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/qubesome/cli/internal/files"
@@ -9,5 +10,8 @@ import (
 func Inside() bool {
 	path := files.InProfileSocketPath()
 	_, err := os.Stat(path)
-	return (err == nil)
+	inside := (err == nil)
+
+	slog.Debug("inception check", "inside", inside)
+	return inside
 }

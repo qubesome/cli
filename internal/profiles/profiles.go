@@ -157,6 +157,10 @@ func StartFromGit(runner, name, gitURL, path, local string) error {
 		return fmt.Errorf("cannot file profile %q in config %q", name, cfgPath)
 	}
 
+	if p.Runner != "" {
+		runner = p.Runner
+	}
+
 	// When sourcing from git, ensure profile path is relative to the git repository.
 	pp, err := securejoin.SecureJoin(filepath.Dir(cfgPath), p.Path)
 	if err != nil {
@@ -462,6 +466,9 @@ func createNewDisplay(bin string, profile *types.Profile, display string) error 
 		dockerArgs = append(dockerArgs, "-v="+xdgRuntimeDir+":/run/user/1000")
 	}
 	if profile.HostAccess.Gpus != "" {
+		if strings.HasSuffix(bin, "podman") {
+			dockerArgs = append(dockerArgs, "--runtime=nvidia.com/gpu=all")
+		}
 		dockerArgs = append(dockerArgs, "--gpus", profile.HostAccess.Gpus)
 	}
 
