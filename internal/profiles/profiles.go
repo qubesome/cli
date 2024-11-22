@@ -45,15 +45,25 @@ func Run(opts ...command.Option[Options]) error {
 		return StartFromGit(o.Runner, o.Profile, o.GitURL, o.Path, o.Local)
 	}
 
-	if o.Config == nil {
+	path := filepath.Join(o.Local, o.Path, "qubesome.config")
+	if _, err := os.Stat(path); err != nil {
+		return err
+	}
+	cfg, err := types.LoadConfig(path)
+	if err != nil {
+		return err
+	}
+	cfg.RootDir = filepath.Dir(path)
+
+	if cfg == nil {
 		return fmt.Errorf("cannot start profile: nil config")
 	}
-	profile, ok := o.Config.Profile(o.Profile)
+	profile, ok := cfg.Profile(o.Profile)
 	if !ok {
 		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
 	}
 
-	return Start(o.Runner, profile, o.Config)
+	return Start(o.Runner, profile, cfg)
 }
 
 func validGitDir(path string) bool {

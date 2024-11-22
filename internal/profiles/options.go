@@ -2,7 +2,6 @@ package profiles
 
 import (
 	"github.com/qubesome/cli/internal/command"
-	"github.com/qubesome/cli/internal/types"
 )
 
 type Options struct {
@@ -11,7 +10,6 @@ type Options struct {
 	Local   string
 	Profile string
 	Runner  string
-	Config  *types.Config
 }
 
 func WithGitURL(gitURL string) command.Option[Options] {
@@ -35,11 +33,6 @@ func WithLocal(local string) command.Option[Options] {
 func WithProfile(profile string) command.Option[Options] {
 	return func(o *Options) {
 		o.Profile = profile
-	}
-}
-func WithConfig(config *types.Config) command.Option[Options] {
-	return func(o *Options) {
-		o.Config = config
 	}
 }
 
