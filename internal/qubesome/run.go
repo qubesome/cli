@@ -1,6 +1,7 @@
 package qubesome
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -24,29 +25,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func init() { //nolint
-	inception.Add("run", runCmd)
-	inception.Add("xdg-open", xdgCmd)
-}
-
-func runCmd(cfg *types.Config, p *types.Profile, args []string) error {
-	opts := []command.Option[Options]{
-		WithConfig(cfg),
-		WithProfile(p.Name),
-		WithWorkload(args[0]),
-	}
-
-	if len(args) > 0 {
-		opts = append(opts, WithExtraArgs(args[1:]))
-	}
-
-	return Run(opts...)
-}
-
-func xdgCmd(cfg *types.Config, p *types.Profile, args []string) error {
-	return XdgRun(WithConfig(cfg), WithProfile(p.Name), WithExtraArgs(args))
-}
-
 func XdgRun(opts ...command.Option[Options]) error {
 	o := &Options{}
 	for _, opt := range opts {
@@ -58,7 +36,8 @@ func XdgRun(opts ...command.Option[Options]) error {
 	}
 
 	if inception.Inside() {
-		return inception.RunOnHost("xdg-open", o.ExtraArgs)
+		client := inception.NewClient(files.InProfileSocketPath())
+		return client.XdgOpen(context.TODO(), o.ExtraArgs[0])
 	}
 
 	q := New()
@@ -77,9 +56,8 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	if inception.Inside() {
-		args := []string{o.Workload}
-		args = append(args, o.ExtraArgs...)
-		return inception.RunOnHost("run", args)
+		client := inception.NewClient(files.InProfileSocketPath())
+		return client.Run(context.TODO(), o.Workload, o.ExtraArgs)
 	}
 
 	if err := o.Validate(); err != nil {
@@ -108,7 +86,7 @@ func runner(in WorkloadInfo, runnerOverride string) error {
 		return err
 	}
 
-	profile, exists := in.Config.Profiles[in.Profile]
+	profile, exists := in.Config.Profile(in.Profile)
 	if !exists {
 		return fmt.Errorf("profile %q does not exist", in.Profile)
 	}

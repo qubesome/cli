@@ -20,14 +20,13 @@ import (
 	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
-	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/runners/util/container"
-	"github.com/qubesome/cli/internal/socket"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/gpu"
 	"github.com/qubesome/cli/internal/util/resolution"
 	"github.com/qubesome/cli/internal/util/xauth"
+	"github.com/qubesome/cli/pkg/inception"
 	"golang.org/x/sys/execabs"
 )
 
@@ -49,7 +48,7 @@ func Run(opts ...command.Option[Options]) error {
 	if o.Config == nil {
 		return fmt.Errorf("cannot start profile: nil config")
 	}
-	profile, ok := o.Config.Profiles[o.Profile]
+	profile, ok := o.Config.Profile(o.Profile)
 	if !ok {
 		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
 	}
@@ -153,7 +152,7 @@ func StartFromGit(runner, name, gitURL, path, local string) error {
 		_ = os.Remove(ln)
 	}()
 
-	p, ok := cfg.Profiles[name]
+	p, ok := cfg.Profile(name)
 	if !ok {
 		return fmt.Errorf("cannot file profile %q in config %q", name, cfgPath)
 	}
@@ -232,22 +231,26 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
+	sockPath, err := files.SocketPath(profile.Name)
+	if err != nil {
+		return err
+	}
+
 	go func() {
-		err1 := socket.Listen(profile, cfg, inception.HandleConnection)
+		defer wg.Done()
+
+		server := inception.NewServer(profile, cfg)
+		err1 := server.Listen(sockPath)
 		if err1 != nil {
 			slog.Debug("error listening to socket", "error", err1)
 			if err == nil {
 				err = err1
 			}
 		}
-
-		wg.Done()
 	}()
 
 	defer func() {
-		if fn, err := files.SocketPath(profile.Name); err != nil {
-			_ = os.Remove(fn)
-		}
+		_ = os.Remove(sockPath)
 	}()
 
 	err = createMagicCookie(profile)
@@ -445,7 +448,6 @@ func createNewDisplay(bin string, profile *types.Profile, display string) error 
 		dockerArgs = append(dockerArgs, "--userns=keep-id")
 	}
 	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		fmt.Println("WARN: running qubesome in Wayland (experimental)")
 		xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR")
 		if xdgRuntimeDir == "" {
 			uid := os.Getuid()

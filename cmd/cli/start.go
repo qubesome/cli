@@ -11,6 +11,12 @@ func startCommand() *cli.Command {
 	cmd := &cli.Command{
 		Name:    "start",
 		Aliases: []string{"s"},
+		Usage:   "start qubesome profiles",
+		Description: `Examples:
+
+qubesome start -git https://github.com/qubesome/sample-dotfiles awesome
+qubesome start -git https://github.com/qubesome/sample-dotfiles i3
+`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "git",
@@ -40,7 +46,6 @@ func startCommand() *cli.Command {
 				Destination: &targetProfile,
 			},
 		},
-		Usage: "start qubesome profiles",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			cfg := profileConfigOrDefault(targetProfile)
 

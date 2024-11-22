@@ -30,10 +30,17 @@ func clipboardCommand() *cli.Command {
 			{
 				Name:  "from-host",
 				Usage: "copies the clipboard contents from the host to a profile",
+				Description: `Examples:
+
+qubesome clip from-host                        - Copy clipboard contents from host to the active profile
+qubesome clip from-host -type image/png        - Copy image from host clipboard to the active profile
+qubesome clip from-host -profile <name>        - Copy clipboard contents from host to a specific profile
+`,
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:        "target_profile",
-						Min:         1,
+						UsageText:   "Required when multiple profiles are active",
+						Min:         0,
 						Max:         1,
 						Destination: &targetProfile,
 					},
@@ -42,11 +49,9 @@ func clipboardCommand() *cli.Command {
 					clipType,
 				},
 				Action: func(ctx context.Context, c *cli.Command) error {
-					cfg := profileConfigOrDefault(targetProfile)
-
-					target, ok := cfg.Profiles[targetProfile]
-					if !ok {
-						return fmt.Errorf("no active profile %q found", targetProfile)
+					target, err := profileOrActive(targetProfile)
+					if err != nil {
+						return err
 					}
 
 					opts := []command.Option[clipboard.Options]{
@@ -55,7 +60,6 @@ func clipboardCommand() *cli.Command {
 					}
 
 					if typ := c.String("type"); typ != "" {
-						fmt.Println(typ)
 						opts = append(opts, clipboard.WithContentType(typ))
 					}
 
@@ -87,12 +91,12 @@ func clipboardCommand() *cli.Command {
 				Action: func(ctx context.Context, c *cli.Command) error {
 					cfg := profileConfigOrDefault(targetProfile)
 
-					source, ok := cfg.Profiles[sourceProfile]
+					source, ok := cfg.Profile(sourceProfile)
 					if !ok {
 						return fmt.Errorf("no active profile %q found", sourceProfile)
 					}
 
-					target, ok := cfg.Profiles[targetProfile]
+					target, ok := cfg.Profile(targetProfile)
 					if !ok {
 						return fmt.Errorf("no active profile %q found", targetProfile)
 					}
@@ -103,7 +107,6 @@ func clipboardCommand() *cli.Command {
 					}
 
 					if typ := c.String("type"); typ != "" {
-						fmt.Println(typ)
 						opts = append(opts, clipboard.WithContentType(typ))
 					}
 
@@ -115,10 +118,17 @@ func clipboardCommand() *cli.Command {
 			{
 				Name:  "to-host",
 				Usage: "copies the clipboard contents from a profile to the host",
+				Description: `Examples:
+
+qubesome clip to-host                        - Copy clipboard contents from the active profile to the host
+qubesome clip to-host -type image/png        - Copy image from the active profile clipboard to the host
+qubesome clip to-host -profile <name>        - Copy clipboard contents from a specific profile to the host
+				`,
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:        "source_profile",
-						Min:         1,
+						UsageText:   "Required when multiple profiles are active",
+						Min:         0,
 						Max:         1,
 						Destination: &sourceProfile,
 					},
@@ -127,11 +137,9 @@ func clipboardCommand() *cli.Command {
 					clipType,
 				},
 				Action: func(ctx context.Context, c *cli.Command) error {
-					cfg := profileConfigOrDefault(sourceProfile)
-
-					target, ok := cfg.Profiles[sourceProfile]
-					if !ok {
-						return fmt.Errorf("no active profile %q found", sourceProfile)
+					target, err := profileOrActive(sourceProfile)
+					if err != nil {
+						return err
 					}
 
 					opts := []command.Option[clipboard.Options]{

@@ -2,8 +2,12 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/log"
@@ -19,6 +23,7 @@ var (
 	path          string
 	local         string
 	runner        string
+	commandName   string
 	debug         bool
 )
 
@@ -33,7 +38,15 @@ func RootCommand() *cli.Command {
 			depsCommand(),
 			versionCommand(),
 			completionCommand(),
+			hostRunCommand(),
 		},
+	}
+
+	cmd.Before = func(ctx context.Context, c *cli.Command) (context.Context, error) {
+		if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+			fmt.Println("\033[33mWARN: Running qubesome in Wayland is experimental. Some features may not work as expected.\033[0m")
+		}
+		return ctx, nil
 	}
 
 	cmd.Flags = append(cmd.Flags, &cli.BoolFlag{
@@ -70,18 +83,76 @@ func config(path string) *types.Config {
 }
 
 func profileConfigOrDefault(profile string) *types.Config {
-	path := files.ProfileConfig(profile)
-	target, err := os.Readlink(path)
+	if profile != "" {
+		// Try to load the profile specific config.
+		path := files.ProfileConfig(profile)
+		target, err := os.Readlink(path)
 
-	var c *types.Config
-	if err == nil {
-		c = config(target)
+		if err == nil {
+			c := config(target)
+			slog.Debug("using profile config", "path", path, "config", c)
+			if c != nil {
+				return c
+			}
+		}
 	}
 
-	if c != nil {
+	cfgs := activeConfigs()
+	if len(cfgs) == 1 {
+		c := config(cfgs[0])
+		slog.Debug("using active profile config", "path", cfgs[0], "config", c)
+		if c != nil && len(c.Profiles) > 0 {
+			return c
+		}
+	}
+
+	// Try to load user-level qubesome config.
+	path = files.QubesomeConfig()
+	c := config(path)
+	slog.Debug("using user-level config", "path", path, "config", c)
+	if c != nil && len(c.Profiles) > 0 {
 		return c
 	}
 
-	path = files.QubesomeConfig()
-	return config(path)
+	return nil
+}
+
+func profileOrActive(profile string) (*types.Profile, error) {
+	if profile != "" {
+		cfg := profileConfigOrDefault(profile)
+		prof, ok := cfg.Profile(profile)
+		if !ok {
+			return nil, fmt.Errorf("profile %q not active", profile)
+		}
+		return prof, nil
+	}
+
+	cfgs := activeConfigs()
+	if len(cfgs) > 1 {
+		return nil, errors.New("multiple profiles active: pick one with -profile")
+	}
+	if len(cfgs) == 0 {
+		return nil, errors.New("no active profile found: start one with qubesome start")
+	}
+
+	f := cfgs[0]
+	name := strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))
+	return profileOrActive(name)
+}
+
+func activeConfigs() []string {
+	var active []string
+
+	root := files.RunUserQubesome()
+	entries, err := os.ReadDir(root)
+	if err == nil {
+		for _, entry := range entries {
+			fn := entry.Name()
+			if filepath.Ext(fn) == ".config" {
+				active = append(active, filepath.Join(root, fn))
+			}
+		}
+	}
+
+	return active
 }

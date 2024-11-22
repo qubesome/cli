@@ -11,6 +11,12 @@ func runCommand() *cli.Command {
 	cmd := &cli.Command{
 		Name:    "run",
 		Aliases: []string{"r"},
+		Usage:   "execute workloads",
+		Description: `Examples:
+
+qubesome run chrome                        - Run the chrome workload on the active profile
+qubesome run -profile <profile> chrome     - Run the chrome workload on a specific profile
+`,
 		Arguments: []cli.Argument{
 			&cli.StringArg{
 				Name:        "workload",
@@ -29,13 +35,17 @@ func runCommand() *cli.Command {
 				Destination: &runner,
 			},
 		},
-		Usage: "execute workloads",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg := profileConfigOrDefault(targetProfile)
+			prof, err := profileOrActive(targetProfile)
+			if err != nil {
+				return err
+			}
+
+			cfg := profileConfigOrDefault(prof.Name)
 
 			return qubesome.Run(
 				qubesome.WithWorkload(workload),
-				qubesome.WithProfile(targetProfile),
+				qubesome.WithProfile(prof.Name),
 				qubesome.WithConfig(cfg),
 				qubesome.WithRunner(runner),
 				qubesome.WithExtraArgs(cmd.Args().Slice()),

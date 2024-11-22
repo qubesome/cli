@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,7 +26,7 @@ var (
 type Config struct {
 	Logging Logging `yaml:"logging"`
 
-	Profiles map[string]*Profile `yaml:"profiles"`
+	Profiles map[string]Profile `yaml:"profiles"`
 
 	// MimeHandler configures mime types and the specific workloads to handle them.
 	MimeHandlers map[string]MimeHandler `yaml:"mimeHandlers"`
@@ -38,33 +39,51 @@ type Config struct {
 	RootDir string
 }
 
+func (c *Config) Profile(name string) (*Profile, bool) {
+	if c == nil || len(c.Profiles) == 0 {
+		return nil, false
+	}
+	p, ok := c.Profiles[name]
+	return &p, ok
+}
+
 // WorkloadFiles returns a list of workload file paths.
 func (c *Config) WorkloadFiles() ([]string, error) {
 	var matches []string
 	root := c.RootDir
-	if root == "" {
-		root = files.QubesomeConfig()
+	slog.Debug("workload files lookup", "root", root)
+
+	for _, profile := range c.Profiles {
+		if c.RootDir == files.RunUserQubesome() {
+			ln := filepath.Join(files.RunUserQubesome(), profile.Name+".config")
+			target, err := os.Readlink(ln)
+			if err != nil {
+				slog.Debug("fail to Readlink", "err", err)
+				continue
+			}
+			root = filepath.Dir(target)
+		}
+
+		wd := filepath.Join(root, profile.Name, "workloads")
+		we, err := os.ReadDir(wd)
+		if err != nil {
+			slog.Debug("fail to ReadDir", "err", err, "wd", wd)
+			continue
+		}
+
+		for _, w := range we {
+			if w.IsDir() {
+				continue
+			}
+
+			path := filepath.Join(wd, w.Name())
+			if filepath.Ext(w.Name()) == ".yaml" {
+				matches = append(matches, path)
+			}
+		}
 	}
-	pattern := fmt.Sprintf("^%s/.*/workloads/.*.yaml$", root)
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		matched, err := regexp.MatchString(pattern, path)
-		if err != nil {
-			return err
-		}
-		if matched {
-			matches = append(matches, path)
-		}
-		return nil
-	})
-	return matches, err
+	return matches, nil
 }
 
 type Logging struct {
@@ -87,7 +106,7 @@ type Profile struct {
 	// Note that this Path descends from the dir where the qubesome
 	// config is being consumed. When sourcing from git, it descends
 	// from the git repository directory.
-	Path   string
+	Path   string `yaml:"path"`
 	Runner string // TODO: Better name runner
 
 	// HostAccess defines all the access request which are allowed for
@@ -107,7 +126,7 @@ type Profile struct {
 
 	// Image is the container image name used for running the profile.
 	// It should contain Xephyr and any additional window managers required.
-	Image string
+	Image string `yaml:"image"`
 
 	Timezone string `yaml:"timezone"`
 
@@ -177,14 +196,16 @@ func (p Profile) Validate() error {
 func LoadConfig(path string) (*Config, error) {
 	cfg := &Config{}
 
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 
-	err = yaml.Unmarshal(data, cfg)
+	decoder := yaml.NewDecoder(f)
+	decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
+	err = decoder.Decode(&cfg)
 	if err != nil {
-		return nil, fmt.Errorf("cannot unmarshal qubesome config %q: %w", path, err)
+		fmt.Println("Strict YAML decoding error:", err)
 	}
 
 	cfg.RootDir = filepath.Dir(path)
@@ -192,9 +213,9 @@ func LoadConfig(path string) (*Config, error) {
 	// To avoid names being defined twice on the profiles, the name
 	// is only defined when referring to a profile which results
 	// on the .name field of Profiles not being populated.
-	for k := range cfg.Profiles {
-		p := cfg.Profiles[k]
-		p.Name = k
+	for k, v := range cfg.Profiles {
+		v.Name = k
+		cfg.Profiles[k] = v
 	}
 
 	return cfg, nil
