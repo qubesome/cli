@@ -67,6 +67,7 @@ qubesome clip to-host i3
 
 - `qubesome start`: Start a qubesome environment for a given profile.
 - `qubesome run`: Run qubesome workloads.
+- `qubesome host-run`: Run commands on the host but display them in a qubesome profile.
 - `qubesome clip`: Manage the images within your workloads.
 - `qubesome images`: Manage the images within your workloads.
 - `qubesome xdg`: Handle xdg-open based via qubesome.

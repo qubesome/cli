@@ -2,8 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/log"
@@ -19,6 +22,7 @@ var (
 	path          string
 	local         string
 	runner        string
+	commandName   string
 	debug         bool
 )
 
@@ -33,6 +37,7 @@ func RootCommand() *cli.Command {
 			depsCommand(),
 			versionCommand(),
 			completionCommand(),
+			hostRunCommand(),
 		},
 	}
 
@@ -84,4 +89,30 @@ func profileConfigOrDefault(profile string) *types.Config {
 
 	path = files.QubesomeConfig()
 	return config(path)
+}
+
+func profileOrActive(profile string) (*types.Profile, error) {
+	if profile != "" {
+		cfg := profileConfigOrDefault(profile)
+		prof, ok := cfg.Profiles[profile]
+		if !ok {
+			return nil, fmt.Errorf("profile %q not active", profile)
+		}
+		return prof, nil
+	}
+
+	matches, err := filepath.Glob(filepath.Join(files.RunUserQubesome(), "*.config"))
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) > 1 {
+		return nil, errors.New("multiple profiles active: pick one with -profile")
+	}
+	if len(matches) == 0 {
+		return nil, errors.New("no active profile found: start one with qubesome start")
+	}
+
+	f := matches[0]
+	name := strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))
+	return profileOrActive(name)
 }
