@@ -13,6 +13,11 @@ func hostRunCommand() *cli.Command {
 		Name:    "host-run",
 		Aliases: []string{"hr"},
 		Usage:   "Runs a command at the host, but shows it in a given qubesome profile",
+		Description: `Examples:
+
+qubesome host-run firefox                        - Run firefox on the host and display it on the active profile
+qubesome host-run -profile <profile> firefox     - Run firefox on the host and display it on a specific profile
+`,
 		Arguments: []cli.Argument{
 			&cli.StringArg{
 				Name:        "command",

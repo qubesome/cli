@@ -30,6 +30,12 @@ func clipboardCommand() *cli.Command {
 			{
 				Name:  "from-host",
 				Usage: "copies the clipboard contents from the host to a profile",
+				Description: `Examples:
+
+qubesome clip from-host                        - Copy clipboard contents from host to the active profile
+qubesome clip from-host -type image/png        - Copy image from host clipboard to the active profile
+qubesome clip from-host -profile <name>        - Copy clipboard contents from host to a specific profile
+`,
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:        "target_profile",
@@ -54,7 +60,6 @@ func clipboardCommand() *cli.Command {
 					}
 
 					if typ := c.String("type"); typ != "" {
-						fmt.Println(typ)
 						opts = append(opts, clipboard.WithContentType(typ))
 					}
 
@@ -102,7 +107,6 @@ func clipboardCommand() *cli.Command {
 					}
 
 					if typ := c.String("type"); typ != "" {
-						fmt.Println(typ)
 						opts = append(opts, clipboard.WithContentType(typ))
 					}
 
@@ -114,6 +118,12 @@ func clipboardCommand() *cli.Command {
 			{
 				Name:  "to-host",
 				Usage: "copies the clipboard contents from a profile to the host",
+				Description: `Examples:
+
+qubesome clip to-host                        - Copy clipboard contents from the active profile to the host
+qubesome clip to-host -type image/png        - Copy image from the active profile clipboard to the host
+qubesome clip to-host -profile <name>        - Copy clipboard contents from a specific profile to the host
+				`,
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:        "source_profile",

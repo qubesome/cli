@@ -12,6 +12,11 @@ func xdgCommand() *cli.Command {
 		Name:    "xdg-open",
 		Aliases: []string{"xdg"},
 		Usage:   "opens a file or URL in the user's configured workload",
+		Description: `Examples:
+
+qubesome xdg-open https://github.com/qubesome                       - Opens the URL on the workload defined on the active qubesome config
+qubesome xdg-open -profile <profile> https://github.com/qubesome    - Opens the URL on the workload defined on the given profile's qubesome config
+`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "profile",
@@ -23,7 +28,12 @@ func xdgCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg := profileConfigOrDefault(targetProfile)
+			prof, err := profileOrActive(targetProfile)
+			if err != nil {
+				return err
+			}
+
+			cfg := profileConfigOrDefault(prof.Name)
 
 			return qubesome.XdgRun(
 				qubesome.WithConfig(cfg),
