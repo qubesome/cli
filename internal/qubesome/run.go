@@ -86,7 +86,7 @@ func runner(in WorkloadInfo, runnerOverride string) error {
 		return err
 	}
 
-	profile, exists := in.Config.Profiles[in.Profile]
+	profile, exists := in.Config.Profile(in.Profile)
 	if !exists {
 		return fmt.Errorf("profile %q does not exist", in.Profile)
 	}

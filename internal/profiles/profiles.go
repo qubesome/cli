@@ -48,7 +48,7 @@ func Run(opts ...command.Option[Options]) error {
 	if o.Config == nil {
 		return fmt.Errorf("cannot start profile: nil config")
 	}
-	profile, ok := o.Config.Profiles[o.Profile]
+	profile, ok := o.Config.Profile(o.Profile)
 	if !ok {
 		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
 	}
@@ -152,7 +152,7 @@ func StartFromGit(runner, name, gitURL, path, local string) error {
 		_ = os.Remove(ln)
 	}()
 
-	p, ok := cfg.Profiles[name]
+	p, ok := cfg.Profile(name)
 	if !ok {
 		return fmt.Errorf("cannot file profile %q in config %q", name, cfgPath)
 	}

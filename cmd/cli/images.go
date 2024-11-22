@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/qubesome/cli/internal/images"
 	"github.com/urfave/cli/v3"
@@ -27,6 +29,15 @@ func imagesCommand() *cli.Command {
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					cfg := profileConfigOrDefault(targetProfile)
+					if cfg == nil {
+						return errors.New("could not find qubesome config")
+					}
+
+					if targetProfile != "" {
+						if _, ok := cfg.Profile(targetProfile); !ok {
+							return fmt.Errorf("could not find profile %q", targetProfile)
+						}
+					}
 
 					return images.Run(
 						images.WithConfig(cfg),
