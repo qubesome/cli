@@ -448,7 +448,6 @@ func createNewDisplay(bin string, profile *types.Profile, display string) error 
 		dockerArgs = append(dockerArgs, "--userns=keep-id")
 	}
 	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		fmt.Println("WARN: running qubesome in Wayland (experimental)")
 		xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR")
 		if xdgRuntimeDir == "" {
 			uid := os.Getuid()

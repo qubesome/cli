@@ -41,6 +41,13 @@ func RootCommand() *cli.Command {
 		},
 	}
 
+	cmd.Before = func(ctx context.Context, c *cli.Command) (context.Context, error) {
+		if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+			fmt.Println("\033[33mWARN: Running qubesome in Wayland is experimental. Some features may not work as expected.\033[0m")
+		}
+		return ctx, nil
+	}
+
 	cmd.Flags = append(cmd.Flags, &cli.BoolFlag{
 		Name:        "debug",
 		Value:       false,

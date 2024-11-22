@@ -103,7 +103,6 @@ func Run(ew types.EffectiveWorkload) error {
 
 	display := ew.Profile.Display
 	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") { //nolint
-		fmt.Println("WARN: running qubesome in Wayland (experimental)")
 		display = 0
 
 		xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR")
