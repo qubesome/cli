@@ -47,10 +47,7 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles i3
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg := profileConfigOrDefault(targetProfile)
-
 			return profiles.Run(
-				profiles.WithConfig(cfg),
 				profiles.WithProfile(targetProfile),
 				profiles.WithGitURL(gitURL),
 				profiles.WithPath(path),
