@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 
+	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/qubesome"
+	"github.com/qubesome/cli/internal/types"
 	"github.com/urfave/cli/v3"
 )
 
@@ -28,12 +30,20 @@ qubesome xdg-open -profile <profile> https://github.com/qubesome    - Opens the 
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			prof, err := profileOrActive(targetProfile)
-			if err != nil {
-				return err
-			}
+			var cfg *types.Config
 
-			cfg := profileConfigOrDefault(prof.Name)
+			// Commands that can be executed from within a profile
+			// (a.k.a. inception mode) should not check for profile
+			// names nor configs, as those are imposed by the inception
+			// server.
+			if !inception.Inside() {
+				prof, err := profileOrActive(targetProfile)
+				if err != nil {
+					return err
+				}
+
+				cfg = profileConfigOrDefault(prof.Name)
+			}
 
 			return qubesome.XdgRun(
 				qubesome.WithConfig(cfg),
