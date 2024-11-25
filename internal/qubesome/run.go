@@ -91,15 +91,7 @@ func runner(in WorkloadInfo, runnerOverride string) error {
 		return fmt.Errorf("profile %q does not exist", in.Profile)
 	}
 
-	path := files.ProfileConfig(in.Profile)
-	target, err := os.Readlink(path)
-	if err != nil {
-		slog.Debug("not able find profile path", "path", path, "error", err)
-		return nil
-	}
-
-	gitdir := filepath.Dir(filepath.Dir(target))
-	err = env.Update("GITDIR", gitdir)
+	err := env.Update("GITDIR", in.Config.RootDir)
 	if err != nil {
 		return err
 	}

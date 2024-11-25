@@ -87,6 +87,7 @@ func profileConfigOrDefault(profile string) *types.Config {
 		// Try to load the profile specific config.
 		path := files.ProfileConfig(profile)
 		target, err := os.Readlink(path)
+		slog.Debug("try to load profile config", "profile", profile, "path", path, target, "target")
 
 		if err == nil {
 			c := config(target)

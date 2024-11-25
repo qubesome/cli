@@ -83,7 +83,6 @@ func Run(ew types.EffectiveWorkload) error {
 
 	if wl.HostAccess.Gpus != "" {
 		args = append(args, "--gpus", wl.HostAccess.Gpus)
-		args = append(args, "--runtime=nvidia")
 	}
 
 	for _, cap := range wl.HostAccess.CapsAdd {
@@ -237,12 +236,12 @@ func Run(ew types.EffectiveWorkload) error {
 
 		src := env.Expand(ps[0])
 		if _, err := os.Stat(src); err != nil {
-			slog.Warn("failed to mount path", "path", src, "error", err)
+			slog.Warn("failed to mount path", "path", src, "error", err, "state", ps[0])
 			continue
 		}
 
 		dst := ps[1]
-		args = append(args, fmt.Sprintf("-v=%s:%s:z", src, dst))
+		args = append(args, fmt.Sprintf("-v=%s:%s", src, dst))
 	}
 
 	args = append(args, wl.Image)

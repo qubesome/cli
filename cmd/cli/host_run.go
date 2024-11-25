@@ -39,10 +39,10 @@ qubesome host-run -profile <profile> firefox     - Run firefox on the host and d
 				return err
 			}
 
-			c := exec.Command(commandName)
+			c := exec.Command(commandName, cmd.Args().Slice()...) //nolint
 			c.Env = append(c.Env, fmt.Sprintf("DISPLAY=:%d", prof.Display))
 			out, err := c.CombinedOutput()
-			fmt.Println(out)
+			fmt.Println(string(out))
 
 			return err
 		},
