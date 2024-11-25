@@ -48,6 +48,14 @@ qubesome clip from-host -profile <name>        - Copy clipboard contents from ho
 				Flags: []cli.Flag{
 					clipType,
 				},
+				ShellComplete: func(ctx context.Context, cmd *cli.Command) {
+					if cmd.NArg() > 0 {
+						return
+					}
+					for _, p := range activeProfiles() {
+						fmt.Println(p)
+					}
+				},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					target, err := profileOrActive(targetProfile)
 					if err != nil {
@@ -87,6 +95,14 @@ qubesome clip from-host -profile <name>        - Copy clipboard contents from ho
 				},
 				Flags: []cli.Flag{
 					clipType,
+				},
+				ShellComplete: func(ctx context.Context, cmd *cli.Command) {
+					if cmd.NArg() > 1 {
+						return
+					}
+					for _, p := range activeProfiles() {
+						fmt.Println(p)
+					}
 				},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					cfg := profileConfigOrDefault(targetProfile)
@@ -135,6 +151,14 @@ qubesome clip to-host -profile <name>        - Copy clipboard contents from a sp
 				},
 				Flags: []cli.Flag{
 					clipType,
+				},
+				ShellComplete: func(ctx context.Context, cmd *cli.Command) {
+					if cmd.NArg() > 0 {
+						return
+					}
+					for _, p := range activeProfiles() {
+						fmt.Println(p)
+					}
 				},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					target, err := profileOrActive(sourceProfile)
