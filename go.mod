@@ -6,7 +6,7 @@ require (
 	github.com/cyphar/filepath-securejoin v0.3.4
 	github.com/go-git/go-git/v5 v5.12.1-0.20241115094014-70dd9f8347eb
 	github.com/google/uuid v1.6.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v3 v3.0.0-alpha9.3
 	golang.org/x/sys v0.27.0
 	google.golang.org/grpc v1.68.0
