@@ -1,0 +1,7 @@
+workflow:
+  steps:
+    - branch_package:
+        source_project: devel:languages:go
+        source_package: qubesome
+        target_project: home:pjbgf
+
