@@ -10,7 +10,7 @@ require (
 	github.com/urfave/cli/v3 v3.0.0-alpha9.3
 	golang.org/x/sys v0.27.0
 	google.golang.org/grpc v1.68.0
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/protobuf v1.35.2
 	gopkg.in/yaml.v3 v3.0.1
 )
 
