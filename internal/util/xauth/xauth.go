@@ -16,13 +16,13 @@ import (
 var cookieFunc = newCookie
 
 func AuthPair(display uint8, parent io.Reader, server, client io.Writer) error {
-	data := make([]byte, 50)
+	data := make([]byte, 40)
 	n, err := parent.Read(data)
 	if err != nil {
 		return fmt.Errorf("failed to read from parent auth file: %w", err)
 	}
-	if n < 50 {
-		return fmt.Errorf("auth file must be at least 50 chars long: was %d instead", n)
+	if n < 40 {
+		return fmt.Errorf("auth file must be at least 40 chars long: was %d instead", n)
 	}
 
 	_, _ = server.Write(data[0:2])
