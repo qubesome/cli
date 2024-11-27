@@ -433,10 +433,20 @@ func createNewDisplay(bin string, profile *types.Profile, display string) error 
 		break
 	}
 
+	x11Dir := "/tmp/.X11-unix"
+	if os.Getenv("WSL_DISTRO_NAME") != "" {
+		fmt.Println("\033[33mWARN: Running qubesome in WSL is experimental. Some features may not work as expected.\033[0m")
+		fp, err := filepath.EvalSymlinks(x11Dir)
+		if err != nil {
+			return fmt.Errorf("failed to eval symlink: %w", err)
+		}
+		x11Dir = fp
+	}
+
 	//nolint
 	var paths []string
 	paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
-	paths = append(paths, "-v=/tmp/.X11-unix:/tmp/.X11-unix:rw")
+	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/.X11-unix:rw", x11Dir))
 	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver", server))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority", workload))
