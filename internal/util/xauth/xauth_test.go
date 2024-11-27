@@ -105,3 +105,16 @@ func TestToNumeric(t *testing.T) {
 		})
 	}
 }
+
+func FuzzToNumberic(f *testing.F) {
+	f.Fuzz(func(t *testing.T, input []byte) {
+		ToNumeric(input)
+	})
+}
+
+func FuzzAuthPair(f *testing.F) {
+	f.Fuzz(func(t *testing.T, display uint8, parent []byte) {
+		_ = AuthPair(display, bytes.NewReader(parent),
+			&bytes.Buffer{}, &bytes.Buffer{})
+	})
+}

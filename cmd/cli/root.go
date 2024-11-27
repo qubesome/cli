@@ -157,3 +157,14 @@ func activeConfigs() []string {
 
 	return active
 }
+
+func activeProfiles() []string {
+	cfgs := activeConfigs()
+	profiles := make([]string, 0, len(cfgs))
+
+	for _, file := range cfgs {
+		profiles = append(profiles, strings.TrimSuffix(filepath.Base(file), ".config"))
+	}
+
+	return profiles
+}
