@@ -2,16 +2,16 @@ version: '1.1'
 testbuild:
   steps:
     - branch_package:
-        source_project: home:pjbgf:branches:devel:languages:go
+        source_project: home:pjbgf:devel:languages:go:unstable
         source_package: qubesome
-        target_project: home:pjbgf:ci:devel:languages:go
+        target_project: home:pjbgf:ci
         add_repositories: disable
     - configure_repositories:
-        project: home:pjbgf:ci:devel:languages:go
+        project: home:pjbgf:ci
         repositories:
           - name: openSUSE_Factory
             paths:
-              - target_project: home:pjbgf:branches:devel:languages:go
+              - target_project: home:pjbgf:devel:languages:go:unstable
                 target_repository: openSUSE_Factory
             architectures:
               - x86_64
@@ -22,7 +22,7 @@ testbuild:
 rebuild:
   steps:
     - trigger_services:
-        project: home:pjbgf:branches:devel:languages:go
+        project: home:pjbgf:devel:languages:go:unstable
         package: qubesome
   filters:
     event: push
