@@ -2,6 +2,8 @@ package inception
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
@@ -10,8 +12,10 @@ import (
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/qubesome"
 	"github.com/qubesome/cli/internal/types"
+	"github.com/qubesome/cli/internal/util/mtls"
 	pb "github.com/qubesome/cli/pkg/inception/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // NewServer returns a new inception server.
@@ -32,13 +36,26 @@ type Server struct {
 	server *grpcServer
 }
 
-func (s *Server) Listen(socket string) error {
+func (s *Server) Listen(serverCert tls.Certificate, ca []byte, socket string) error {
 	lis, err := net.Listen("unix", socket)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	gs := grpc.NewServer()
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(ca) {
+		return fmt.Errorf("failed to append CA from PEM")
+	}
+
+	creds := credentials.NewTLS(&tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    certPool,
+		MinVersion:   tls.VersionTLS13,
+		ServerName:   mtls.ProfileServerName,
+	})
+
+	gs := grpc.NewServer(grpc.Creds(creds))
 	pb.RegisterQubesomeHostServer(gs, s.server)
 
 	slog.Debug("[server] listening", "addr", lis.Addr())

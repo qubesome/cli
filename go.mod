@@ -35,5 +35,6 @@ require (
 	golang.org/x/net v0.31.0 // indirect
 	golang.org/x/text v0.20.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
+	google.golang.org/grpc/security/advancedtls v1.0.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
