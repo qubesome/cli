@@ -24,6 +24,7 @@ import (
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/gpu"
+	"github.com/qubesome/cli/internal/util/mtls"
 	"github.com/qubesome/cli/internal/util/resolution"
 	"github.com/qubesome/cli/internal/util/xauth"
 	"github.com/qubesome/cli/pkg/inception"
@@ -250,11 +251,15 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 		return err
 	}
 
+	creds, err := mtls.NewCredentials()
+	if err != nil {
+		return err
+	}
 	go func() {
 		defer wg.Done()
 
 		server := inception.NewServer(profile, cfg)
-		err1 := server.Listen(sockPath)
+		err1 := server.Listen(creds.ServerCert, creds.CA, sockPath)
 		if err1 != nil {
 			slog.Debug("error listening to socket", "error", err1)
 			if err == nil {
@@ -272,7 +277,9 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 		return err
 	}
 
-	err = createNewDisplay(binary, profile, strconv.Itoa(int(profile.Display)))
+	err = createNewDisplay(binary,
+		creds.CA, creds.ClientPEM, creds.ClientKeyPEM,
+		profile, strconv.Itoa(int(profile.Display)))
 	if err != nil {
 		return err
 	}
@@ -356,7 +363,7 @@ func startWindowManager(bin, name, display, wm string) error {
 	return nil
 }
 
-func createNewDisplay(bin string, profile *types.Profile, display string) error {
+func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, display string) error {
 	command := "Xephyr"
 	res, err := resolution.Primary()
 	if err != nil {
@@ -453,6 +460,9 @@ func createNewDisplay(bin string, profile *types.Profile, display string) error 
 		// rely on currently set DISPLAY.
 		"-e", "DISPLAY",
 		"-e", "XDG_SESSION_TYPE=X11",
+		"-e", "Q_MTLS_CA",
+		"-e", "Q_MTLS_CERT",
+		"-e", "Q_MTLS_KEY",
 		"--device", "/dev/dri",
 		"--security-opt=no-new-privileges:true",
 		"--cap-drop=ALL",
@@ -536,6 +546,9 @@ func createNewDisplay(bin string, profile *types.Profile, display string) error 
 
 	slog.Debug("exec: "+bin, "args", dockerArgs)
 	cmd := execabs.Command(bin, dockerArgs...)
+	cmd.Env = append(os.Environ(), "Q_MTLS_CA="+string(ca))
+	cmd.Env = append(cmd.Env, "Q_MTLS_CERT="+string(cert))
+	cmd.Env = append(cmd.Env, "Q_MTLS_KEY="+string(key))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
