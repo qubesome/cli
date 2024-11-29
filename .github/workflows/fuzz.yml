@@ -1,0 +1,42 @@
+name: fuzz tests
+
+on:
+  push:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "0 7 * * 6"
+
+permissions: {}
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      actions: read # for cache access
+    env:
+      FUZZ_TIME: 10m
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@cbb722410c2e876e24abbe8de2cc27693e501dcb # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version: stable
+
+      - name: Set environment variable based on trigger
+        run: |
+          if [[ "${{ github.event_name }}" != "push" ]]; then
+            echo "FUZZ_TIME=30m" >> $GITHUB_ENV
+          fi
+
+      - name: Fuzzing
+        uses: form3tech-oss/go-ci-fuzz/ci/github-actions/fuzz@4663eaaadb263d2621592c62681dac7f7002d582
+        with:
+          fuzz-time: ${{ env.FUZZ_TIME }}
+          fail-fast: true
+          version: 0.1.3
