@@ -269,7 +269,12 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 	}()
 
 	defer func() {
-		_ = os.Remove(sockPath)
+		// Clean up the profile dir once profile finishes.
+		pd := files.ProfileDir(profile.Name)
+		err = os.RemoveAll(pd)
+		if err != nil {
+			slog.Warn("failed to remove profile dir", "path", pd, "error", err)
+		}
 	}()
 
 	err = createMagicCookie(profile)

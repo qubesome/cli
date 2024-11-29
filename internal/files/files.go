@@ -3,8 +3,8 @@
 // Key locations:
 // - ~/.qubesome: default location for persistent files.
 // - ~/.qubesome/images-last-checked: file that stores when images were last checked.
-// - /run/user/%d/qubesome: root of ephemeral files.
-// - /run/user/%d/qubesome/git/<git-url>/<path>: where git repositories
+// - ~/.qubesome/run: root of ephemeral files.
+// - ~/.qubesome/git/<git-url>/<path>: where git repositories
 // are cloned to.
 package files
 
@@ -53,7 +53,7 @@ func ImagesLastCheckedPath() string {
 
 // RunUserQubesome returns the path to the user-specific qubesome directory.
 func RunUserQubesome() string {
-	return fmt.Sprintf("/run/user/%d/qubesome", os.Getuid())
+	return filepath.Join(QubesomeDir(), "run")
 }
 
 // ClientCookiePath returns the path to the client cookie file for the given profile.
