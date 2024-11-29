@@ -12,8 +12,6 @@ import (
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/command"
-	"github.com/qubesome/cli/internal/drive"
-	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/inception"
@@ -22,6 +20,8 @@ import (
 	"github.com/qubesome/cli/internal/runners/podman"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
+	"github.com/qubesome/cli/internal/util/drive"
+	"github.com/qubesome/cli/internal/util/env"
 	"gopkg.in/yaml.v3"
 )
 
