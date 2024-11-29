@@ -82,7 +82,7 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	if wl.HostAccess.Gpus != "" {
-		args = append(args, "--gpus", wl.HostAccess.Gpus)
+		args = append(args, "--device=nvidia.com/gpu=all")
 	}
 
 	for _, cap := range wl.HostAccess.CapsAdd {

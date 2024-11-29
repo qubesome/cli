@@ -168,10 +168,6 @@ func StartFromGit(runner, name, gitURL, path, local string) error {
 		return fmt.Errorf("cannot file profile %q in config %q", name, cfgPath)
 	}
 
-	if p.Runner != "" {
-		runner = p.Runner
-	}
-
 	// When sourcing from git, ensure profile path is relative to the git repository.
 	pp, err := securejoin.SecureJoin(filepath.Dir(cfgPath), p.Path)
 	if err != nil {
@@ -196,6 +192,12 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 
 	if err := profile.Validate(); err != nil {
 		return err
+	}
+
+	// If runner is not being overwritten (via -runner), use the runner
+	// set at profile level in the config.
+	if runner == "" && profile.Runner != "" {
+		runner = profile.Runner
 	}
 
 	binary := files.ContainerRunnerBinary(runner)
@@ -502,9 +504,10 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	}
 	if profile.HostAccess.Gpus != "" {
 		if strings.HasSuffix(bin, "podman") {
-			dockerArgs = append(dockerArgs, "--runtime=nvidia.com/gpu=all")
+			dockerArgs = append(dockerArgs, "--device=nvidia.com/gpu=all")
+		} else {
+			dockerArgs = append(dockerArgs, "--gpus", profile.HostAccess.Gpus)
 		}
-		dockerArgs = append(dockerArgs, "--gpus", profile.HostAccess.Gpus)
 	}
 
 	if profile.DNS != "" {
