@@ -24,6 +24,9 @@ rebuild:
     - trigger_services:
         project: home:pjbgf:devel:languages:go:unstable
         package: qubesome
+    - rebuild_package:
+        project: home:pjbgf:devel:languages:go:unstable
+        package: qubesome
   filters:
     event: push
     branches:

@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/qubesome/cli/internal/env"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/runners/util/container"
 	"github.com/qubesome/cli/internal/runners/util/mime"
 	"github.com/qubesome/cli/internal/runners/util/usb"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
+	"github.com/qubesome/cli/internal/util/env"
 	"github.com/qubesome/cli/internal/util/gpu"
 	"golang.org/x/sys/execabs"
 )

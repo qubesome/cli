@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/qubesome/cli/internal/env"
+	"github.com/qubesome/cli/internal/util/env"
 )
 
 type Workload struct {
