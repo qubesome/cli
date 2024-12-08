@@ -18,17 +18,3 @@ testbuild:
               - aarch64
   filters:
     event: pull_request
-
-rebuild:
-  steps:
-    - trigger_services:
-        project: home:pjbgf:devel:languages:go:unstable
-        package: qubesome
-    - rebuild_package:
-        project: home:pjbgf:devel:languages:go:unstable
-        package: qubesome
-  filters:
-    event: push
-    branches:
-      only:
-        - main
