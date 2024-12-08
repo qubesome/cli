@@ -86,10 +86,10 @@ func StartFromGit(runner, name, gitURL, path, local string) error {
 	ln := files.ProfileConfig(name)
 
 	if _, err := os.Lstat(ln); err == nil {
-		// Wayland is not cleaning up profile state after closure.
-		if !strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
+		if container.Running(runner, fmt.Sprintf(ContainerNameFormat, name)) {
 			return fmt.Errorf("profile %q is already started", name)
 		}
+
 		if err = os.Remove(ln); err != nil {
 			return fmt.Errorf("failed to remove leftover profile symlink: %w", err)
 		}
