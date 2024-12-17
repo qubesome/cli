@@ -22,7 +22,7 @@ storage, etc).
 go install github.com/qubesome/cli/cmd/qubesome@latest
 ```
 
-##### For Tumbleweed users
+##### For Leap and Tumbleweed users
 ```
 zypper install -y qubesome
 ```

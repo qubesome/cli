@@ -41,13 +41,6 @@ func Run(ew types.EffectiveWorkload) error {
 		return fmt.Errorf("failed to get named devices: %w", err)
 	}
 
-	if wl.HostAccess.Gpus != "" {
-		if !gpu.Supported() {
-			wl.HostAccess.Gpus = ""
-			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
-		}
-	}
-
 	var paths []string
 	// Mount localtime into container. This file may be a symlink, if so,
 	// mount the underlying file as well.
@@ -79,8 +72,13 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	if wl.HostAccess.Gpus != "" {
-		args = append(args, "--gpus", wl.HostAccess.Gpus)
-		args = append(args, "--runtime=nvidia")
+		gpu, ok := gpu.Supported("podman")
+		if !ok {
+			wl.HostAccess.Gpus = ""
+			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
+		} else {
+			args = append(args, gpu)
+		}
 	}
 
 	for _, cap := range wl.HostAccess.CapsAdd {
