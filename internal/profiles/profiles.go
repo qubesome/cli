@@ -214,7 +214,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 	go images.PreemptWorkloadImages(binary, cfg)
 
 	if profile.Gpus != "" {
-		if !gpu.Supported() {
+		if _, ok := gpu.Supported(runner); !ok {
 			profile.Gpus = ""
 			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
 		}
@@ -503,10 +503,8 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		dockerArgs = append(dockerArgs, "-v="+xdgRuntimeDir+":/run/user/1000")
 	}
 	if profile.HostAccess.Gpus != "" {
-		if strings.HasSuffix(bin, "podman") {
-			dockerArgs = append(dockerArgs, "--device=nvidia.com/gpu=all")
-		} else {
-			dockerArgs = append(dockerArgs, "--gpus", profile.HostAccess.Gpus)
+		if gpus, ok := gpu.Supported(profile.Runner); ok {
+			dockerArgs = append(dockerArgs, gpus)
 		}
 	}
 
