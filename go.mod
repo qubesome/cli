@@ -3,7 +3,7 @@ module github.com/qubesome/cli
 go 1.23.3
 
 require (
-	github.com/cyphar/filepath-securejoin v0.3.5
+	github.com/cyphar/filepath-securejoin v0.3.6
 	github.com/go-git/go-git/v5 v5.12.1-0.20241115094014-70dd9f8347eb
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.10.0
