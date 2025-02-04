@@ -46,6 +46,15 @@ func Run(opts ...command.Option[Options]) error {
 		return StartFromGit(o.Runner, o.Profile, o.GitURL, o.Path, o.Local)
 	}
 
+	if o.Local != "" {
+		// Running from local, treat the local path as the GITDIR for envvar
+		// expansion purposes.
+		err := env.Update("GITDIR", o.Local)
+		if err != nil {
+			return err
+		}
+	}
+
 	path := filepath.Join(o.Local, o.Path, "qubesome.config")
 	if _, err := os.Stat(path); err != nil {
 		return err
@@ -102,7 +111,7 @@ func StartFromGit(runner, name, gitURL, path, local string) error {
 
 	if strings.HasPrefix(local, "~") {
 		if len(local) > 1 && local[1] == '/' {
-			local = os.ExpandEnv("${HOME}" + local[1:])
+			local = filepath.Join(os.ExpandEnv("${HOME}"), local[1:])
 		}
 	}
 
@@ -245,6 +254,11 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 		}
 	}
 
+	err = createMagicCookie(profile)
+	if err != nil {
+		return err
+	}
+
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
@@ -278,11 +292,6 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 			slog.Warn("failed to remove profile dir", "path", pd, "error", err)
 		}
 	}()
-
-	err = createMagicCookie(profile)
-	if err != nil {
-		return err
-	}
 
 	err = createNewDisplay(binary,
 		creds.CA, creds.ClientPEM, creds.ClientKeyPEM,
@@ -467,7 +476,13 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
 
 	for _, p := range profile.Paths {
-		paths = append(paths, "-v="+env.Expand(p))
+		p = env.Expand(p)
+
+		src := strings.Split(p, ":")
+		if _, err := os.Stat(src[0]); err != nil {
+			fmt.Printf("\033[33mWARN: missing mapped dir: %s.\033[0m\n", src[0])
+		}
+		paths = append(paths, "-v="+p)
 	}
 
 	dockerArgs := []string{
