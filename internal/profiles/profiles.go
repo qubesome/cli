@@ -467,7 +467,13 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
 
 	for _, p := range profile.Paths {
-		paths = append(paths, "-v="+env.Expand(p))
+		p = env.Expand(p)
+
+		src := strings.Split(p, ":")
+		if _, err := os.Stat(src[0]); err != nil {
+			fmt.Printf("\033[33mWARN: missing mapped dir: %s.\033[0m\n", src[0])
+		}
+		paths = append(paths, "-v="+p)
 	}
 
 	dockerArgs := []string{
