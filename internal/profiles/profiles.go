@@ -46,6 +46,15 @@ func Run(opts ...command.Option[Options]) error {
 		return StartFromGit(o.Runner, o.Profile, o.GitURL, o.Path, o.Local)
 	}
 
+	if o.Local != "" {
+		// Running from local, treat the local path as the GITDIR for envvar
+		// expansion purposes.
+		err := env.Update("GITDIR", o.Local)
+		if err != nil {
+			return err
+		}
+	}
+
 	path := filepath.Join(o.Local, o.Path, "qubesome.config")
 	if _, err := os.Stat(path); err != nil {
 		return err
@@ -102,7 +111,7 @@ func StartFromGit(runner, name, gitURL, path, local string) error {
 
 	if strings.HasPrefix(local, "~") {
 		if len(local) > 1 && local[1] == '/' {
-			local = os.ExpandEnv("${HOME}" + local[1:])
+			local = filepath.Join(os.ExpandEnv("${HOME}"), local[1:])
 		}
 	}
 
