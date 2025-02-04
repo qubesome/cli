@@ -254,6 +254,11 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 		}
 	}
 
+	err = createMagicCookie(profile)
+	if err != nil {
+		return err
+	}
+
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
@@ -287,11 +292,6 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 			slog.Warn("failed to remove profile dir", "path", pd, "error", err)
 		}
 	}()
-
-	err = createMagicCookie(profile)
-	if err != nil {
-		return err
-	}
 
 	err = createNewDisplay(binary,
 		creds.CA, creds.ClientPEM, creds.ClientKeyPEM,
