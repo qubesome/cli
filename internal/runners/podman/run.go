@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/keyring"
+	"github.com/qubesome/cli/internal/keyring/backend"
 	"github.com/qubesome/cli/internal/runners/util/container"
 	"github.com/qubesome/cli/internal/runners/util/mime"
 	"github.com/qubesome/cli/internal/runners/util/usb"
@@ -197,6 +199,9 @@ func Run(ew types.EffectiveWorkload) error {
 
 		// Mount qube socket so that it can send commands from container to host.
 		args = append(args, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
+		args = append(args, "-e=Q_MTLS_CA")
+		args = append(args, "-e=Q_MTLS_CERT")
+		args = append(args, "-e=Q_MTLS_KEY")
 	}
 
 	if ew.Profile.DNS != "" {
@@ -249,6 +254,33 @@ func Run(ew types.EffectiveWorkload) error {
 
 	slog.Debug(fmt.Sprintf("exec: %s", runnerBinary), "args", args)
 	cmd := execabs.Command(runnerBinary, args...)
+
+	if ew.Workload.HostAccess.Mime {
+		// Since the implementation of mTLS, workloads granted mime handling
+		// need the mTLS creds so that they can communicate with the inception
+		// server.
+		ks := keyring.New(ew.Profile.Name, backend.New())
+		ca, err := ks.Get(keyring.MtlsCA)
+		if err != nil {
+			return err
+		}
+
+		cert, err := ks.Get(keyring.MtlsClientCert)
+		if err != nil {
+			return err
+		}
+
+		key, err := ks.Get(keyring.MtlsClientKey)
+		if err != nil {
+			return err
+		}
+
+		slog.Debug("enabling mime access")
+
+		cmd.Env = append(os.Environ(), "Q_MTLS_CA="+ca)
+		cmd.Env = append(cmd.Env, "Q_MTLS_CERT="+cert)
+		cmd.Env = append(cmd.Env, "Q_MTLS_KEY="+key)
+	}
 
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
