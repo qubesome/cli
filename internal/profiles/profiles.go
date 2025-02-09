@@ -18,6 +18,8 @@ import (
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
+	"github.com/qubesome/cli/internal/keyring"
+	"github.com/qubesome/cli/internal/keyring/backend"
 	"github.com/qubesome/cli/internal/runners/util/container"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
@@ -290,6 +292,13 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 		err = os.RemoveAll(pd)
 		if err != nil {
 			slog.Warn("failed to remove profile dir", "path", pd, "error", err)
+		}
+	}()
+
+	defer func() {
+		err := deleteMtlsData(profile.Name)
+		if err != nil {
+			slog.Warn("failed to delete mTLS data", "error", err)
 		}
 	}()
 
@@ -581,9 +590,44 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	cmd.Env = append(cmd.Env, "Q_MTLS_CERT="+string(cert))
 	cmd.Env = append(cmd.Env, "Q_MTLS_KEY="+string(key))
 
+	err = storeMtlsData(profile.Name, string(ca), string(cert), string(key))
+	if err != nil {
+		return err
+	}
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %w", output, err)
+	}
+	return nil
+}
+
+func storeMtlsData(profile, ca, cert, key string) error {
+	ks := keyring.New(profile, backend.New())
+	if err := ks.Set(keyring.MtlsCA, ca); err != nil {
+		return err
+	}
+
+	if err := ks.Set(keyring.MtlsClientCert, cert); err != nil {
+		return err
+	}
+
+	if err := ks.Set(keyring.MtlsClientKey, key); err != nil {
+		return err
+	}
+	return nil
+}
+
+func deleteMtlsData(profile string) error {
+	ks := keyring.New(profile, backend.New())
+	if err := ks.Delete(keyring.MtlsCA); err != nil {
+		return err
+	}
+	if err := ks.Delete(keyring.MtlsClientCert); err != nil {
+		return err
+	}
+	if err := ks.Delete(keyring.MtlsClientKey); err != nil {
+		return err
 	}
 	return nil
 }
