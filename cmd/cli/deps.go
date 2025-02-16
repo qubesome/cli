@@ -11,8 +11,17 @@ func depsCommand() *cli.Command {
 	cmd := &cli.Command{
 		Name:  "deps",
 		Usage: "shows status of external dependencies",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "runner",
+				Destination: &runner,
+			},
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return deps.Run()
+			cfg := profileConfigOrDefault("")
+			return deps.Run(deps.WithConfig(cfg),
+				deps.WithRunner(runner),
+			)
 		},
 	}
 	return cmd
