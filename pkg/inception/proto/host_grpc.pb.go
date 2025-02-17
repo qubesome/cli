@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	QubesomeHost_XdgOpen_FullMethodName     = "/qubesome.QubesomeHost/XdgOpen"
-	QubesomeHost_RunWorkload_FullMethodName = "/qubesome.QubesomeHost/RunWorkload"
+	QubesomeHost_XdgOpen_FullMethodName            = "/qubesome.QubesomeHost/XdgOpen"
+	QubesomeHost_RunWorkload_FullMethodName        = "/qubesome.QubesomeHost/RunWorkload"
+	QubesomeHost_FlatpakRunWorkload_FullMethodName = "/qubesome.QubesomeHost/FlatpakRunWorkload"
 )
 
 // QubesomeHostClient is the client API for QubesomeHost service.
@@ -29,6 +30,7 @@ const (
 type QubesomeHostClient interface {
 	XdgOpen(ctx context.Context, in *XdgOpenRequest, opts ...grpc.CallOption) (*XdgOpenReply, error)
 	RunWorkload(ctx context.Context, in *RunWorkloadRequest, opts ...grpc.CallOption) (*RunWorkloadReply, error)
+	FlatpakRunWorkload(ctx context.Context, in *FlatpakRunWorkloadRequest, opts ...grpc.CallOption) (*FlatpakRunWorkloadReply, error)
 }
 
 type qubesomeHostClient struct {
@@ -59,12 +61,23 @@ func (c *qubesomeHostClient) RunWorkload(ctx context.Context, in *RunWorkloadReq
 	return out, nil
 }
 
+func (c *qubesomeHostClient) FlatpakRunWorkload(ctx context.Context, in *FlatpakRunWorkloadRequest, opts ...grpc.CallOption) (*FlatpakRunWorkloadReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FlatpakRunWorkloadReply)
+	err := c.cc.Invoke(ctx, QubesomeHost_FlatpakRunWorkload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QubesomeHostServer is the server API for QubesomeHost service.
 // All implementations must embed UnimplementedQubesomeHostServer
 // for forward compatibility.
 type QubesomeHostServer interface {
 	XdgOpen(context.Context, *XdgOpenRequest) (*XdgOpenReply, error)
 	RunWorkload(context.Context, *RunWorkloadRequest) (*RunWorkloadReply, error)
+	FlatpakRunWorkload(context.Context, *FlatpakRunWorkloadRequest) (*FlatpakRunWorkloadReply, error)
 	mustEmbedUnimplementedQubesomeHostServer()
 }
 
@@ -80,6 +93,9 @@ func (UnimplementedQubesomeHostServer) XdgOpen(context.Context, *XdgOpenRequest)
 }
 func (UnimplementedQubesomeHostServer) RunWorkload(context.Context, *RunWorkloadRequest) (*RunWorkloadReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunWorkload not implemented")
+}
+func (UnimplementedQubesomeHostServer) FlatpakRunWorkload(context.Context, *FlatpakRunWorkloadRequest) (*FlatpakRunWorkloadReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FlatpakRunWorkload not implemented")
 }
 func (UnimplementedQubesomeHostServer) mustEmbedUnimplementedQubesomeHostServer() {}
 func (UnimplementedQubesomeHostServer) testEmbeddedByValue()                      {}
@@ -138,6 +154,24 @@ func _QubesomeHost_RunWorkload_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QubesomeHost_FlatpakRunWorkload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FlatpakRunWorkloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QubesomeHostServer).FlatpakRunWorkload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QubesomeHost_FlatpakRunWorkload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QubesomeHostServer).FlatpakRunWorkload(ctx, req.(*FlatpakRunWorkloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // QubesomeHost_ServiceDesc is the grpc.ServiceDesc for QubesomeHost service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -152,6 +186,10 @@ var QubesomeHost_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunWorkload",
 			Handler:    _QubesomeHost_RunWorkload_Handler,
+		},
+		{
+			MethodName: "FlatpakRunWorkload",
+			Handler:    _QubesomeHost_FlatpakRunWorkload_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -109,3 +109,32 @@ func (c *Client) Run(ctx context.Context, workload string, args []string) error 
 
 	return nil
 }
+
+func (c *Client) FlatpakRun(ctx context.Context, workload string, args []string) error {
+	creds, err := getCreds()
+	if err != nil {
+		return err
+	}
+
+	conn, err := grpc.NewClient(c.socket, grpc.WithTransportCredentials(creds))
+	if err != nil {
+		return fmt.Errorf("failed to connect to qubesome host: %w", err)
+	}
+	defer conn.Close()
+
+	cl := pb.NewQubesomeHostClient(conn)
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	slog.Debug("[client] calling FlatpakRunWorkload", "workload", workload, "args", args)
+	_, err = cl.FlatpakRunWorkload(ctx, &pb.FlatpakRunWorkloadRequest{
+		Workload: workload,
+		Args:     strings.Join(args, " "),
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}

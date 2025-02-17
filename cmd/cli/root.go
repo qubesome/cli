@@ -39,6 +39,7 @@ func RootCommand() *cli.Command {
 			versionCommand(),
 			completionCommand(),
 			hostRunCommand(),
+			flatpakCommand(),
 		},
 	}
 

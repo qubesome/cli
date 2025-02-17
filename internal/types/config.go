@@ -118,6 +118,10 @@ type Profile struct {
 	// display.
 	Display uint8 `yaml:"display"`
 
+	// Flatpaks defines the Flatpak applications from Host to be made available
+	// to the profile.
+	Flatpaks []string `yaml:"flatpaks"`
+
 	// Paths defines the paths to be mounted to the profile's container.
 	Paths []string `yaml:"paths"`
 
