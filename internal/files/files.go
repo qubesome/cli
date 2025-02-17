@@ -123,3 +123,11 @@ func GitDirPath(url string) (string, error) {
 func WorkloadsDir(root, path string) (string, error) {
 	return securejoin.SecureJoin(root, filepath.Join(path, "workloads"))
 }
+
+func FlatpakApps() string {
+	return "/var/lib/flatpak/exports/share/applications"
+}
+
+func FlatpakIcons() string {
+	return "/var/lib/flatpak/exports/share/icons/hicolor/scalable/apps"
+}

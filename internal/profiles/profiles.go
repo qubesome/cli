@@ -1,7 +1,9 @@
 package profiles
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -561,6 +563,11 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		return err
 	}
 
+	err = setupAppsDir(profile)
+	if err != nil {
+		return err
+	}
+
 	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
 	if profile.Dbus {
 		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
@@ -568,6 +575,11 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
 		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
 	}
+
+	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.local/share/applications:ro",
+		filepath.Join(files.ProfileDir(profile.Name), "applications")))
+	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.local/share/icons:ro",
+		filepath.Join(files.ProfileDir(profile.Name), "icons")))
 
 	dockerArgs = append(dockerArgs, paths...)
 
@@ -643,7 +655,7 @@ func grabberShortcut() string {
 func setupRunUserDir(dir string) error {
 	err := os.MkdirAll(dir, files.DirMode)
 	if err != nil {
-		return fmt.Errorf("failed to create isolated <qubesome>/user path: %w", err)
+		return fmt.Errorf("failed to create isolated <profile>/user dir: %w", err)
 	}
 
 	shm := filepath.Join(dir, "shm")
@@ -655,6 +667,107 @@ func setupRunUserDir(dir string) error {
 	err = os.Chmod(shm, 0o1777)
 	if err != nil {
 		return fmt.Errorf("failed to chmod profile shm dir: %w", err)
+	}
+
+	return nil
+}
+
+func setupAppsDir(profile *types.Profile) error {
+	dir := files.ProfileDir(profile.Name)
+	err := os.MkdirAll(filepath.Join(dir, "applications"), files.DirMode)
+	if err != nil {
+		return fmt.Errorf("failed to create <profile>/applications dir: %w", err)
+	}
+	err = os.MkdirAll(filepath.Join(dir, "icons"), files.DirMode)
+	if err != nil {
+		return fmt.Errorf("failed to create <profile>/icons dir: %w", err)
+	}
+
+	for _, name := range profile.Flatpaks {
+		src := filepath.Join(files.FlatpakApps(), name+".desktop")
+		target := filepath.Join(dir, "applications", name+".desktop")
+
+		err = processFlatPakFile(name, src, target)
+		if err != nil {
+			slog.Error("failed processing flatpak desktop file", "name", name, "error", err)
+			continue
+		}
+
+		src = filepath.Join(files.FlatpakIcons(), name+".svg")
+		target = filepath.Join(dir, "icons", name+".svg")
+		err = copyFlatPakIcon(src, target)
+		if err != nil {
+			slog.Error("failed copying flatpak icon", "name", name, "error", err)
+		}
+
+		slog.Debug("added flatpak workload", "name", name)
+	}
+	return nil
+}
+
+func copyFlatPakIcon(sourcePath, destPath string) error {
+	srcFile, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer srcFile.Close()
+
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, srcFile)
+	if err != nil {
+		return fmt.Errorf("failed to copy file: %w", err)
+	}
+
+	err = destFile.Sync()
+	if err != nil {
+		return fmt.Errorf("failed to sync file: %w", err)
+	}
+
+	return nil
+}
+
+func processFlatPakFile(workload, src, target string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer srcFile.Close()
+
+	destFile, err := os.Create(target)
+	if err != nil {
+		return fmt.Errorf("failed to create new file: %w", err)
+	}
+	defer destFile.Close()
+
+	scanner := bufio.NewScanner(srcFile)
+	writer := bufio.NewWriter(destFile)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "Exec=") {
+			line = fmt.Sprintf("Exec=/bin/sh -c '/usr/local/bin/qubesome flatpak run \"%s\"'", workload)
+		} else if strings.HasPrefix(line, "Icon=") {
+			line = fmt.Sprintf("Icon=~/.local/share/icons/%s.svg", workload)
+		}
+
+		_, err := writer.WriteString(line + "\n")
+		if err != nil {
+			return fmt.Errorf("failed to write to destination file: %w", err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading source file: %w", err)
+	}
+
+	err = writer.Flush()
+	if err != nil {
+		return fmt.Errorf("failed to flush writer: %w", err)
 	}
 
 	return nil

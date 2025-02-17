@@ -7,6 +7,7 @@ package qubesome;
 service QubesomeHost {
   rpc XdgOpen (XdgOpenRequest) returns (XdgOpenReply) {}
   rpc RunWorkload (RunWorkloadRequest) returns (RunWorkloadReply) {}
+  rpc FlatpakRunWorkload (FlatpakRunWorkloadRequest) returns (FlatpakRunWorkloadReply) {}
 }
 
 message XdgOpenRequest {
@@ -22,4 +23,12 @@ message RunWorkloadRequest {
 }
 
 message RunWorkloadReply {
+}
+
+message FlatpakRunWorkloadRequest {
+  string workload = 1;
+  string args = 2;
+}
+
+message FlatpakRunWorkloadReply {
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/qubesome/cli/internal/command"
+	"github.com/qubesome/cli/internal/flatpak"
 	"github.com/qubesome/cli/internal/qubesome"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/mtls"
@@ -104,4 +105,24 @@ func (s *grpcServer) RunWorkload(ctx context.Context, in *pb.RunWorkloadRequest)
 
 	err := qubesome.Run(opts...)
 	return &pb.RunWorkloadReply{}, err
+}
+
+func (s *grpcServer) FlatpakRunWorkload(ctx context.Context, in *pb.FlatpakRunWorkloadRequest) (*pb.FlatpakRunWorkloadReply, error) {
+	worload := in.GetWorkload()
+	args := in.GetArgs()
+	profile := s.profile.Name
+	slog.Debug("[server] flatpak-run-workload received", "workload", worload, "profile", profile, "args", args)
+
+	opts := []command.Option[flatpak.Options]{
+		flatpak.WithConfig(s.config),
+		flatpak.WithProfile(profile),
+		flatpak.WithName(worload),
+	}
+
+	if len(args) > 0 {
+		opts = append(opts, flatpak.WithExtraArgs(strings.Split(args, " ")))
+	}
+
+	err := flatpak.Run(opts...)
+	return &pb.FlatpakRunWorkloadReply{}, err
 }

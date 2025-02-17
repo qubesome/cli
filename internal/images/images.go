@@ -90,44 +90,15 @@ func PreemptWorkloadImages(bin string, cfg *types.Config) {
 }
 
 func PullAll(bin string, cfg *types.Config) error {
-	wf, err := cfg.WorkloadFiles()
+	imgs, err := UniqueImages(cfg)
 	if err != nil {
-		return fmt.Errorf("cannot get workloads files: %w", err)
+		return fmt.Errorf("cannot get images: %w", err)
 	}
 
-	if len(wf) == 0 {
-		fmt.Println("no workloads found")
-	}
-
-	seen := map[string]struct{}{}
-	for _, fn := range wf {
-		fi, err := os.Stat(fn)
+	for _, img := range imgs {
+		err = PullImage(bin, img)
 		if err != nil {
-			return fmt.Errorf("cannot stat file %q: %w", fn, err)
-		}
-
-		if !fi.Mode().IsRegular() {
-			continue
-		}
-
-		data, err := os.ReadFile(fn)
-		if err != nil {
-			return fmt.Errorf("cannot read file %q: %w", fn, err)
-		}
-
-		w := types.Workload{}
-		err = yaml.Unmarshal(data, &w)
-		if err != nil {
-			return fmt.Errorf("cannot unmarshal workload file %q: %w", fn, err)
-		}
-
-		if _, ok := seen[w.Image]; !ok {
-			seen[w.Image] = struct{}{}
-
-			err = PullImage(bin, w.Image)
-			if err != nil {
-				slog.Error("cannot pull image %q: %w", w.Image, err)
-			}
+			slog.Error("cannot pull image %q: %w", img, err)
 		}
 	}
 
@@ -143,13 +114,95 @@ func PullImage(bin, image string) error {
 }
 
 func PullImageIfNotPresent(bin, image string) error {
+	ok, err := imagePresent(bin, image)
+	if ok && err == nil {
+		return nil
+	}
+
+	return PullImage(bin, image)
+}
+
+func imagePresent(bin, image string) (bool, error) {
 	slog.Debug("checking if container image is present", "image", image)
 	cmd := execabs.Command(bin, "images", "-q", image)
 
 	out, err := cmd.Output()
 	if len(out) > 0 && err == nil {
-		return nil
+		return true, nil
 	}
 
-	return PullImage(bin, image)
+	return false, err
+}
+
+func MissingImages(bin string, cfg *types.Config) ([]string, error) {
+	imgs, err := UniqueImages(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("cannot get images: %w", err)
+	}
+
+	missing := make([]string, 0, len(imgs))
+	for _, img := range imgs {
+		ok, err := imagePresent(bin, img)
+		if ok && err == nil {
+			continue
+		}
+
+		missing = append(missing, img)
+	}
+
+	return missing, nil
+}
+
+func UniqueImages(cfg *types.Config) ([]string, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+
+	missing := []string{}
+
+	seen := map[string]struct{}{}
+	for _, p := range cfg.Profiles {
+		if _, ok := seen[p.Image]; !ok {
+			seen[p.Image] = struct{}{}
+			missing = append(missing, p.Image)
+		}
+	}
+
+	wf, err := cfg.WorkloadFiles()
+	if err != nil {
+		return nil, fmt.Errorf("cannot get workloads files: %w", err)
+	}
+
+	if len(wf) == 0 {
+		fmt.Println("no workloads found")
+	}
+
+	for _, fn := range wf {
+		fi, err := os.Stat(fn)
+		if err != nil {
+			return nil, fmt.Errorf("cannot stat file %q: %w", fn, err)
+		}
+
+		if !fi.Mode().IsRegular() {
+			continue
+		}
+
+		data, err := os.ReadFile(fn)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read file %q: %w", fn, err)
+		}
+
+		w := types.Workload{}
+		err = yaml.Unmarshal(data, &w)
+		if err != nil {
+			return nil, fmt.Errorf("cannot unmarshal workload file %q: %w", fn, err)
+		}
+
+		if _, ok := seen[w.Image]; !ok {
+			seen[w.Image] = struct{}{}
+			missing = append(missing, w.Image)
+		}
+	}
+
+	return missing, nil
 }

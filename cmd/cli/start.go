@@ -62,7 +62,7 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles i3
 			// so that the containerised Windows Manager is able to execute
 			// new container workloads. This self-calls qubesome and leave it
 			// running so that the main process exits right away.
-			if !selfcall {
+			if !debug && !selfcall {
 				cmd := exec.Command(os.Args[0], os.Args[1:]...) //nolint
 				cmd.Env = append(cmd.Env, "QUBESOME_SELFCALL=true")
 				cmd.Env = append(cmd.Env, os.Environ()...)
