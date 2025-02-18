@@ -35,6 +35,10 @@ func Run(opts ...command.Option[Options]) error {
 		return fmt.Errorf("cannot find profile %q", o.Profile)
 	}
 
+	if len(prof.Flatpaks) == 0 {
+		return fmt.Errorf("profile has no flatpaks")
+	}
+
 	allowed := false
 	for _, name := range prof.Flatpaks {
 		if name == o.Name {
@@ -56,4 +60,41 @@ func Run(opts ...command.Option[Options]) error {
 	fmt.Println(string(out))
 
 	return err
+}
+
+func Install(opts ...command.Option[Options]) error {
+	o := &Options{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	if o.Config == nil {
+		return fmt.Errorf("no config found")
+	}
+
+	prof, ok := o.Config.Profiles[o.Profile]
+	if !ok {
+		return fmt.Errorf("cannot find profile %q", o.Profile)
+	}
+
+	if len(prof.Flatpaks) == 0 {
+		fmt.Println("Skipping: profile has no flatpaks")
+		return nil
+	}
+
+	for _, name := range prof.Flatpaks {
+		fmt.Println("installing Flatpak", name)
+		args := []string{"install", "flathub", name}
+
+		c := exec.Command("/usr/bin/flatpak", args...)
+		c.Stdin = os.Stdin
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+
+		if err := c.Run(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
