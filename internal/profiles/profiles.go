@@ -219,12 +219,26 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 		return fmt.Errorf("could not find container runner %q", binary)
 	}
 
-	err = images.PullImageIfNotPresent(binary, profile.Image)
+	imgs, err := images.MissingImages(binary, cfg)
 	if err != nil {
-		return fmt.Errorf("cannot pull profile image: %w", err)
+		return err
 	}
 
-	go images.PreemptWorkloadImages(binary, cfg)
+	for _, img := range imgs {
+		if img == profile.Image {
+			fmt.Println("Pulling profile image:", profile.Image)
+			err = images.PullImageIfNotPresent(binary, profile.Image)
+			if err != nil {
+				return fmt.Errorf("cannot pull profile image: %w", err)
+			}
+		}
+	}
+
+	if os.Stdin != nil && len(imgs) > 1 {
+		if proceed("Not all workload images are present. Start loading them on the background?") {
+			go images.PreemptWorkloadImages(binary, cfg)
+		}
+	}
 
 	if profile.Gpus != "" {
 		if _, ok := gpu.Supported(runner); !ok {
@@ -333,6 +347,26 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 
 	wg.Wait()
 	return nil
+}
+
+func proceed(prompt string) bool {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Printf("%s (Y/N): ", prompt)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading input, please try again.")
+			continue
+		}
+
+		input = strings.TrimSpace(input)
+		if strings.EqualFold(input, "Y") {
+			return true
+		} else if strings.EqualFold(input, "N") {
+			return false
+		}
+		fmt.Println("Invalid input. Please enter 'Y' or 'N'.")
+	}
 }
 
 func createMagicCookie(profile *types.Profile) error {
