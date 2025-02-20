@@ -33,6 +33,7 @@ import (
 	"github.com/qubesome/cli/internal/util/xauth"
 	"github.com/qubesome/cli/pkg/inception"
 	"golang.org/x/sys/execabs"
+	"golang.org/x/term"
 )
 
 var (
@@ -234,7 +235,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 		}
 	}
 
-	if os.Stdin != nil && len(imgs) > 1 {
+	if len(imgs) > 1 && term.IsTerminal(int(os.Stdout.Fd())) {
 		if proceed("Not all workload images are present. Start loading them on the background?") {
 			go images.PreemptWorkloadImages(binary, cfg)
 		}
