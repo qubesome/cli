@@ -5,11 +5,12 @@ import (
 )
 
 type Options struct {
-	GitURL  string
-	Path    string
-	Local   string
-	Profile string
-	Runner  string
+	GitURL      string
+	Path        string
+	Local       string
+	Profile     string
+	Runner      string
+	Interactive bool
 }
 
 func WithGitURL(gitURL string) command.Option[Options] {
@@ -39,5 +40,11 @@ func WithProfile(profile string) command.Option[Options] {
 func WithRunner(runner string) command.Option[Options] {
 	return func(o *Options) {
 		o.Runner = runner
+	}
+}
+
+func WithInteractive() command.Option[Options] {
+	return func(o *Options) {
+		o.Interactive = true
 	}
 }
