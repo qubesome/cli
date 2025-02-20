@@ -60,6 +60,35 @@ qubesome flatpak run -profile <profile> org.kde.francis     - Run the org.kde.fr
 					)
 				},
 			},
+			{
+				Name:  "install",
+				Usage: "executes flatpak install on Host for each Flatpak in the Qubesome profile",
+				Description: `Examples:
+
+qubesome flatpak install
+`,
+				Arguments: []cli.Argument{
+					&cli.StringArg{
+						Name:        "profile",
+						Destination: &targetProfile,
+						Min:         1,
+						Max:         1,
+					},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					prof, err := profileOrActive(targetProfile)
+					if err == nil {
+						targetProfile = prof.Name
+					}
+
+					cfg := profileConfigOrDefault(targetProfile)
+
+					return flatpak.Install(
+						flatpak.WithProfile(targetProfile),
+						flatpak.WithConfig(cfg),
+					)
+				},
+			},
 		},
 	}
 	return cmd

@@ -2,11 +2,12 @@ package cli
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
 
+	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/profiles"
 	"github.com/urfave/cli/v3"
 )
@@ -44,6 +45,11 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles i3
 				Destination: &runner,
 			},
 			&cli.BoolFlag{
+				Name:        "interactive",
+				Aliases:     []string{"i"},
+				Destination: &interactive,
+			},
+			&cli.BoolFlag{
 				Sources:     cli.EnvVars("QUBESOME_SELFCALL"),
 				Destination: &selfcall,
 				Hidden:      true,
@@ -62,7 +68,7 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles i3
 			// so that the containerised Windows Manager is able to execute
 			// new container workloads. This self-calls qubesome and leave it
 			// running so that the main process exits right away.
-			if !debug && !selfcall {
+			if !debug && !interactive && !selfcall {
 				cmd := exec.Command(os.Args[0], os.Args[1:]...) //nolint
 				cmd.Env = append(cmd.Env, "QUBESOME_SELFCALL=true")
 				cmd.Env = append(cmd.Env, os.Environ()...)
@@ -74,23 +80,26 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles i3
 				}
 
 				if err := cmd.Start(); err != nil {
-					slog.Error("failed to daemonise profile start",
-						"cmd", os.Args[0], "args", os.Args[1:])
-					return err
+					return fmt.Errorf("failed to daemonise profile start: %w", err)
 				}
 
-				slog.Error("profile start daemon", "pid", cmd.Process.Pid,
-					"cmd", os.Args[0], "args", os.Args[1:])
+				fmt.Printf("[%d] profile start as daemon\n", cmd.Process.Pid)
 				os.Exit(0)
 			}
 
-			return profiles.Run(
+			opts := []command.Option[profiles.Options]{
 				profiles.WithProfile(targetProfile),
 				profiles.WithGitURL(gitURL),
 				profiles.WithPath(path),
 				profiles.WithLocal(local),
 				profiles.WithRunner(runner),
-			)
+			}
+
+			if interactive {
+				opts = append(opts, profiles.WithInteractive())
+			}
+
+			return profiles.Run(opts...)
 		},
 	}
 	return cmd

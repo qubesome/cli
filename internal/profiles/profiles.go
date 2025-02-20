@@ -33,6 +33,7 @@ import (
 	"github.com/qubesome/cli/internal/util/xauth"
 	"github.com/qubesome/cli/pkg/inception"
 	"golang.org/x/sys/execabs"
+	"golang.org/x/term"
 )
 
 var (
@@ -47,7 +48,7 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	if o.GitURL != "" {
-		return StartFromGit(o.Runner, o.Profile, o.GitURL, o.Path, o.Local)
+		return StartFromGit(o.Runner, o.Profile, o.GitURL, o.Path, o.Local, o.Interactive)
 	}
 
 	if o.Local != "" {
@@ -77,7 +78,7 @@ func Run(opts ...command.Option[Options]) error {
 		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
 	}
 
-	return Start(o.Runner, profile, cfg)
+	return Start(o.Runner, profile, cfg, o.Interactive)
 }
 
 func validGitDir(path string) bool {
@@ -95,7 +96,7 @@ func validGitDir(path string) bool {
 	return err == nil
 }
 
-func StartFromGit(runner, name, gitURL, path, local string) error {
+func StartFromGit(runner, name, gitURL, path, local string, interactive bool) error {
 	ln := files.ProfileConfig(name)
 
 	if _, err := os.Lstat(ln); err == nil {
@@ -190,10 +191,10 @@ func StartFromGit(runner, name, gitURL, path, local string) error {
 
 	slog.Debug("start from git", "profile", p.Name, "p", path, "path", p.Path, "config", cfgPath)
 
-	return Start(runner, p, cfg)
+	return Start(runner, p, cfg, interactive)
 }
 
-func Start(runner string, profile *types.Profile, cfg *types.Config) (err error) {
+func Start(runner string, profile *types.Profile, cfg *types.Config, interactive bool) (err error) {
 	if cfg == nil {
 		return fmt.Errorf("cannot start profile: config is nil")
 	}
@@ -219,12 +220,26 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 		return fmt.Errorf("could not find container runner %q", binary)
 	}
 
-	err = images.PullImageIfNotPresent(binary, profile.Image)
+	imgs, err := images.MissingImages(binary, cfg)
 	if err != nil {
-		return fmt.Errorf("cannot pull profile image: %w", err)
+		return err
 	}
 
-	go images.PreemptWorkloadImages(binary, cfg)
+	for _, img := range imgs {
+		if img == profile.Image {
+			fmt.Println("Pulling profile image:", profile.Image)
+			err = images.PullImageIfNotPresent(binary, profile.Image)
+			if err != nil {
+				return fmt.Errorf("cannot pull profile image: %w", err)
+			}
+		}
+	}
+
+	if len(imgs) > 1 && term.IsTerminal(int(os.Stdout.Fd())) {
+		if proceed("Not all workload images are present. Start loading them on the background?") {
+			go images.PreemptWorkloadImages(binary, cfg)
+		}
+	}
 
 	if profile.Gpus != "" {
 		if _, ok := gpu.Supported(runner); !ok {
@@ -306,7 +321,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 
 	err = createNewDisplay(binary,
 		creds.CA, creds.ClientPEM, creds.ClientKeyPEM,
-		profile, strconv.Itoa(int(profile.Display)))
+		profile, strconv.Itoa(int(profile.Display)), interactive)
 	if err != nil {
 		return err
 	}
@@ -333,6 +348,26 @@ func Start(runner string, profile *types.Profile, cfg *types.Config) (err error)
 
 	wg.Wait()
 	return nil
+}
+
+func proceed(prompt string) bool {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Printf("%s (Y/N): ", prompt)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading input, please try again.")
+			continue
+		}
+
+		input = strings.TrimSpace(input)
+		if strings.EqualFold(input, "Y") {
+			return true
+		} else if strings.EqualFold(input, "N") {
+			return false
+		}
+		fmt.Println("Invalid input. Please enter 'Y' or 'N'.")
+	}
 }
 
 func createMagicCookie(profile *types.Profile) error {
@@ -390,7 +425,7 @@ func startWindowManager(bin, name, display, wm string) error {
 	return nil
 }
 
-func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, display string) error {
+func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, display string, interactive bool) error {
 	command := "Xephyr"
 	res, err := resolution.Primary()
 	if err != nil {
@@ -499,7 +534,6 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	dockerArgs := []string{
 		"run",
 		"--rm",
-		"-d",
 		// rely on currently set DISPLAY.
 		"-e", "DISPLAY",
 		"-e", "XDG_SESSION_TYPE=X11",
@@ -509,6 +543,12 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		"--device", "/dev/dri",
 		"--security-opt=no-new-privileges:true",
 		"--cap-drop=ALL",
+	}
+
+	if interactive {
+		dockerArgs = append(dockerArgs, "-it")
+	} else {
+		dockerArgs = append(dockerArgs, "-d")
 	}
 
 	if strings.HasSuffix(bin, "podman") {
@@ -589,18 +629,32 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(ContainerNameFormat, profile.Name)))
 	dockerArgs = append(dockerArgs, profile.Image)
-	dockerArgs = append(dockerArgs, command)
-	dockerArgs = append(dockerArgs, cArgs...)
+	if interactive {
+		dockerArgs = append(dockerArgs, "sh")
+		fmt.Println("To manually start the Window Manager:")
+		fmt.Printf("\t%s %s &\n\tDISPLAY=:%d %s &\n", command, strings.Join(cArgs, " "), profile.Display, profile.WindowManager)
+	} else {
+		dockerArgs = append(dockerArgs, command)
+		dockerArgs = append(dockerArgs, cArgs...)
 
-	fmt.Println(
-		"INFO: For best experience use input grabber shortcuts:",
-		grabberShortcut())
+		fmt.Println(
+			"INFO: For best experience use input grabber shortcuts:",
+			grabberShortcut())
+	}
 
 	slog.Debug("exec: "+bin, "args", dockerArgs)
 	cmd := execabs.Command(bin, dockerArgs...)
 	cmd.Env = append(os.Environ(), "Q_MTLS_CA="+string(ca))
 	cmd.Env = append(cmd.Env, "Q_MTLS_CERT="+string(cert))
 	cmd.Env = append(cmd.Env, "Q_MTLS_KEY="+string(key))
+
+	if interactive {
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		return cmd.Run()
+	}
 
 	err = storeMtlsData(profile.Name, string(ca), string(cert), string(key))
 	if err != nil {
