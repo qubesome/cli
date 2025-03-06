@@ -1,6 +1,9 @@
 package gpu
 
-import "os/exec"
+import (
+	"os"
+	"os/exec"
+)
 
 // Supported checks whether GPU sharing is supported by the system, based
 // on either NVidia or AMD toolkits being instead.
@@ -16,8 +19,8 @@ func Supported(runner string) (string, bool) {
 		}
 		return "--gpus=all", true
 	}
-	// AMD GPU.
-	if path, _ := exec.LookPath("rocm-smi"); path != "" {
+	// AMD GPU based on AMD Kernel Fusion Driver.
+	if _, err := os.Stat("/dev/kfd"); err == nil {
 		return "--device=/dev/kfd", true
 	}
 	return "", false
