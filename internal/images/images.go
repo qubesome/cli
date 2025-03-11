@@ -122,16 +122,19 @@ func PullImageIfNotPresent(bin, image string) error {
 	return PullImage(bin, image)
 }
 
-func imagePresent(bin, image string) (bool, error) {
-	slog.Debug("checking if container image is present", "image", image)
+func imagePresent(bin, image string) (found bool, err error) {
+	defer func() {
+		slog.Debug("checking container image presence", "image", image, "found", found)
+	}()
 	cmd := execabs.Command(bin, "images", "-q", image)
 
 	out, err := cmd.Output()
 	if len(out) > 0 && err == nil {
-		return true, nil
+		found = true
+		return
 	}
 
-	return false, err
+	return
 }
 
 func MissingImages(bin string, cfg *types.Config) ([]string, error) {
