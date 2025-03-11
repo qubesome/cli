@@ -1,4 +1,4 @@
-## qubesome
+## qubesome [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/qubesome/cli/badge)](https://scorecard.dev/viewer/?uri=github.com/qubesome/cli)
 
 Welcome to qubesome! This project is a command-line interface (CLI) tool aimed
 to simplify managing Linux desktop configurations. It works by virtualizing
