@@ -1,12 +1,13 @@
 module github.com/qubesome/cli
 
 go 1.24.0
+
 require (
 	github.com/cyphar/filepath-securejoin v0.4.1
 	github.com/go-git/go-git/v5 v5.14.0
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.10.0
-	github.com/urfave/cli/v3 v3.0.0-beta1
+	github.com/urfave/cli/v3 v3.1.1
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/sys v0.31.0
 	golang.org/x/term v0.30.0
