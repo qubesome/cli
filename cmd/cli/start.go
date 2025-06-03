@@ -61,8 +61,6 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles i3
 		Arguments: []cli.Argument{
 			&cli.StringArg{
 				Name:        "profile",
-				Min:         1,
-				Max:         1,
 				Destination: &targetProfile,
 			},
 		},

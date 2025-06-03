@@ -24,8 +24,6 @@ qubesome flatpak run -profile <profile> org.kde.francis     - Run the org.kde.fr
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:        "workload",
-						Min:         1,
-						Max:         1,
 						Destination: &workload,
 					},
 				},
@@ -71,8 +69,6 @@ qubesome flatpak install
 					&cli.StringArg{
 						Name:        "profile",
 						Destination: &targetProfile,
-						Min:         1,
-						Max:         1,
 					},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
