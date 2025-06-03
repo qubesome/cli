@@ -22,8 +22,6 @@ qubesome run -profile <profile> chrome     - Run the chrome workload on a specif
 		Arguments: []cli.Argument{
 			&cli.StringArg{
 				Name:        "workload",
-				Min:         1,
-				Max:         1,
 				Destination: &workload,
 			},
 		},

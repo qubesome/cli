@@ -40,8 +40,6 @@ qubesome clip from-host -profile <name>        - Copy clipboard contents from ho
 					&cli.StringArg{
 						Name:        "target_profile",
 						UsageText:   "Required when multiple profiles are active",
-						Min:         0,
-						Max:         1,
 						Destination: &targetProfile,
 					},
 				},
@@ -82,14 +80,10 @@ qubesome clip from-host -profile <name>        - Copy clipboard contents from ho
 				Arguments: []cli.Argument{
 					&cli.StringArg{
 						Name:        "source_profile",
-						Min:         1,
-						Max:         1,
 						Destination: &sourceProfile,
 					},
 					&cli.StringArg{
 						Name:        "target_profile",
-						Min:         1,
-						Max:         1,
 						Destination: &targetProfile,
 					},
 				},
@@ -144,8 +138,6 @@ qubesome clip to-host -profile <name>        - Copy clipboard contents from a sp
 					&cli.StringArg{
 						Name:        "source_profile",
 						UsageText:   "Required when multiple profiles are active",
-						Min:         0,
-						Max:         1,
 						Destination: &sourceProfile,
 					},
 				},

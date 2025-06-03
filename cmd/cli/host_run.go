@@ -21,8 +21,6 @@ qubesome host-run -profile <profile> firefox     - Run firefox on the host and d
 		Arguments: []cli.Argument{
 			&cli.StringArg{
 				Name:        "command",
-				Min:         1,
-				Max:         1,
 				Destination: &commandName,
 			},
 		},
