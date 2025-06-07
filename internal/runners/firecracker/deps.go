@@ -23,7 +23,7 @@ const (
 	qubesomeFilemode    = 0o700
 	qubesomeCfgFilemode = 0o600
 
-	kernelURL  = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.5/x86_64/vmlinux-5.10.186"
+	kernelURL  = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.11/x86_64/vmlinux-6.1.102"
 	kernelFile = "vmlinux"
 
 	MB              = 1024 * 1024
