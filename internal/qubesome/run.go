@@ -176,7 +176,7 @@ func runner(in WorkloadInfo, runnerOverride string) error {
 	if !reflect.DeepEqual(ew.Workload.HostAccess, w.HostAccess) {
 		msg := diffMessage(w, ew)
 		if len(msg) > 0 {
-			err := fmt.Errorf("workload %s tries to access more than profile allows", in.Profile)
+			err := fmt.Errorf("workload %s tries to access more than profile allows", in.Name)
 			dbus.NotifyOrLog("qubesome: access denied", err.Error()+":<br/>"+msg)
 
 			return err
