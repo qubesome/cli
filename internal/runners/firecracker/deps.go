@@ -74,7 +74,7 @@ func ensureDependencies(img string) error {
 
 func setupTaps(img string) error {
 	slog.Info("setting up taps")
-	bin := files.ContainerRunnerBinary("")
+	bin := files.ContainerRunnerBinary("docker")
 	cmd := execabs.Command(bin,
 		"run", "--rm", "--privileged",
 		"--network", "host",
