@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"text/template"
 
 	"github.com/qubesome/cli/internal/files"
@@ -20,28 +19,6 @@ type configParams struct {
 	HostDeviceName  string
 }
 
-func createRootFs(dir, img string) (string, error) {
-	slog.Info("creating root fs")
-	rootfs := filepath.Join(dir, "roofs.ext4")
-	bin := files.ContainerRunnerBinary("docker")
-	cmd := execabs.Command(bin,
-		"run", "--rm", "--privileged",
-		"-v", "/tmp/:/tmp/",
-		img,
-		"create_rootfs", rootfs, strconv.Itoa(os.Getuid()),
-	)
-
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-
-	if err := cmd.Run(); err != nil {
-		return "", err
-	}
-
-	return rootfs, nil
-}
-
 func Run(ew types.EffectiveWorkload) error {
 	slog.Warn("use of firecracker is experimental")
 
@@ -53,7 +30,7 @@ func Run(ew types.EffectiveWorkload) error {
 		return fmt.Errorf("firecracker does not support single instance")
 	}
 
-	if err := ensureDependencies(ew.Workload.Image); err != nil {
+	if err := ensureDependencies(); err != nil {
 		return err
 	}
 
@@ -67,10 +44,7 @@ func Run(ew types.EffectiveWorkload) error {
 		return err
 	}
 
-	uid := os.Getuid()
-	baseDir := fmt.Sprintf(runUserDir, uid)
-	kfile := filepath.Join(baseDir, qubesomeDir, kernelFile)
-
+	kfile := filepath.Join(files.QubesomeDir(), kernelFile)
 	params := configParams{
 		KernelImagePath: kfile,
 		RootFsPath:      rootfs,
@@ -85,7 +59,7 @@ func Run(ew types.EffectiveWorkload) error {
 		return err
 	}
 
-	f, err := os.OpenFile(cfgPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, qubesomeCfgFilemode)
+	f, err := os.OpenFile(cfgPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, files.FileMode)
 	if err != nil {
 		return fmt.Errorf("failed to open firecracker config file: %w", err)
 	}
@@ -105,10 +79,10 @@ func Run(ew types.EffectiveWorkload) error {
 }
 
 func run(args []string) error {
-	slog.Debug(command, "args", args)
+	slog.Debug(files.FireCrackerBinary, "args", args)
 
 	ctx := context.Background()
-	cmd := execabs.CommandContext(ctx, command, args...)
+	cmd := execabs.CommandContext(ctx, files.FireCrackerBinary, args...)
 
 	cmd.Stdin = os.Stdin
 	cmd.Stderr = os.Stderr

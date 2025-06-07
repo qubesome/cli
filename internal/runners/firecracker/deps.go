@@ -11,20 +11,26 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/util/dbus"
 	"golang.org/x/sys/execabs"
+
+	_ "embed"
 )
 
-const (
-	command             = "/usr/bin/firecracker"
-	runUserDir          = "/run/user/%d"
-	qubesomeDir         = "qubesome"
-	qubesomeFilemode    = 0o700
-	qubesomeCfgFilemode = 0o600
+//go:embed firecracker.config
+var configTmpl string
 
+const (
+	// kernelUrl from https://s3.amazonaws.com/spec.ccfc.min/
 	kernelURL  = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.11/x86_64/vmlinux-6.1.102"
 	kernelFile = "vmlinux"
+
+	// light-weight image that contains the necessary tools for setting up
+	// firecracker's network taps.
+	firecrackerImg = "ghcr.io/qubesome/firecracker:latest"
 
 	MB              = 1024 * 1024
 	maxDownloadSize = 100 * MB
@@ -32,32 +38,24 @@ const (
 	networkDevName = "tap1"
 )
 
-func ensureDependencies(img string) error {
-	if _, err := exec.LookPath(command); err != nil {
+func ensureDependencies() error {
+	if _, err := exec.LookPath(files.FireCrackerBinary); err != nil {
 		return err
 	}
 
-	uid := os.Getuid()
-	baseDir := fmt.Sprintf(runUserDir, uid)
-
-	_, err := os.Stat(baseDir)
-	if err != nil {
-		return err
-	}
-
-	d := filepath.Join(baseDir, qubesomeDir)
-	if err = os.MkdirAll(d, qubesomeFilemode); err != nil {
+	d := files.QubesomeDir()
+	if err := os.MkdirAll(d, files.DirMode); err != nil {
 		return err
 	}
 
 	kfile := filepath.Join(d, kernelFile)
-	_, err = os.Stat(kfile)
+	_, err := os.Stat(kfile)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 
-		slog.Info("cached kernel image not found")
+		dbus.NotifyOrLog("firecracker", "downloading fresh kernel image")
 		err = download(kernelURL, kfile)
 		if err != nil {
 			return fmt.Errorf("failed to download kernel image: %w", err)
@@ -66,19 +64,44 @@ func ensureDependencies(img string) error {
 
 	_, err = net.InterfaceByName(networkDevName)
 	if err != nil {
-		return setupTaps(img)
+		return setupTaps()
 	}
 
 	return nil
 }
 
-func setupTaps(img string) error {
-	slog.Info("setting up taps")
+func createRootFs(dir, img string) (string, error) {
+	slog.Info("creating root fs")
+	rootfs := filepath.Join(dir, "roofs.ext4")
 	bin := files.ContainerRunnerBinary("docker")
 	cmd := execabs.Command(bin,
 		"run", "--rm", "--privileged",
-		"--network", "host",
+		"-v", dir+":"+dir,
 		img,
+		"create_rootfs", rootfs, strconv.Itoa(os.Getuid()),
+	)
+
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+
+	return rootfs, nil
+}
+
+func setupTaps() error {
+	slog.Info("setting up taps")
+	bin := files.ContainerRunnerBinary("docker")
+
+	slog.Debug("setting up taps", "device name", networkDevName)
+	cmd := execabs.Command(bin,
+		"run", "--rm", "--privileged",
+		"--network", "host",
+		"-e", fmt.Sprintf("TAP_DEV=%s", networkDevName),
+		firecrackerImg,
 		"setup_taps",
 	)
 
