@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/cyphar/filepath-securejoin v0.4.1
-	github.com/go-git/go-git/v5 v5.16.0
+	github.com/go-git/go-git/v5 v5.16.2
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v3 v3.3.3
