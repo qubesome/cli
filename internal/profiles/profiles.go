@@ -14,9 +14,9 @@ import (
 	"time"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing/transport"
+	"github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/google/uuid"
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
@@ -150,7 +150,7 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 			auth = a
 		}
 
-		_, err = git.PlainClone(dir, false, &git.CloneOptions{
+		_, err = git.PlainClone(dir, &git.CloneOptions{
 			URL:  gitURL,
 			Auth: auth,
 		})
