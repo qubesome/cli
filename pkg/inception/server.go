@@ -38,7 +38,8 @@ type Server struct {
 }
 
 func (s *Server) Listen(serverCert tls.Certificate, ca []byte, socket string) error {
-	lis, err := net.Listen("unix", socket)
+	lc := net.ListenConfig{}
+	lis, err := lc.Listen(context.Background(), "unix", socket)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}

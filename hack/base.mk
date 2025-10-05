@@ -1,4 +1,4 @@
-GOLANGCI_VERSION ?= v1.64.5
+GOLANGCI_VERSION ?= v2.5.0
 PROTOC_VERSION ?= 29.3
 TOOLS_BIN := $(shell mkdir -p build/tools && realpath build/tools)
 

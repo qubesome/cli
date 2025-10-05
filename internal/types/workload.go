@@ -72,14 +72,14 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 
 	e.Name = fmt.Sprintf("%s-%s", w.Name, p.Name)
 
-	e.Workload.HostAccess.Camera = w.HostAccess.Camera && p.HostAccess.Camera
-	e.Workload.HostAccess.Microphone = w.HostAccess.Microphone && p.HostAccess.Microphone
-	e.Workload.HostAccess.Speakers = w.HostAccess.Speakers && p.HostAccess.Speakers
-	e.Workload.HostAccess.Dbus = w.HostAccess.Dbus && p.HostAccess.Dbus
-	e.Workload.HostAccess.VarRunUser = w.HostAccess.VarRunUser && p.HostAccess.VarRunUser
-	e.Workload.HostAccess.Bluetooth = w.HostAccess.Bluetooth && p.HostAccess.Bluetooth
-	e.Workload.HostAccess.Mime = w.HostAccess.Mime && p.HostAccess.Mime
-	e.Workload.HostAccess.Privileged = w.HostAccess.Privileged && p.HostAccess.Privileged
+	e.Workload.HostAccess.Camera = w.HostAccess.Camera && p.Camera
+	e.Workload.HostAccess.Microphone = w.HostAccess.Microphone && p.Microphone
+	e.Workload.HostAccess.Speakers = w.HostAccess.Speakers && p.Speakers
+	e.Workload.HostAccess.Dbus = w.HostAccess.Dbus && p.Dbus
+	e.Workload.HostAccess.VarRunUser = w.HostAccess.VarRunUser && p.VarRunUser
+	e.Workload.HostAccess.Bluetooth = w.HostAccess.Bluetooth && p.Bluetooth
+	e.Workload.HostAccess.Mime = w.HostAccess.Mime && p.Mime
+	e.Workload.HostAccess.Privileged = w.HostAccess.Privileged && p.Privileged
 
 	// TODO: Consider restraining user on workloads.
 	e.Workload.User = w.User
@@ -127,13 +127,13 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 		e.Workload.HostAccess.CapsAdd = caps
 	}
 
-	if len(p.HostAccess.Devices) == 0 {
+	if len(p.Devices) == 0 {
 		e.Workload.HostAccess.Devices = p.Devices[:0]
 	} else if len(w.HostAccess.Devices) > 0 {
 		devs := make([]string, 0, len(w.HostAccess.Devices))
 
 		for _, path := range w.HostAccess.Devices {
-			if pathAllowed(path, p.HostAccess.Devices) {
+			if pathAllowed(path, p.Devices) {
 				devs = append(devs, path)
 			}
 		}

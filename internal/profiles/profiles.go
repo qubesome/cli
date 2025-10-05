@@ -81,11 +81,12 @@ func Run(opts ...command.Option[Options]) error {
 	if err != nil {
 		return err
 	}
-	cfg.RootDir = filepath.Dir(path)
 
 	if cfg == nil {
 		return fmt.Errorf("cannot start profile: nil config")
 	}
+
+	cfg.RootDir = filepath.Dir(path)
 	profile, ok := cfg.Profile(o.Profile)
 	if !ok {
 		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
@@ -593,7 +594,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	} else {
 		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE=X11")
 	}
-	if profile.HostAccess.Gpus != "" {
+	if profile.Gpus != "" {
 		if gpus, ok := gpu.Supported(profile.Runner); ok {
 			dockerArgs = append(dockerArgs, gpus)
 		}

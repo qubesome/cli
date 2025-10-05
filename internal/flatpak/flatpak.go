@@ -54,7 +54,7 @@ func Run(opts ...command.Option[Options]) error {
 	args := []string{"run", o.Name}
 	args = append(args, o.ExtraArgs...)
 
-	c := exec.Command("/usr/bin/flatpak", args...)
+	c := exec.CommandContext(context.TODO(), "/usr/bin/flatpak", args...)
 	c.Env = append(os.Environ(), fmt.Sprintf("DISPLAY=:%d", prof.Display))
 	out, err := c.CombinedOutput()
 	fmt.Println(string(out))
@@ -86,7 +86,7 @@ func Install(opts ...command.Option[Options]) error {
 		fmt.Println("installing Flatpak", name)
 		args := []string{"install", "flathub", name}
 
-		c := exec.Command("/usr/bin/flatpak", args...)
+		c := exec.CommandContext(context.TODO(), "/usr/bin/flatpak", args...)
 		c.Stdin = os.Stdin
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
