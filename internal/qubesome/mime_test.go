@@ -143,7 +143,7 @@ func Test_HandleMime(t *testing.T) {
 			called := 0
 
 			q := New()
-			q.runner = func(wi WorkloadInfo, _ string) error {
+			q.runner = func(wi WorkloadInfo, _ string, _ bool) error {
 				actual = &wi
 				called++
 				return nil

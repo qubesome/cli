@@ -78,10 +78,10 @@ func Run(opts ...command.Option[Options]) error {
 
 	// Wait for any background operation that is in-flight.
 	defer wg.Wait()
-	return runner(in, o.Runner)
+	return runner(in, o.Runner, o.Headless)
 }
 
-func runner(in WorkloadInfo, runnerOverride string) error {
+func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
@@ -188,6 +188,11 @@ func runner(in WorkloadInfo, runnerOverride string) error {
 
 	if runnerOverride != "" {
 		ew.Workload.Runner = runnerOverride
+	}
+
+	if headless {
+		// In headless mode, Mime handling is not supported.
+		ew.Workload.HostAccess.Mime = false
 	}
 
 	switch ew.Workload.Runner {

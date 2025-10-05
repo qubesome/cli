@@ -13,6 +13,7 @@ type Options struct {
 	Profile   string
 	Runner    string
 	ExtraArgs []string
+	Headless  bool
 }
 
 func WithExtraArgs(args []string) command.Option[Options] {
@@ -42,6 +43,11 @@ func WithWorkload(workload string) command.Option[Options] {
 func WithConfig(cfg *types.Config) command.Option[Options] {
 	return func(o *Options) {
 		o.Config = cfg
+	}
+}
+func WithHeadless() command.Option[Options] {
+	return func(o *Options) {
+		o.Headless = true
 	}
 }
 

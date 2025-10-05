@@ -42,6 +42,7 @@ qubesome headless -profile ~/git/dotfiles chrome
 			cfg := config(conf)
 
 			return qubesome.Run(
+				qubesome.WithHeadless(),
 				qubesome.WithWorkload(workload),
 				qubesome.WithProfile(targetProfile),
 				qubesome.WithConfig(cfg),
