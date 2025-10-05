@@ -41,6 +41,7 @@ func RootCommand() *cli.Command {
 			completionCommand(),
 			hostRunCommand(),
 			flatpakCommand(),
+			headlessCommand(),
 		},
 	}
 
