@@ -635,6 +635,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
 	if profile.Dbus {
+		paths = append(paths, "-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket")
 		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
 	} else {
 		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
