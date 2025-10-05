@@ -56,7 +56,7 @@ linters:
     - stylecheck
     - tagalign
     - tagliatelle
-    - tenv
+    - usetesting
     - testableexamples
     - thelper
     - tparallel
