@@ -1,5 +1,5 @@
 GOLANGCI_VERSION ?= v2.5.0
-PROTOC_VERSION ?= 29.3
+PROTOC_VERSION ?= 32.1
 TOOLS_BIN := $(shell mkdir -p build/tools && realpath build/tools)
 
 ifneq ($(shell git status --porcelain --untracked-files=no),)
