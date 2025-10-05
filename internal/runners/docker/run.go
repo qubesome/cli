@@ -112,7 +112,17 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 
 		// TODO: Investigate ways to avoid sharing /run/user/1000 on Wayland.
-		args = append(args, "-e XDG_RUNTIME_DIR")
+		args = append(args, "-e", "XDG_RUNTIME_DIR")
+		args = append(args, "-e", "XDG_BACKEND")
+		args = append(args, "-e", "XDG_SEAT")
+		args = append(args, "-e", "XDG_SESSION_TYPE")
+		args = append(args, "-e", "XDG_SESSION_ID")
+		args = append(args, "-e", "XDG_SESSION_CLASS")
+		args = append(args, "-e", "XDG_SESSION_DESKTOP")
+		args = append(args, "-e", "WAYLAND_DISPLAY")
+		args = append(args, "-e", "HYPRLAND_INSTANCE_SIGNATURE")
+		args = append(args, "-e", "DBUS_SESSION_BUS_ADDRESS")
+
 		args = append(args, "-v="+xdgRuntimeDir+":/run/user/1000")
 	} else {
 		if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
@@ -162,6 +172,11 @@ func Run(ew types.EffectiveWorkload) error {
 		homedir, err := getHomeDir(wl.Image)
 		if err != nil {
 			return err
+		}
+
+		err = os.MkdirAll(pdir, files.DirMode)
+		if err != nil {
+			return fmt.Errorf("failed to ensure profile dir: %w", err)
 		}
 
 		srcMimeList := filepath.Join(pdir, "mimeapps.list")

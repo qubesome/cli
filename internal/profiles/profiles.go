@@ -81,11 +81,12 @@ func Run(opts ...command.Option[Options]) error {
 	if err != nil {
 		return err
 	}
-	cfg.RootDir = filepath.Dir(path)
 
 	if cfg == nil {
 		return fmt.Errorf("cannot start profile: nil config")
 	}
+
+	cfg.RootDir = filepath.Dir(path)
 	profile, ok := cfg.Profile(o.Profile)
 	if !ok {
 		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
@@ -336,6 +337,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		creds.CA, creds.ClientPEM, creds.ClientKeyPEM,
 		profile, strconv.Itoa(int(profile.Display)), interactive, cfg)
 	if err != nil {
+		slog.Warn("failed to create display", "error", err)
 		return err
 	}
 
@@ -412,12 +414,13 @@ func createMagicCookie(profile *types.Profile) error {
 
 	xauthority := os.Getenv("XAUTHORITY")
 	if xauthority == "" {
-		return fmt.Errorf("XAUTHORITY not defined")
+		xauthority = os.ExpandEnv("${HOME}/.XAUTHORITY")
 	}
 
 	slog.Debug("opening parent xauthority", "path", xauthority)
 	parent, err := os.Open(xauthority)
 	if err != nil {
+		slog.Debug("failed to open parent xauthority", "error", err)
 		return err
 	}
 	defer parent.Close()
@@ -470,6 +473,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 			"-tst",
 			"-nolisten", "tcp",
 			"-auth", "/home/xorg-user/.Xserver",
+			"-verbose", "9",
 			"--",
 			strings.TrimPrefix(profile.WindowManager, "exec ")}
 	}
@@ -549,7 +553,6 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		"--rm",
 		// rely on currently set DISPLAY.
 		"-e", "DISPLAY",
-		"-e", "XDG_SESSION_TYPE=X11",
 		"-e", "Q_MTLS_CA",
 		"-e", "Q_MTLS_CERT",
 		"-e", "Q_MTLS_KEY",
@@ -578,10 +581,20 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		}
 
 		// TODO: Investigate ways to avoid sharing /run/user/1000 on Wayland.
-		dockerArgs = append(dockerArgs, "-e XDG_RUNTIME_DIR")
+		dockerArgs = append(dockerArgs, "-e", "XDG_RUNTIME_DIR")
+		dockerArgs = append(dockerArgs, "-e", "XDG_BACKEND")
+		dockerArgs = append(dockerArgs, "-e", "XDG_SEAT")
+		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE")
+		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_ID")
+		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_CLASS")
+		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_DESKTOP")
+		dockerArgs = append(dockerArgs, "-e", "WAYLAND_DISPLAY")
+		dockerArgs = append(dockerArgs, "-e", "HYPRLAND_INSTANCE_SIGNATURE")
 		dockerArgs = append(dockerArgs, "-v="+xdgRuntimeDir+":/run/user/1000")
+	} else {
+		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE=X11")
 	}
-	if profile.HostAccess.Gpus != "" {
+	if profile.Gpus != "" {
 		if gpus, ok := gpu.Supported(profile.Runner); ok {
 			dockerArgs = append(dockerArgs, gpus)
 		}
@@ -623,6 +636,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
 	if profile.Dbus {
+		paths = append(paths, "-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket")
 		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
 	} else {
 		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
@@ -657,6 +671,8 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	slog.Debug("exec: "+bin, "args", dockerArgs)
 	cmd := execabs.Command(bin, dockerArgs...)
+	cmd.Env = append(cmd.Env, os.Environ()...)
+
 	cmd.Env = append(os.Environ(), "Q_MTLS_CA="+string(ca))
 	cmd.Env = append(cmd.Env, "Q_MTLS_CERT="+string(cert))
 	cmd.Env = append(cmd.Env, "Q_MTLS_KEY="+string(key))
