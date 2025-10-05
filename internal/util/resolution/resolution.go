@@ -22,7 +22,7 @@ func Primary() (string, error) {
 	var err error
 
 	for _, binary := range binaries {
-		cmd := execabs.Command(binary) //nolint
+		cmd := execabs.Command(binary)
 		output, err = cmd.Output()
 		if err == nil && len(output) > 0 {
 			break
