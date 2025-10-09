@@ -10,10 +10,17 @@ import (
 )
 
 type Workload struct {
-	Name           string     `yaml:"name"`
-	Image          string     `yaml:"image"`
-	Command        string     `yaml:"command"`
-	Args           []string   `yaml:"args"`
+	Name    string `yaml:"name"`
+	Image   string `yaml:"image"`
+	Command string `yaml:"command"`
+	// Args defines X11-specific arguments.
+	Args []string `yaml:"args"`
+	// X11Args defines X11-specific arguments.
+	X11Args []string `yaml:"x11Args"`
+	// WaylandArgs defines Wayland-specific arguments.
+	WaylandArgs []string `yaml:"waylandArgs"`
+	// NoGPUArgs defines arguments to be used when no GPU is available.
+	NoGPUArgs      []string   `yaml:"noGpuArgs"`
 	SingleInstance bool       `yaml:"singleInstance"`
 	HostAccess     HostAccess `yaml:"hostAccess"`
 	MimeApps       []string   `yaml:"mimeApps"`
