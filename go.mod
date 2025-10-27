@@ -7,7 +7,7 @@ require (
 	github.com/go-git/go-git/v6 v6.0.0-20250628104446-20c25df268c3
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.11.1
-	github.com/urfave/cli/v3 v3.4.1
+	github.com/urfave/cli/v3 v3.5.0
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/sys v0.37.0
 	golang.org/x/term v0.36.0
