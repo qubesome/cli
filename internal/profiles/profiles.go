@@ -688,7 +688,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	err = storeMtlsData(profile.Name, string(ca), string(cert), string(key))
 	if err != nil {
-		return err
+		slog.Error("failed storing mtls data", "error", err)
 	}
 
 	output, err := cmd.CombinedOutput()
