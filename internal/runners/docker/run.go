@@ -60,6 +60,7 @@ func Run(ew types.EffectiveWorkload) error {
 		"--rm",
 		"-d",
 		"--security-opt=seccomp=unconfined",
+		"--security-opt=label=disable",
 		"--security-opt=no-new-privileges=true",
 	}
 
@@ -271,27 +272,16 @@ func Run(ew types.EffectiveWorkload) error {
 		// Since the implementation of mTLS, workloads granted mime handling
 		// need the mTLS creds so that they can communicate with the inception
 		// server.
-		ks := keyring.New(ew.Profile.Name, backend.New())
-		ca, err := ks.Get(keyring.MtlsCA)
-		if err != nil {
-			return err
+
+		if ca, cert, key, ok := mtlsData(ew.Profile.Name); ok {
+			slog.Debug("mime access: enabled")
+
+			cmd.Env = append(os.Environ(), "Q_MTLS_CA="+ca)
+			cmd.Env = append(cmd.Env, "Q_MTLS_CERT="+cert)
+			cmd.Env = append(cmd.Env, "Q_MTLS_KEY="+key)
+		} else {
+			slog.Debug("mime access: skipped")
 		}
-
-		cert, err := ks.Get(keyring.MtlsClientCert)
-		if err != nil {
-			return err
-		}
-
-		key, err := ks.Get(keyring.MtlsClientKey)
-		if err != nil {
-			return err
-		}
-
-		slog.Debug("enabling mime access")
-
-		cmd.Env = append(os.Environ(), "Q_MTLS_CA="+ca)
-		cmd.Env = append(cmd.Env, "Q_MTLS_CERT="+cert)
-		cmd.Env = append(cmd.Env, "Q_MTLS_KEY="+key)
 	}
 
 	cmd.Stderr = os.Stderr
@@ -299,6 +289,29 @@ func Run(ew types.EffectiveWorkload) error {
 	cmd.Stdout = os.Stdout
 
 	return cmd.Run()
+}
+
+func mtlsData(name string) (string, string, string, bool) {
+	ks := keyring.New(name, backend.New())
+	ca, err := ks.Get(keyring.MtlsCA)
+	if err != nil {
+		slog.Error("failed to fetch mtls-ca", "error", err)
+		return "", "", "", false
+	}
+
+	cert, err := ks.Get(keyring.MtlsClientCert)
+	if err != nil {
+		slog.Error("failed to fetch mtls-client-cert", "error", err)
+		return "", "", "", false
+	}
+
+	key, err := ks.Get(keyring.MtlsClientKey)
+	if err != nil {
+		slog.Error("failed to fetch mtls-client-key", "error", err)
+		return "", "", "", false
+	}
+
+	return ca, cert, key, true
 }
 
 func getHomeDir(image string) (string, error) {

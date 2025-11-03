@@ -557,7 +557,8 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		"-e", "Q_MTLS_CERT",
 		"-e", "Q_MTLS_KEY",
 		"--device", "/dev/dri",
-		"--security-opt=no-new-privileges:true",
+		"--security-opt=no-new-privileges=true",
+		"--security-opt=label=disable",
 		"--cap-drop=ALL",
 	}
 
@@ -687,7 +688,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	err = storeMtlsData(profile.Name, string(ca), string(cert), string(key))
 	if err != nil {
-		return err
+		slog.Error("failed storing mtls data", "error", err)
 	}
 
 	output, err := cmd.CombinedOutput()

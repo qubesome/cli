@@ -61,6 +61,7 @@ func Run(ew types.EffectiveWorkload) error {
 		"-d",
 		"--security-opt=seccomp=unconfined",
 		"--security-opt=no-new-privileges=true",
+		"--security-opt=label=disable",
 		"--group-add=keep-groups",
 	}
 
