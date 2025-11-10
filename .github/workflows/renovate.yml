@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   renovate:
-    uses: qubesome/.github/actions/renovate.yml@main
+    uses: qubesome/.github/.github/workflows/renovate.yml@main
     secrets:
       RENOVATE_PRIVATE_KEY: ${{ secrets.RENOVATE_PRIVATE_KEY }}
       RENOVATE_APP_ID: ${{ secrets.RENOVATE_APP_ID }}
