@@ -1,0 +1,16 @@
+name: Renovate
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: '0 5,7 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  renovate:
+    uses: qubesome/.github/actions/renovate.yml@main
+    secrets:
+      RENOVATE_PRIVATE_KEY: ${{ secrets.RENOVATE_PRIVATE_KEY }}
+      RENOVATE_APP_ID: ${{ secrets.RENOVATE_APP_ID }}
