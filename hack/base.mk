@@ -18,7 +18,7 @@ $(GOLANGCI):
 
 PROTOC = $(TOOLS_BIN)/protoc
 $(PROTOC):
-	curl -fsSL https://github.com/protocolbuffers/protobuf/releases/download/v$(PROTOC_VERSION)/protoc-$(PROTOC_VERSION)-linux-x86_64.zip \
+	curl -fsSL https://github.com/protocolbuffers/protobuf/releases/download/$(PROTOC_VERSION)/protoc-$(patsubst v%,%,$(PROTOC_VERSION))-linux-x86_64.zip \
 		-o $(TOOLS_BIN)/protoc.zip
 	unzip -j $(TOOLS_BIN)/protoc.zip -d $(TOOLS_BIN) "bin/protoc"
 	rm $(TOOLS_BIN)/protoc.zip
