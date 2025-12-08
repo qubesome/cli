@@ -691,6 +691,24 @@ func Test_ApplyProfile(t *testing.T) {
 			},
 		},
 		{
+			name: "Network none: workload foo + profile none",
+			workload: Workload{
+				HostAccess: HostAccess{Network: "none"},
+			},
+			profile: &Profile{
+				HostAccess: HostAccess{Network: "foo"},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Network: "none"},
+				},
+				Profile: &Profile{
+					HostAccess: HostAccess{Network: "foo"},
+				},
+			},
+		},
+		{
 			name: "Paths empty: workload /foo + profile empty",
 			workload: Workload{
 				HostAccess: HostAccess{Paths: []string{"/foo:/foo"}},
