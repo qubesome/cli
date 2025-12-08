@@ -97,7 +97,7 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 
 	// If profile sets a network, that is enforced on all workloads.
 	// If a profile does not set a network, workloads can only set "none" as a network.
-	if p.Network != "" {
+	if p.Network != "" && w.HostAccess.Network != "none" {
 		e.Workload.HostAccess.Network = p.Network
 	} else if w.HostAccess.Network != "" && w.HostAccess.Network != "none" {
 		e.Workload.HostAccess.Network = ""
