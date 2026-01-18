@@ -1,5 +1,5 @@
 # renovate: datasource=github-tags depName=golangci/golangci-lint
-GOLANGCI_VERSION ?= v2.7.2
+GOLANGCI_VERSION ?= v2.8.0
 # renovate: datasource=github-tags depName=protocolbuffers/protobuf
 PROTOC_VERSION ?= v33.4
 TOOLS_BIN := $(shell mkdir -p build/tools && realpath build/tools)
