@@ -51,6 +51,7 @@ func Run(opts ...command.Option[Options]) error {
 		return fmt.Errorf("flatpak %q is not allowed for profile %q", o.Name, o.Profile)
 	}
 
+	//nolint:prealloc
 	args := []string{"run", o.Name}
 	args = append(args, o.ExtraArgs...)
 

@@ -475,7 +475,8 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 			"-auth", "/home/xorg-user/.Xserver",
 			"-verbose", "9",
 			"--",
-			strings.TrimPrefix(profile.WindowManager, "exec ")}
+			strings.TrimPrefix(profile.WindowManager, "exec "),
+		}
 	}
 
 	server, err := files.ServerCookiePath(profile.Name)
@@ -529,7 +530,6 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		x11Dir = fp
 	}
 
-	//nolint
 	var paths []string
 	paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
 	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/.X11-unix:rw", x11Dir))

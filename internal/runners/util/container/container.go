@@ -26,6 +26,7 @@ func ID(bin, name string) (string, bool) {
 }
 
 func Exec(bin, id string, ew types.EffectiveWorkload) error {
+	//nolint:prealloc
 	args := []string{"exec", "--detach", id, ew.Workload.Command}
 	args = append(args, ew.Workload.Args...)
 

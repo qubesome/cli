@@ -22,9 +22,7 @@ import (
 	"golang.org/x/sys/execabs"
 )
 
-var (
-	runnerBinary = files.ContainerRunnerBinary("docker")
-)
+var runnerBinary = files.ContainerRunnerBinary("docker")
 
 func Run(ew types.EffectiveWorkload) error {
 	if err := ew.Validate(); err != nil {
@@ -346,6 +344,7 @@ func hostDbusParams() []string {
 }
 
 func cameraParams() []string {
+	//nolint:prealloc
 	params := []string{
 		"--group-add=video",
 	}

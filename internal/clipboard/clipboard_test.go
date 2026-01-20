@@ -39,10 +39,11 @@ func TestCopy(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var opts []command.Option[Options]
-			opts = append(opts, WithSourceProfile(tc.from))
-			opts = append(opts, WithTargetProfile(tc.to))
-			opts = append(opts, WithContentType(tc.target))
+			opts := []command.Option[Options]{
+				WithSourceProfile(tc.from),
+				WithTargetProfile(tc.to),
+				WithContentType(tc.target),
+			}
 
 			err := Run(opts...)
 
