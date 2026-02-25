@@ -249,7 +249,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		}
 	}
 
-	if len(imgs) > 1 && term.IsTerminal(int(os.Stdout.Fd())) {
+	if len(imgs) > 1 && term.IsTerminal(int(os.Stdout.Fd())) { //nolint:gosec // G115: fd values fit in int
 		if proceed("Not all workload images are present. Start loading them on the background?") {
 			go images.PreemptWorkloadImages(binary, cfg)
 		}
@@ -417,8 +417,8 @@ func createMagicCookie(profile *types.Profile) error {
 		xauthority = os.ExpandEnv("${HOME}/.XAUTHORITY")
 	}
 
-	slog.Debug("opening parent xauthority", "path", xauthority)
-	parent, err := os.Open(xauthority)
+	slog.Debug("opening parent xauthority", "path", xauthority) //nolint:gosec // G706: path is from trusted env var
+	parent, err := os.Open(xauthority)                          //nolint:gosec // G703: path is from trusted env var
 	if err != nil {
 		slog.Debug("failed to open parent xauthority", "error", err)
 		return err
@@ -670,7 +670,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 			grabberShortcut())
 	}
 
-	slog.Debug("exec: "+bin, "args", dockerArgs)
+	slog.Debug("exec", "binary", bin, "args", dockerArgs) //nolint:gosec // G706: binary path is from trusted config
 	cmd := execabs.Command(bin, dockerArgs...)
 	cmd.Env = append(cmd.Env, os.Environ()...)
 
