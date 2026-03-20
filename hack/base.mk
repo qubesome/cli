@@ -1,7 +1,7 @@
 # renovate: datasource=github-tags depName=golangci/golangci-lint
 GOLANGCI_VERSION ?= v2.11.3
 # renovate: datasource=github-tags depName=protocolbuffers/protobuf
-PROTOC_VERSION ?= v34.0
+PROTOC_VERSION ?= v34.1
 TOOLS_BIN := $(shell mkdir -p build/tools && realpath build/tools)
 
 ifneq ($(shell git status --porcelain --untracked-files=no),)
