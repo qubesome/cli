@@ -15,7 +15,7 @@ import (
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/go-git/go-git/v6"
-	"github.com/go-git/go-git/v6/plumbing/transport"
+	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/google/uuid"
 	"github.com/qubesome/cli/internal/command"
@@ -142,18 +142,18 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 	} else {
 		slog.Debug("cloning repo to start")
 
-		var auth transport.AuthMethod
+		var clientOptions []client.Option
 		if strings.HasPrefix(gitURL, "git@") {
 			a, err := ssh.NewSSHAgentAuth("git")
 			if err != nil {
 				return err
 			}
-			auth = a
+			clientOptions = append(clientOptions, client.WithSSHAuth(a))
 		}
 
 		_, err = git.PlainClone(dir, &git.CloneOptions{
-			URL:  gitURL,
-			Auth: auth,
+			URL:           gitURL,
+			ClientOptions: clientOptions,
 		})
 		if err != nil {
 			return err
