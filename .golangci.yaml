@@ -24,7 +24,7 @@ linters:
     - gochecksumtype
     - goconst
     - goheader
-    - gomodguard
+    - gomodguard_v2
     - goprintffuncname
     - gosec
     - gosmopolitan
@@ -76,6 +76,10 @@ linters:
       - third_party$
       - builtin$
       - examples$
+  settings:
+    goconst:
+      ignore-tests: true
+      min-occurrences: 10
 formatters:
   enable:
     - gofmt

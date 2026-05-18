@@ -251,7 +251,7 @@ func Run(ew types.EffectiveWorkload) error {
 	args = append(args, wl.Command)
 	args = append(args, wl.Args...)
 
-	slog.Debug("exec", "binary", runnerBinary, "args", args) //nolint:gosec // G706: binary path is from trusted config
+	slog.Debug("exec", "binary", runnerBinary, "args", args)
 	cmd := execabs.Command(runnerBinary, args...)
 
 	if ew.Workload.HostAccess.Mime {
