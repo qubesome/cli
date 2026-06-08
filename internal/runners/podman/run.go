@@ -49,6 +49,9 @@ func Run(ew types.EffectiveWorkload) error {
 		paths = append(paths, fmt.Sprintf("-v=%[1]s:%[1]s:ro", file))
 
 		if target, err := os.Readlink(file); err == nil {
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(file), target)
+			}
 			paths = append(paths, fmt.Sprintf("-v=%[1]s:%[1]s:ro", target))
 		}
 	}
