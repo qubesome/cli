@@ -254,7 +254,7 @@ func Run(ew types.EffectiveWorkload) error {
 	args = append(args, wl.Command)
 	args = append(args, wl.Args...)
 
-	slog.Debug("exec", "binary", runnerBinary, "args", args)
+	slog.Debug("exec", "binary", runnerBinary, "args", container.RedactEnvArgs(args))
 	cmd := execabs.Command(runnerBinary, args...)
 
 	if ew.Workload.HostAccess.Mime {

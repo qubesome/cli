@@ -670,7 +670,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 			grabberShortcut())
 	}
 
-	slog.Debug("exec", "binary", bin, "args", dockerArgs)
+	slog.Debug("exec", "binary", bin, "args", container.RedactEnvArgs(dockerArgs))
 	cmd := execabs.Command(bin, dockerArgs...)
 	cmd.Env = append(cmd.Env, os.Environ()...)
 
