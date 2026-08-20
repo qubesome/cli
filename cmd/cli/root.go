@@ -42,6 +42,7 @@ func RootCommand() *cli.Command {
 			hostRunCommand(),
 			flatpakCommand(),
 			headlessCommand(),
+			usbCommand(),
 		},
 	}
 

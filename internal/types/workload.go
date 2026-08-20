@@ -51,10 +51,12 @@ type HostAccess struct {
 	Bluetooth bool `yaml:"bluetooth"`
 
 	// USBDevices defines the USB devices to be made available to a
-	// workload, based on the USB product name.
+	// workload. Each entry is either a "vendor:product" identifier
+	// (e.g. 1050:0407) matched against the device IDs, or, for backwards
+	// compatibility, a prefix of the USB product name.
 	//
-	// To list all USB product names for the current machine use:
-	//  cat /sys/bus/usb/devices/*/product | sort -u
+	// To list the USB devices detected on the current machine use:
+	//  qubesome usb
 	USBDevices []string `yaml:"usbDevices"`
 	Gpus       string   `yaml:"gpus"`
 	Paths      []string `yaml:"paths"`
