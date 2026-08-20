@@ -6,6 +6,7 @@ require (
 	github.com/cyphar/filepath-securejoin v0.6.1
 	github.com/go-git/go-git/v6 v6.0.0-alpha.5
 	github.com/google/uuid v1.6.0
+	github.com/qubesome/libudev v0.0.2
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v3 v3.9.0
 	github.com/zalando/go-keyring v0.2.8
