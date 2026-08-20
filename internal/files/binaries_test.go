@@ -8,6 +8,8 @@ import (
 )
 
 func TestContainerRunnerBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
 	tests := []struct {
 		in   string
 		want string

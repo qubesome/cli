@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
@@ -39,13 +40,7 @@ func Run(opts ...command.Option[Options]) error {
 		return fmt.Errorf("profile has no flatpaks")
 	}
 
-	allowed := false
-	for _, name := range prof.Flatpaks {
-		if name == o.Name {
-			allowed = true
-			break
-		}
-	}
+	allowed := slices.Contains(prof.Flatpaks, o.Name)
 
 	if !allowed {
 		return fmt.Errorf("flatpak %q is not allowed for profile %q", o.Name, o.Profile)

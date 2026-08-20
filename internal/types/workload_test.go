@@ -20,7 +20,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Camera: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Camera: true},
+				Camera: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -28,7 +28,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Camera: true},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Camera: true},
+					Camera: true,
 				},
 			},
 		},
@@ -38,7 +38,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Camera: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Camera: true},
+				Camera: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -46,7 +46,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Camera: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Camera: true},
+					Camera: true,
 				},
 			},
 		},
@@ -56,7 +56,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Camera: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Camera: false},
+				Camera: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -64,7 +64,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Camera: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Camera: false},
+					Camera: false,
 				},
 			},
 		},
@@ -74,7 +74,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Camera: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Camera: false},
+				Camera: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -82,7 +82,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Camera: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Camera: false},
+					Camera: false,
 				},
 			},
 		},
@@ -92,7 +92,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Dbus: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Dbus: true},
+				Dbus: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -100,7 +100,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Dbus: true},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Dbus: true},
+					Dbus: true,
 				},
 			},
 		},
@@ -110,7 +110,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Dbus: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Dbus: true},
+				Dbus: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -118,7 +118,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Dbus: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Dbus: true},
+					Dbus: true,
 				},
 			},
 		},
@@ -128,7 +128,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Dbus: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Dbus: false},
+				Dbus: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -136,7 +136,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Dbus: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Dbus: false},
+					Dbus: false,
 				},
 			},
 		},
@@ -146,7 +146,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Dbus: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Dbus: false},
+				Dbus: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -154,7 +154,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Dbus: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Dbus: false},
+					Dbus: false,
 				},
 			},
 		},
@@ -164,7 +164,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Microphone: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Microphone: true},
+				Microphone: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -172,7 +172,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Microphone: true},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Microphone: true},
+					Microphone: true,
 				},
 			},
 		},
@@ -182,7 +182,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Microphone: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Microphone: true},
+				Microphone: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -190,7 +190,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Microphone: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Microphone: true},
+					Microphone: true,
 				},
 			},
 		},
@@ -200,7 +200,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Microphone: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Microphone: false},
+				Microphone: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -208,7 +208,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Microphone: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Microphone: false},
+					Microphone: false,
 				},
 			},
 		},
@@ -218,7 +218,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Microphone: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Microphone: false},
+				Microphone: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -226,7 +226,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Microphone: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Microphone: false},
+					Microphone: false,
 				},
 			},
 		},
@@ -236,7 +236,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Speakers: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Speakers: true},
+				Speakers: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -244,7 +244,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Speakers: true},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Speakers: true},
+					Speakers: true,
 				},
 			},
 		},
@@ -254,7 +254,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Speakers: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Speakers: true},
+				Speakers: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -262,7 +262,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Speakers: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Speakers: true},
+					Speakers: true,
 				},
 			},
 		},
@@ -272,7 +272,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Speakers: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Speakers: false},
+				Speakers: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -280,7 +280,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Speakers: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Speakers: false},
+					Speakers: false,
 				},
 			},
 		},
@@ -290,7 +290,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Speakers: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Speakers: false},
+				Speakers: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -298,7 +298,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Speakers: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Speakers: false},
+					Speakers: false,
 				},
 			},
 		},
@@ -308,7 +308,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{VarRunUser: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{VarRunUser: true},
+				VarRunUser: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -316,7 +316,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{VarRunUser: true},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{VarRunUser: true},
+					VarRunUser: true,
 				},
 			},
 		},
@@ -326,7 +326,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{VarRunUser: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{VarRunUser: true},
+				VarRunUser: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -334,7 +334,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{VarRunUser: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{VarRunUser: true},
+					VarRunUser: true,
 				},
 			},
 		},
@@ -344,7 +344,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{VarRunUser: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{VarRunUser: false},
+				VarRunUser: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -352,7 +352,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{VarRunUser: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{VarRunUser: false},
+					VarRunUser: false,
 				},
 			},
 		},
@@ -362,7 +362,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{VarRunUser: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{VarRunUser: false},
+				VarRunUser: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -370,7 +370,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{VarRunUser: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{VarRunUser: false},
+					VarRunUser: false,
 				},
 			},
 		},
@@ -382,9 +382,7 @@ func Test_ApplyProfile(t *testing.T) {
 				},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{
-					USBDevices: []string{},
-				},
+				USBDevices: []string{},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -394,9 +392,7 @@ func Test_ApplyProfile(t *testing.T) {
 					},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{
-						USBDevices: []string{},
-					},
+					USBDevices: []string{},
 				},
 			},
 		},
@@ -412,11 +408,9 @@ func Test_ApplyProfile(t *testing.T) {
 				},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{
-					USBDevices: []string{
-						"Foo",
-						"FooBar",
-					},
+				USBDevices: []string{
+					"Foo",
+					"FooBar",
 				},
 			},
 			want: EffectiveWorkload{
@@ -429,11 +423,9 @@ func Test_ApplyProfile(t *testing.T) {
 					},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{
-						USBDevices: []string{
-							"Foo",
-							"FooBar",
-						},
+					USBDevices: []string{
+						"Foo",
+						"FooBar",
 					},
 				},
 			},
@@ -444,7 +436,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Gpus: "all"},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Gpus: "all"},
+				Gpus: "all",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -452,7 +444,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Gpus: "all"},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Gpus: "all"},
+					Gpus: "all",
 				},
 			},
 		},
@@ -462,7 +454,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Gpus: ""},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Gpus: "all"},
+				Gpus: "all",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -470,7 +462,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Gpus: ""},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Gpus: "all"},
+					Gpus: "all",
 				},
 			},
 		},
@@ -480,7 +472,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Gpus: "all"},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Gpus: ""},
+				Gpus: "",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -488,7 +480,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Gpus: ""},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Gpus: ""},
+					Gpus: "",
 				},
 			},
 		},
@@ -498,7 +490,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Gpus: ""},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Gpus: ""},
+				Gpus: "",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -506,7 +498,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Gpus: ""},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Gpus: ""},
+					Gpus: "",
 				},
 			},
 		},
@@ -516,7 +508,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Privileged: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Privileged: true},
+				Privileged: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -524,7 +516,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Privileged: true},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Privileged: true},
+					Privileged: true,
 				},
 			},
 		},
@@ -534,7 +526,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Privileged: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Privileged: true},
+				Privileged: true,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -542,7 +534,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Privileged: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Privileged: true},
+					Privileged: true,
 				},
 			},
 		},
@@ -552,7 +544,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Privileged: true},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Privileged: false},
+				Privileged: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -560,7 +552,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Privileged: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Privileged: false},
+					Privileged: false,
 				},
 			},
 		},
@@ -570,7 +562,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Privileged: false},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Privileged: false},
+				Privileged: false,
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -578,7 +570,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Privileged: false},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Privileged: false},
+					Privileged: false,
 				},
 			},
 		},
@@ -588,7 +580,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Network: ""},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Network: ""},
+				Network: "",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -596,7 +588,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Network: ""},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Network: ""},
+					Network: "",
 				},
 			},
 		},
@@ -606,7 +598,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Network: ""},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Network: "none"},
+				Network: "none",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -614,7 +606,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Network: "none"},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Network: "none"},
+					Network: "none",
 				},
 			},
 		},
@@ -624,7 +616,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Network: "none"},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Network: ""},
+				Network: "",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -632,7 +624,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Network: "none"},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Network: ""},
+					Network: "",
 				},
 			},
 		},
@@ -642,7 +634,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Network: "foo"},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Network: "foo"},
+				Network: "foo",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -650,7 +642,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Network: "foo"},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Network: "foo"},
+					Network: "foo",
 				},
 			},
 		},
@@ -660,7 +652,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Network: ""},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Network: "foo"},
+				Network: "foo",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -668,7 +660,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Network: "foo"},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Network: "foo"},
+					Network: "foo",
 				},
 			},
 		},
@@ -678,7 +670,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Network: "foo"},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Network: ""},
+				Network: "",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -686,7 +678,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Network: ""},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Network: ""},
+					Network: "",
 				},
 			},
 		},
@@ -696,7 +688,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Network: "none"},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Network: "foo"},
+				Network: "foo",
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -704,7 +696,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Network: "none"},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Network: "foo"},
+					Network: "foo",
 				},
 			},
 		},
@@ -822,7 +814,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{CapsAdd: []string{}},
+				CapsAdd: []string{},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -830,7 +822,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{CapsAdd: []string{}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{CapsAdd: []string{}},
+					CapsAdd: []string{},
 				},
 			},
 		},
@@ -840,7 +832,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
+				CapsAdd: []string{"FOO"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -848,7 +840,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
+					CapsAdd: []string{"FOO"},
 				},
 			},
 		},
@@ -858,7 +850,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{CapsAdd: []string{"FOO"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{CapsAdd: []string{"FOOB"}},
+				CapsAdd: []string{"FOOB"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -866,7 +858,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{CapsAdd: []string{}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{CapsAdd: []string{"FOOB"}},
+					CapsAdd: []string{"FOOB"},
 				},
 			},
 		},
@@ -876,7 +868,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{CapsAdd: []string{"foo"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+				CapsAdd: []string{"foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -884,7 +876,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{CapsAdd: []string{"foo"}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+					CapsAdd: []string{"foo"},
 				},
 			},
 		},
@@ -894,7 +886,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{CapsAdd: []string{"bar"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{CapsAdd: []string{"foo", "bar"}},
+				CapsAdd: []string{"foo", "bar"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -902,7 +894,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{CapsAdd: []string{"bar"}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{CapsAdd: []string{"foo", "bar"}},
+					CapsAdd: []string{"foo", "bar"},
 				},
 			},
 		},
@@ -912,7 +904,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{CapsAdd: []string{"bar"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+				CapsAdd: []string{"foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -920,7 +912,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{CapsAdd: []string{}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{CapsAdd: []string{"foo"}},
+					CapsAdd: []string{"foo"},
 				},
 			},
 		},
@@ -930,7 +922,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Devices: []string{"/foo"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Devices: []string{}},
+				Devices: []string{},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -938,7 +930,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Devices: []string{}},
+					Devices: []string{},
 				},
 			},
 		},
@@ -948,7 +940,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Devices: []string{}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Devices: []string{"/foo"}},
+				Devices: []string{"/foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -956,7 +948,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Devices: []string{"/foo"}},
+					Devices: []string{"/foo"},
 				},
 			},
 		},
@@ -966,7 +958,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Devices: []string{"/foo"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Devices: []string{"/foo"}},
+				Devices: []string{"/foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -974,7 +966,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{"/foo"}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Devices: []string{"/foo"}},
+					Devices: []string{"/foo"},
 				},
 			},
 		},
@@ -984,7 +976,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Devices: []string{"/foo/"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Devices: []string{"/foo"}},
+				Devices: []string{"/foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -992,7 +984,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{"/foo/"}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Devices: []string{"/foo"}},
+					Devices: []string{"/foo"},
 				},
 			},
 		},
@@ -1002,7 +994,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Devices: []string{"/foo"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Devices: []string{"/foob"}},
+				Devices: []string{"/foob"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -1010,7 +1002,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Devices: []string{"/foob"}},
+					Devices: []string{"/foob"},
 				},
 			},
 		},
@@ -1020,7 +1012,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Devices: []string{"/foo"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Devices: []string{"/foo"}},
+				Devices: []string{"/foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -1028,7 +1020,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{"/foo"}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Devices: []string{"/foo"}},
+					Devices: []string{"/foo"},
 				},
 			},
 		},
@@ -1038,7 +1030,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Devices: []string{"/bar"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Devices: []string{"/foo", "/bar"}},
+				Devices: []string{"/foo", "/bar"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -1046,7 +1038,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{"/bar"}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Devices: []string{"/foo", "/bar"}},
+					Devices: []string{"/foo", "/bar"},
 				},
 			},
 		},
@@ -1056,7 +1048,7 @@ func Test_ApplyProfile(t *testing.T) {
 				HostAccess: HostAccess{Devices: []string{"/bar"}},
 			},
 			profile: &Profile{
-				HostAccess: HostAccess{Devices: []string{"/foo"}},
+				Devices: []string{"/foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -1064,7 +1056,7 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{}},
 				},
 				Profile: &Profile{
-					HostAccess: HostAccess{Devices: []string{"/foo"}},
+					Devices: []string{"/foo"},
 				},
 			},
 		},

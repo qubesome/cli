@@ -26,5 +26,5 @@ type App interface {
 
 	Usage(format string)
 	Exit(code int)
-	Printf(format string, a ...interface{}) (n int, err error)
+	Printf(format string, a ...any) (n int, err error)
 }
