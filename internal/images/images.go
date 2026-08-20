@@ -29,16 +29,14 @@ func Run(opts ...command.Option[Options]) error {
 func Pull(bin string, cfg *types.Config, wg *sync.WaitGroup) error {
 	switch cfg.WorkloadPullMode {
 	case types.Background:
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			if exp, _ := pullExpired(); exp {
 				err := PullAll(bin, cfg)
 				if err != nil {
 					slog.Error("error pulling images", "error", err)
 				}
 			}
-			wg.Done()
-		}()
+		})
 	case types.OnDemand:
 		// no-op as images will be pull when needed.
 	}

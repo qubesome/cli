@@ -77,9 +77,8 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e := EffectiveWorkload{
 		Profile:  p,
 		Workload: w,
-	}
 
-	e.Name = fmt.Sprintf("%s-%s", w.Name, p.Name)
+		Name: fmt.Sprintf("%s-%s", w.Name, p.Name)}
 
 	e.Workload.HostAccess.Camera = w.HostAccess.Camera && p.Camera
 	e.Workload.HostAccess.Microphone = w.HostAccess.Microphone && p.Microphone
@@ -111,7 +110,7 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 		paths := make([]string, 0, len(w.HostAccess.Paths))
 
 		for _, path := range w.HostAccess.Paths {
-			src := strings.Split(path, ":")[0]
+			src, _, _ := strings.Cut(path, ":")
 			if pathAllowed(src, p.HostAccess.Paths) {
 				paths = append(paths, path)
 			}
