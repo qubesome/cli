@@ -22,7 +22,7 @@ import (
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/drive"
 	"github.com/qubesome/cli/internal/util/env"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func XdgRun(opts ...command.Option[Options]) error {

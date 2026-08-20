@@ -10,8 +10,8 @@ import (
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/sys/execabs"
-	"gopkg.in/yaml.v3"
 )
 
 func Run(opts ...command.Option[Options]) error {

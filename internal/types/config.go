@@ -8,7 +8,7 @@ import (
 	"regexp"
 
 	"github.com/qubesome/cli/internal/files"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 var (

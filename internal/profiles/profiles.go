@@ -33,9 +33,9 @@ import (
 	"github.com/qubesome/cli/internal/util/resolution"
 	"github.com/qubesome/cli/internal/util/xauth"
 	"github.com/qubesome/cli/pkg/inception"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/sys/execabs"
 	"golang.org/x/term"
-	"gopkg.in/yaml.v3"
 )
 
 var (
