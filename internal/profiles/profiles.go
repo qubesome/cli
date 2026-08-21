@@ -39,7 +39,6 @@ import (
 )
 
 var (
-	ContainerNameFormat = "qubesome-%s"
 	defaultProfileImage = "ghcr.io/qubesome/xorg:latest"
 
 	appTemplate = `[Desktop Entry]
@@ -114,7 +113,7 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 	ln := files.ProfileConfig(name)
 
 	if _, err := os.Lstat(ln); err == nil {
-		if container.Running(runner, fmt.Sprintf(ContainerNameFormat, name)) {
+		if container.Running(runner, fmt.Sprintf(container.ContainerNameFormat, name)) {
 			return fmt.Errorf("profile %q is already started", name)
 		}
 
@@ -345,7 +344,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 	// run the Window Manager directly, without the need of a exec
 	// into the container to trigger it.
 	if !strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		name := fmt.Sprintf(ContainerNameFormat, profile.Name)
+		name := fmt.Sprintf(container.ContainerNameFormat, profile.Name)
 
 		// If xhost access control is enabled, it may block qubesome
 		// execution. A tail sign is the profile container dying early.
@@ -636,10 +635,22 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	}
 
 	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
-	if profile.Dbus {
+	switch profile.HostAccess.Dbus.Mode {
+	case types.DbusFull:
 		paths = append(paths, "-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket")
 		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
-	} else {
+		// A workload may narrow to filtered even under a full profile, so also
+		// expose the raw buses for the in-container proxy to read from.
+		paths = appendProxyHostBuses(paths)
+	case types.DbusFiltered:
+		// The in-container xdg-dbus-proxy needs the raw host buses. Workloads
+		// never see these mounts, only the filtered sockets that the proxy
+		// writes under the shared run-user dir. The machine-id stays isolated
+		// per profile.
+		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
+		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
+		paths = appendProxyHostBuses(paths)
+	default:
 		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
 		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
 	}
@@ -655,7 +666,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	// dockerArgs = append(dockerArgs, "--ipc=shareable")
 	dockerArgs = append(dockerArgs, "--shm-size=128m")
 
-	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(ContainerNameFormat, profile.Name)))
+	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(container.ContainerNameFormat, profile.Name)))
 	dockerArgs = append(dockerArgs, profile.Image)
 	if interactive {
 		dockerArgs = append(dockerArgs, "sh")
@@ -950,6 +961,35 @@ func processFlatPakFile(workload, src, target string) error {
 	}
 
 	return nil
+}
+
+// appendProxyHostBuses mounts the raw host buses into the profile container at
+// the well-known paths that the per-workload xdg-dbus-proxy instances read
+// from. Only the profile container ever sees these raw sockets.
+func appendProxyHostBuses(paths []string) []string {
+	paths = append(paths, "-v=/run/dbus/system_bus_socket:/run/host-dbus/system")
+	if hostSession := hostSessionBusPath(); hostSession != "" {
+		paths = append(paths, fmt.Sprintf("-v=%s:/run/host-dbus/session", hostSession))
+	}
+	return paths
+}
+
+// hostSessionBusPath resolves the host session bus socket. It prefers
+// DBUS_SESSION_BUS_ADDRESS (unix:path=...) and falls back to
+// $XDG_RUNTIME_DIR/bus. It returns an empty string when neither is available.
+func hostSessionBusPath() string {
+	addr := os.Getenv("DBUS_SESSION_BUS_ADDRESS")
+	if strings.HasPrefix(addr, "unix:path=") {
+		p := strings.TrimPrefix(addr, "unix:path=")
+		if i := strings.IndexByte(p, ','); i >= 0 {
+			p = p[:i]
+		}
+		return p
+	}
+	if x := os.Getenv("XDG_RUNTIME_DIR"); x != "" {
+		return filepath.Join(x, "bus")
+	}
+	return ""
 }
 
 func writeMachineID(path string) error {

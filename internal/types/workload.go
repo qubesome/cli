@@ -30,10 +30,9 @@ type Workload struct {
 }
 
 type HostAccess struct {
-	// Dbus controls access to the dbus session running at the host.
-	// If false, a new dbus session for the specific Qubesome profile
-	// will be created.
-	Dbus bool `yaml:"dbus"`
+	// Dbus controls access to dbus. Accepts a legacy bool (true=full,
+	// false=none) or a structured policy with mode and per-bus rules.
+	Dbus DbusPolicy `yaml:"dbus"`
 
 	// Network defines what container network the workload should be
 	// bound to. If empty, uses default bridge network.
@@ -83,7 +82,7 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e.Workload.HostAccess.Camera = w.HostAccess.Camera && p.Camera
 	e.Workload.HostAccess.Microphone = w.HostAccess.Microphone && p.Microphone
 	e.Workload.HostAccess.Speakers = w.HostAccess.Speakers && p.Speakers
-	e.Workload.HostAccess.Dbus = w.HostAccess.Dbus && p.Dbus
+	e.Workload.HostAccess.Dbus = mergeDbusFields(w.HostAccess.Dbus, p.HostAccess.Dbus)
 	e.Workload.HostAccess.VarRunUser = w.HostAccess.VarRunUser && p.VarRunUser
 	e.Workload.HostAccess.Bluetooth = w.HostAccess.Bluetooth && p.Bluetooth
 	e.Workload.HostAccess.Mime = w.HostAccess.Mime && p.Mime
@@ -168,6 +167,22 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	return e
 }
 
+// mergeDbusFields merges workload and profile dbus policies. When both are
+// the zero value (neither side has configured dbus), the zero value is
+// preserved so workloads that omit the dbus field keep a zero DbusPolicy
+// after merging rather than observing an implicit "none" mode string.
+func mergeDbusFields(workload, profile DbusPolicy) DbusPolicy {
+	if isZeroDbus(workload) && isZeroDbus(profile) {
+		return DbusPolicy{}
+	}
+	return MergeDbus(workload, profile)
+}
+
+// isZeroDbus reports whether d is the zero value (unset dbus field).
+func isZeroDbus(d DbusPolicy) bool {
+	return d.Mode == "" && len(d.Session) == 0 && len(d.System) == 0
+}
+
 func pathAllowed(path string, list []string) bool {
 	path = filepath.Clean(env.Expand(path))
 	for _, a := range list {
@@ -209,6 +224,9 @@ func (w Workload) Validate() error {
 		if err := valid(arg, "args", 250, false, nil); err != nil {
 			return err
 		}
+	}
+	if err := w.HostAccess.Dbus.Validate(); err != nil {
+		return err
 	}
 	return nil
 }

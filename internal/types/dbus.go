@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -95,10 +96,11 @@ func parseDbusRule(s string) (dbusRule, error) {
 
 // Validate checks the mode and, regardless of mode, that every rule string
 // is well formed. Rules are validated even for non-filtered modes so a typo
-// is caught rather than silently ignored.
+// is caught rather than silently ignored. An empty mode string is treated as
+// DbusNone to accept the Go zero value without requiring explicit initialization.
 func (d DbusPolicy) Validate() error {
 	switch d.Mode {
-	case DbusNone, DbusFiltered, DbusFull:
+	case "", DbusNone, DbusFiltered, DbusFull:
 	default:
 		return fmt.Errorf("dbus: unknown mode %q", d.Mode)
 	}
@@ -240,6 +242,24 @@ func MergeDbus(workload, profile DbusPolicy) DbusPolicy {
 			System:  intersectRules(workload.System, profile.System),
 		}
 	}
+}
+
+// canonMode treats an empty mode as DbusNone so an unset policy is comparable
+// to an explicit none.
+func canonMode(m DbusMode) DbusMode {
+	if m == "" {
+		return DbusNone
+	}
+	return m
+}
+
+// DbusEqual reports whether two policies grant the same access. An unset policy
+// (empty mode) compares equal to an explicit none, so a workload that omits
+// dbus is not reported as differing from its isolated effective policy.
+func DbusEqual(a, b DbusPolicy) bool {
+	return canonMode(a.Mode) == canonMode(b.Mode) &&
+		slices.Equal(a.Session, b.Session) &&
+		slices.Equal(a.System, b.System)
 }
 
 // ProxyFlags renders rule strings into xdg-dbus-proxy flags. It always starts

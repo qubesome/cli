@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/qubesome/cli/internal/dbusproxy"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/keyring"
 	"github.com/qubesome/cli/internal/keyring/backend"
@@ -127,7 +128,10 @@ func Run(ew types.EffectiveWorkload) error {
 
 		args = append(args, "-v="+xdgRuntimeDir+":/run/user/1000")
 	} else {
-		if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
+		dp := wl.HostAccess.Dbus
+		hostBus := dp.Mode == types.DbusFull || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser
+
+		if hostBus {
 			args = append(args, "-v=/run/user/1000:/run/user/1000")
 		}
 
@@ -136,12 +140,42 @@ func Run(ew types.EffectiveWorkload) error {
 			return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
 		}
 		paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
-		if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
-			args = append(args, hostDbusParams()...)
-		} else {
-			paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
 
-			machineIDPath := filepath.Join(files.ProfileDir(ew.Profile.Name), "machine-id")
+		machineIDPath := filepath.Join(files.ProfileDir(ew.Profile.Name), "machine-id")
+
+		switch {
+		case hostBus:
+			args = append(args, hostDbusParams()...)
+
+		case dp.Mode == types.DbusFiltered:
+			paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
+			paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
+
+			spec := dbusproxy.Spec{
+				Runner:           runnerBinary,
+				ProfileContainer: fmt.Sprintf(container.ContainerNameFormat, ew.Profile.Name),
+				WorkloadName:     ew.Name,
+				Session:          dp.Session,
+				System:           dp.System,
+			}
+			sockets, err := spec.Start()
+			if err != nil {
+				return err
+			}
+
+			// The workload sees only the filtered sockets, never the raw host
+			// bus. Overlay each filtered socket on the standard bus path. The
+			// proxies run in the profile container and are reaped when it stops.
+			if host := dbusproxy.HostSocket(userDir, sockets.Session); host != "" {
+				paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000/bus", host))
+				args = append(args, "-e=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus")
+			}
+			if host := dbusproxy.HostSocket(userDir, sockets.System); host != "" {
+				paths = append(paths, fmt.Sprintf("-v=%s:/run/dbus/system_bus_socket", host))
+			}
+
+		default:
+			paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
 			paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
 		}
 	}

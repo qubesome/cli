@@ -236,7 +236,7 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 	if w.HostAccess.VarRunUser != ew.Workload.HostAccess.VarRunUser {
 		msg = msg + "- VarRunUser<br/>"
 	}
-	if w.HostAccess.Dbus != ew.Workload.HostAccess.Dbus {
+	if !types.DbusEqual(w.HostAccess.Dbus, ew.Workload.HostAccess.Dbus) {
 		msg = msg + "- Dbus<br/>"
 	}
 	if w.HostAccess.Gpus != ew.Workload.HostAccess.Gpus {

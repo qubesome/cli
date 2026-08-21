@@ -141,6 +141,7 @@ func TestDbusPolicy_Validate(t *testing.T) {
 		policy  DbusPolicy
 		wantErr bool
 	}{
+		{name: "empty mode is valid (zero value)", policy: DbusPolicy{}},
 		{name: "none is valid", policy: DbusPolicy{Mode: DbusNone}},
 		{name: "full is valid", policy: DbusPolicy{Mode: DbusFull}},
 		{name: "filtered with valid rules", policy: DbusPolicy{
@@ -384,5 +385,48 @@ func TestMergeDbus_BusesIntersectIndependently(t *testing.T) {
 	}
 	if got.System != nil {
 		t.Errorf("system: nil ceiling should drop all, got %v", got.System)
+	}
+}
+
+func TestDbusEqual(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		a, b  DbusPolicy
+		equal bool
+	}{
+		{name: "unset equals explicit none", a: DbusPolicy{}, b: DbusPolicy{Mode: DbusNone}, equal: true},
+		{name: "unset equals unset", a: DbusPolicy{}, b: DbusPolicy{}, equal: true},
+		{name: "full differs from none", a: DbusPolicy{Mode: DbusFull}, b: DbusPolicy{Mode: DbusNone}, equal: false},
+		{name: "full differs from unset", a: DbusPolicy{Mode: DbusFull}, b: DbusPolicy{}, equal: false},
+		{
+			name:  "same filtered rules equal",
+			a:     DbusPolicy{Mode: DbusFiltered, Session: []string{"talk=a"}},
+			b:     DbusPolicy{Mode: DbusFiltered, Session: []string{"talk=a"}},
+			equal: true,
+		},
+		{
+			name:  "different session rules differ",
+			a:     DbusPolicy{Mode: DbusFiltered, Session: []string{"talk=a"}},
+			b:     DbusPolicy{Mode: DbusFiltered, Session: []string{"talk=b"}},
+			equal: false,
+		},
+		{
+			name:  "system rules differ",
+			a:     DbusPolicy{Mode: DbusFiltered, System: []string{"see=a"}},
+			b:     DbusPolicy{Mode: DbusFiltered},
+			equal: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := DbusEqual(tt.a, tt.b); got != tt.equal {
+				t.Errorf("DbusEqual(%+v, %+v) = %v want %v", tt.a, tt.b, got, tt.equal)
+			}
+		})
 	}
 }

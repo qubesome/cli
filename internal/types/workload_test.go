@@ -87,74 +87,86 @@ func Test_ApplyProfile(t *testing.T) {
 			},
 		},
 		{
-			name: "Dbus ON: workload ON + profile ON",
+			name: "Dbus full: workload full + profile full",
 			workload: Workload{
-				HostAccess: HostAccess{Dbus: true},
+				HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusFull}},
 			},
 			profile: &Profile{
-				Dbus: true,
+				HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusFull}},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{Dbus: true},
+					HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusFull}},
 				},
 				Profile: &Profile{
-					Dbus: true,
+					HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusFull}},
 				},
 			},
 		},
 		{
-			name: "Dbus OFF: workload OFF + profile ON",
+			name: "Dbus none: workload none + profile full",
 			workload: Workload{
-				HostAccess: HostAccess{Dbus: false},
+				HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusNone}},
 			},
 			profile: &Profile{
-				Dbus: true,
+				HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusFull}},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{Dbus: false},
+					HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusNone}},
 				},
 				Profile: &Profile{
-					Dbus: true,
+					HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusFull}},
 				},
 			},
 		},
 		{
-			name: "Dbus OFF: workload ON + profile OFF",
+			name: "Dbus filtered: profile bounds workload rules",
 			workload: Workload{
-				HostAccess: HostAccess{Dbus: true},
+				HostAccess: HostAccess{Dbus: DbusPolicy{
+					Mode:    DbusFiltered,
+					Session: []string{"talk=org.foo.Bar", "talk=org.denied"},
+				}},
 			},
 			profile: &Profile{
-				Dbus: false,
+				HostAccess: HostAccess{Dbus: DbusPolicy{
+					Mode:    DbusFiltered,
+					Session: []string{"talk=org.foo.*"},
+				}},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{Dbus: false},
+					HostAccess: HostAccess{Dbus: DbusPolicy{
+						Mode:    DbusFiltered,
+						Session: []string{"talk=org.foo.Bar"},
+					}},
 				},
 				Profile: &Profile{
-					Dbus: false,
+					HostAccess: HostAccess{Dbus: DbusPolicy{
+						Mode:    DbusFiltered,
+						Session: []string{"talk=org.foo.*"},
+					}},
 				},
 			},
 		},
 		{
-			name: "Dbus OFF: workload OFF + profile OFF",
+			name: "Dbus none: workload full + profile none",
 			workload: Workload{
-				HostAccess: HostAccess{Dbus: false},
+				HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusFull}},
 			},
 			profile: &Profile{
-				Dbus: false,
+				HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusNone}},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{Dbus: false},
+					HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusNone}},
 				},
 				Profile: &Profile{
-					Dbus: false,
+					HostAccess: HostAccess{Dbus: DbusPolicy{Mode: DbusNone}},
 				},
 			},
 		},

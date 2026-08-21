@@ -10,6 +10,9 @@ import (
 	"golang.org/x/sys/execabs"
 )
 
+// ContainerNameFormat is the format used to derive a profile's container name.
+const ContainerNameFormat = "qubesome-%s"
+
 func ID(bin, name string) (string, bool) {
 	args := fmt.Sprintf("ps -a -q -f name=%s", name)
 	cmd := execabs.Command(bin, //nolint:gosec
