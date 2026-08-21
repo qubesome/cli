@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/qubesome/libudev v0.0.2
 	github.com/stretchr/testify v1.11.1
-	github.com/urfave/cli/v3 v3.9.0
+	github.com/urfave/cli/v3 v3.10.1
 	github.com/zalando/go-keyring v0.2.8
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/sys v0.47.0
