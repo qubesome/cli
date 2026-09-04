@@ -241,8 +241,10 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 
 		src := env.Expand(ps[0])
-		if _, err := os.Stat(src); err != nil {
-			slog.Warn("failed to mount path", "path", src, "error", err, "state", ps[0])
+		// Mapped dirs are created upfront, otherwise the container runner
+		// creates them owned by root.
+		if err := files.EnsureMappedDir(src); err != nil {
+			slog.Warn("failed to mount path", "path", src, "error", err)
 			continue
 		}
 
