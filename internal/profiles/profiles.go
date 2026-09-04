@@ -542,8 +542,11 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		p = env.Expand(p)
 
 		src := strings.Split(p, ":")
-		if _, err := os.Stat(src[0]); err != nil {
-			fmt.Printf("\033[33mWARN: missing mapped dir: %s.\033[0m\n", src[0])
+		// Mapped dirs are created upfront, otherwise the container runner
+		// creates them owned by root.
+		if err := files.EnsureMappedDir(src[0]); err != nil {
+			fmt.Printf("\033[33mWARN: skipping mapped dir %s: %v.\033[0m\n", src[0], err)
+			continue
 		}
 		paths = append(paths, "-v="+p)
 	}

@@ -26,7 +26,50 @@ const (
 var (
 	// ErrUnableGetSocketPath is an error returned when unable to get the socket path for a profile.
 	ErrUnableGetSocketPath = errors.New("unable to get socket path for profile")
+
+	// ErrMissingMappedPath is an error returned when the source of a mapped
+	// path does not exist, and cannot be created by qubesome.
+	ErrMissingMappedPath = errors.New("mapped path does not exist")
 )
+
+// EnsureMappedDir prepares the host side of a bind mount source.
+//
+// Existing paths are left untouched, whatever their type. A missing src
+// is only created when it declares itself a directory, by ending with a
+// path separator, and its parent dir is already present. Any other
+// missing src returns ErrMissingMappedPath, as container runners create
+// missing bind mount sources as root-owned dirs, which is wrong for file
+// mappings and masks unmounted mount points. Errors other than the path
+// being absent are returned as they are.
+func EnsureMappedDir(src string) error {
+	_, err := os.Lstat(src)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	if !strings.HasSuffix(src, string(filepath.Separator)) {
+		return ErrMissingMappedPath
+	}
+
+	dir := filepath.Clean(src)
+	parent := filepath.Dir(dir)
+
+	fi, err := os.Stat(parent)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: parent dir %q is not present", ErrMissingMappedPath, parent)
+		}
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%w: parent %q is not a dir", ErrMissingMappedPath, parent)
+	}
+
+	return os.Mkdir(dir, DirMode)
+}
 
 // QubesomeDir returns the root directory where Qubesome configuration is stored.
 func QubesomeDir() string {
