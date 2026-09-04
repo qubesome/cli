@@ -256,7 +256,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 	}
 
 	if profile.Gpus != "" {
-		if _, ok := gpu.Supported(runner); !ok {
+		if _, ok := gpu.Params(runner); !ok {
 			profile.Gpus = ""
 			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
 		}
@@ -596,8 +596,8 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE=X11")
 	}
 	if profile.Gpus != "" {
-		if gpus, ok := gpu.Supported(profile.Runner); ok {
-			dockerArgs = append(dockerArgs, gpus)
+		if gpus, ok := gpu.Params(profile.Runner); ok {
+			dockerArgs = append(dockerArgs, gpus...)
 		}
 	}
 
