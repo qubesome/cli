@@ -79,12 +79,12 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	if wl.HostAccess.Gpus != "" {
-		gpu, ok := gpu.Supported("podman")
+		params, ok := gpu.Params("podman")
 		if !ok {
 			wl.HostAccess.Gpus = ""
 			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
 		} else {
-			args = append(args, gpu)
+			args = append(args, params...)
 		}
 	}
 

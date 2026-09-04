@@ -43,6 +43,7 @@ func RootCommand() *cli.Command {
 			flatpakCommand(),
 			headlessCommand(),
 			usbCommand(),
+			gpuCommand(),
 		},
 	}
 
