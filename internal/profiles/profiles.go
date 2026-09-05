@@ -343,26 +343,6 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
-	// In Wayland, Xephyr is replaced by xwayland-run, which can
-	// run the Window Manager directly, without the need of a exec
-	// into the container to trigger it.
-	if !strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		name := fmt.Sprintf(ContainerNameFormat, profile.Name)
-
-		// If xhost access control is enabled, it may block qubesome
-		// execution. A tail sign is the profile container dying early.
-		if !container.Running(binary, name) {
-			msg := os.ExpandEnv("run xhost +SI:localhost:${USER} and try again")
-			dbus.NotifyOrLog("qubesome start error", msg)
-			return fmt.Errorf("failed to start profile: %s", msg)
-		}
-
-		err = startWindowManager(binary, name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
-		if err != nil {
-			return err
-		}
-	}
-
 	wg.Wait()
 	return nil
 }
@@ -430,55 +410,28 @@ func createMagicCookie(profile *types.Profile) error {
 	return xauth.AuthPair(profile.Display, parent, server, client)
 }
 
-func startWindowManager(bin, name, display, wm string) error {
-	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s %s", display, wm)}
-
-	slog.Debug(bin+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(bin, args...)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %w", output, err)
-	}
-	return nil
-}
-
 func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, display string, interactive bool, cfg *types.Config) error {
-	command := "Xephyr"
 	res, err := resolution.Primary()
 	if err != nil {
 		return err
 	}
+
+	// The display stack runs from the qubesome binary already mounted in
+	// the profile, so the window manager reaches Xwayland as separate
+	// arguments rather than through a shell.
+	command := files.InProfileBinary
 	cArgs := []string{
-		":" + display,
-		"-title", fmt.Sprintf("qubesome-%s :%s", profile.Name, display),
-		"-auth", "/home/xorg-user/.Xserver",
-		"-extension", "MIT-SHM",
-		"-extension", "XTEST",
-		"-nopn",
-		"-nolisten", "tcp",
-		"-screen", res,
-		"-resizeable",
+		"profile-display",
+		"--display", display,
+		"--geometry", res,
+		"--auth", "/home/xorg-user/.Xserver",
+		"--wm", profile.WindowManager,
 	}
 	if profile.XephyrArgs != "" {
-		cArgs = append(cArgs, strings.Split(profile.XephyrArgs, " ")...)
+		cArgs = append(cArgs, "--extra", profile.XephyrArgs)
 	}
-
 	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		command = "xwayland-run"
-		cArgs = []string{
-			"-host-grab",
-			"-geometry", res,
-			"-extension", "MIT-SHM",
-			"-extension", "XTEST",
-			"-nopn",
-			"-tst",
-			"-nolisten", "tcp",
-			"-auth", "/home/xorg-user/.Xserver",
-			"-verbose", "9",
-			"--",
-			strings.TrimPrefix(profile.WindowManager, "exec "),
-		}
+		cArgs = append(cArgs, "--host-wayland")
 	}
 
 	server, err := files.ServerCookiePath(profile.Name)
@@ -678,8 +631,8 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	dockerArgs = append(dockerArgs, profile.Image)
 	if interactive {
 		dockerArgs = append(dockerArgs, "sh")
-		fmt.Println("To manually start the Window Manager:")
-		fmt.Printf("\t%s %s &\n\tDISPLAY=:%d %s &\n", command, strings.Join(cArgs, " "), profile.Display, profile.WindowManager)
+		fmt.Println("To manually start the display:")
+		fmt.Printf("\t%s %s\n", command, strings.Join(cArgs, " "))
 	} else {
 		dockerArgs = append(dockerArgs, command)
 		dockerArgs = append(dockerArgs, cArgs...)
