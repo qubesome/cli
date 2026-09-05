@@ -44,6 +44,12 @@ var (
 	ContainerNameFormat = "qubesome-%s"
 	defaultProfileImage = "ghcr.io/qubesome/xorg:latest"
 
+	// profileStartGrace is how long the profile container is given to
+	// fail before it is considered started. It only has to outlast an
+	// entrypoint that cannot run at all, not a slow compositor, because
+	// the compositor is waited for inside the container.
+	profileStartGrace = 500 * time.Millisecond
+
 	appTemplate = `[Desktop Entry]
 Version=1.0
 Name={{.Name}}
@@ -410,6 +416,21 @@ func createMagicCookie(profile *types.Profile) error {
 	return xauth.AuthPair(profile.Display, parent, server, client)
 }
 
+// shellQuote renders args as a single line that a shell will split back
+// into exactly these arguments.
+//
+// The profile's window manager is one argument that usually contains
+// spaces, so joining on a space would print a line that runs a different
+// command from the one qubesome runs.
+func shellQuote(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, a := range args {
+		quoted = append(quoted, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
+	}
+
+	return strings.Join(quoted, " ")
+}
+
 func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, display string, interactive bool, cfg *types.Config) error {
 	res, err := resolution.Primary()
 	if err != nil {
@@ -632,7 +653,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	if interactive {
 		dockerArgs = append(dockerArgs, "sh")
 		fmt.Println("To manually start the display:")
-		fmt.Printf("\t%s %s\n", command, strings.Join(cArgs, " "))
+		fmt.Printf("\t%s %s\n", command, shellQuote(cArgs))
 	} else {
 		dockerArgs = append(dockerArgs, command)
 		dockerArgs = append(dockerArgs, cArgs...)
@@ -667,6 +688,22 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	if err != nil {
 		return fmt.Errorf("%s: %w", output, err)
 	}
+
+	// docker run -d reports success once the container is created, which
+	// says nothing about whether its entrypoint survived. A profile whose
+	// image is missing the compositor would otherwise start cleanly and
+	// simply never show a window.
+	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
+	time.Sleep(profileStartGrace)
+
+	if !container.Running(bin, name) {
+		msg := fmt.Sprintf("profile %s exited immediately, check %s logs %s",
+			profile.Name, bin, name)
+		dbus.NotifyOrLog("qubesome start error", msg)
+
+		return errors.New(msg)
+	}
+
 	return nil
 }
 
