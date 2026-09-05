@@ -19,7 +19,7 @@ message XdgOpenReply {
 
 message RunWorkloadRequest {
   string workload = 1;
-  string args = 2;
+  repeated string args = 2;
 }
 
 message RunWorkloadReply {
@@ -27,7 +27,7 @@ message RunWorkloadReply {
 
 message FlatpakRunWorkloadRequest {
   string workload = 1;
-  string args = 2;
+  repeated string args = 2;
 }
 
 message FlatpakRunWorkloadReply {

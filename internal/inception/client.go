@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/qubesome/cli/internal/util/mtls"
@@ -101,7 +100,7 @@ func (c *Client) Run(ctx context.Context, workload string, args []string) error 
 	slog.Debug("[client] calling RunWorkload", "workload", workload, "args", args)
 	_, err = cl.RunWorkload(ctx, &pb.RunWorkloadRequest{
 		Workload: workload,
-		Args:     strings.Join(args, " "),
+		Args:     args,
 	})
 	if err != nil {
 		return err
@@ -130,7 +129,7 @@ func (c *Client) FlatpakRun(ctx context.Context, workload string, args []string)
 	slog.Debug("[client] calling FlatpakRunWorkload", "workload", workload, "args", args)
 	_, err = cl.FlatpakRunWorkload(ctx, &pb.FlatpakRunWorkloadRequest{
 		Workload: workload,
-		Args:     strings.Join(args, " "),
+		Args:     args,
 	})
 	if err != nil {
 		return err
