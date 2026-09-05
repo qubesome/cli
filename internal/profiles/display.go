@@ -1,9 +1,13 @@
 package profiles
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // displayParams describes the display stack a profile runs: a Wayland
@@ -138,4 +142,36 @@ func xwaylandArgs(p displayParams) ([]string, error) {
 		"env", "-u", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR="+p.AppRuntimeDir)
 
 	return append(args, wm...), nil
+}
+
+// waitForSocket blocks until path is a unix socket, or timeout elapses.
+//
+// Xwayland fails immediately if the compositor is not yet listening, so
+// starting it before the socket exists turns a startup race into an
+// intermittent failure.
+func waitForSocket(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		fi, err := os.Stat(path)
+		if err == nil {
+			if fi.Mode().Type()&os.ModeSocket == 0 {
+				return fmt.Errorf("%q is not a socket: %s", path, fi.Mode().Type())
+			}
+			return nil
+		}
+
+		// Only a missing socket means it may still be on its way. Any
+		// other error, a permission one for instance, would otherwise be
+		// reported as a timeout much later and further from the cause.
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("failed to stat %q: %w", path, err)
+		}
+
+		if deadline.Before(time.Now()) {
+			return fmt.Errorf("timed out waiting for compositor socket %q", path)
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
 }

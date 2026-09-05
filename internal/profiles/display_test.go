@@ -1,7 +1,11 @@
 package profiles
 
 import (
+	"net"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -175,4 +179,39 @@ func TestXwaylandArgsDisablesEavesdroppingExtensions(t *testing.T) {
 
 	require.Equal(t, []string{"MIT-SHM", "XTEST", "RECORD"}, disabled,
 		"these extensions must stay disabled, see the comment in xwaylandArgs")
+}
+
+func TestWaitForSocket(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "qubesome")
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		l, err := net.Listen("unix", path)
+		if err != nil {
+			return
+		}
+		t.Cleanup(func() { _ = l.Close() })
+	}()
+
+	require.NoError(t, waitForSocket(path, 5*time.Second))
+}
+
+func TestWaitForSocketTimesOut(t *testing.T) {
+	t.Parallel()
+
+	err := waitForSocket(filepath.Join(t.TempDir(), "absent"), 100*time.Millisecond)
+	require.Error(t, err)
+}
+
+func TestWaitForSocketRejectsNonSocket(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "qubesome")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+
+	err := waitForSocket(path, time.Second)
+	require.ErrorContains(t, err, "not a socket")
 }
