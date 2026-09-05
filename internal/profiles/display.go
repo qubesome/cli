@@ -52,13 +52,15 @@ type displayParams struct {
 func splitGeometry(geometry string) (string, string, error) {
 	w, h, ok := strings.Cut(geometry, "x")
 	if !ok {
-		return "", "", fmt.Errorf("geometry %q is not WIDTHxHEIGHT", geometry)
+		return "", "", fmt.Errorf("host screen resolution %q is not WIDTHxHEIGHT", geometry)
 	}
 
 	for _, v := range []string{w, h} {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
-			return "", "", fmt.Errorf("geometry %q is not WIDTHxHEIGHT", geometry)
+			return "", "", fmt.Errorf(
+				"host screen resolution %q has dimension %q, which is not a positive integer",
+				geometry, v)
 		}
 	}
 
