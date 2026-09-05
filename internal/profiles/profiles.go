@@ -564,30 +564,11 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	if strings.HasSuffix(bin, "podman") {
 		dockerArgs = append(dockerArgs, "--userns=keep-id")
 	}
-	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR")
-		if xdgRuntimeDir == "" {
-			uid := os.Getuid()
-			if uid < 1000 {
-				return fmt.Errorf("qubesome does not support running under privileged users")
-			}
-			xdgRuntimeDir = "/run/user/" + strconv.Itoa(uid)
-		}
-
-		// TODO: Investigate ways to avoid sharing /run/user/1000 on Wayland.
-		dockerArgs = append(dockerArgs, "-e", "XDG_RUNTIME_DIR")
-		dockerArgs = append(dockerArgs, "-e", "XDG_BACKEND")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SEAT")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_ID")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_CLASS")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_DESKTOP")
-		dockerArgs = append(dockerArgs, "-e", "WAYLAND_DISPLAY")
-		dockerArgs = append(dockerArgs, "-e", "HYPRLAND_INSTANCE_SIGNATURE")
-		dockerArgs = append(dockerArgs, "-v="+xdgRuntimeDir+":/run/user/1000")
-	} else {
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE=X11")
-	}
+	// The profile runs its own compositor, so it needs nothing from the
+	// host session beyond the display socket already mounted below. The
+	// session type is reported as X11 because the window manager runs on
+	// Xwayland regardless of what the host session is.
+	dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE=X11")
 	if profile.Gpus != "" {
 		if gpus, ok := gpu.Params(profile.Runner); ok {
 			dockerArgs = append(dockerArgs, gpus...)
