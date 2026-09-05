@@ -1,7 +1,9 @@
 package types
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -204,12 +206,22 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
 	decoder := yaml.NewDecoder(f)
 	decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
-	err = decoder.Decode(&cfg)
-	if err != nil {
-		fmt.Println("Strict YAML decoding error:", err)
+	// A partially decoded config must never be used. Every hostAccess
+	// restriction is deny-by-default, so returning what was decoded before
+	// the error would silently drop restrictions.
+	// cfg is already a pointer. Decoding into &cfg would hand yaml a
+	// **Config, which it follows by replacing the pointer rather than
+	// filling the struct, so a document that is an explicit null sets cfg
+	// to nil without reporting an error.
+	if err := decoder.Decode(cfg); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("config %q is empty", path)
+		}
+		return nil, fmt.Errorf("failed to decode config %q: %w", path, err)
 	}
 
 	cfg.RootDir = filepath.Dir(path)
