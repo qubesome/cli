@@ -184,19 +184,36 @@ func TestXwaylandArgsDisablesEavesdroppingExtensions(t *testing.T) {
 func TestWaitForSocket(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "qubesome")
+	path := filepath.Join(t.TempDir(), "qubesome")
 
+	listening := make(chan net.Listener, 1)
 	go func() {
 		time.Sleep(50 * time.Millisecond)
+
 		l, err := net.Listen("unix", path)
 		if err != nil {
+			// t.Logf is safe from a non-test goroutine, unlike
+			// t.Fatal. Without this the test fails as a timeout and
+			// points at waitForSocket rather than at the listener
+			// that never started.
+			t.Logf("failed to listen on %q: %v", path, err)
+			close(listening)
 			return
 		}
-		t.Cleanup(func() { _ = l.Close() })
+
+		listening <- l
 	}()
 
-	require.NoError(t, waitForSocket(path, 5*time.Second))
+	err := waitForSocket(path, 5*time.Second)
+
+	// Closing on the test goroutine, rather than through a t.Cleanup
+	// registered by the goroutine above, which may run after this test
+	// has returned and then never runs at all.
+	if l := <-listening; l != nil {
+		_ = l.Close()
+	}
+
+	require.NoError(t, err)
 }
 
 func TestWaitForSocketTimesOut(t *testing.T) {
