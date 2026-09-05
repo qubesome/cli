@@ -1,7 +1,6 @@
 package docker
 
 import (
-	"bytes"
 	"fmt"
 	"log/slog"
 	"os"
@@ -178,7 +177,7 @@ func Run(ew types.EffectiveWorkload) error {
 	//nolint
 	if wl.HostAccess.Mime {
 		pdir := files.ProfileDir(ew.Profile.Name)
-		homedir, err := getHomeDir(wl.Image)
+		homedir, err := container.HomeDir(runnerBinary, wl.Image)
 		if err != nil {
 			return err
 		}
@@ -324,20 +323,6 @@ func mtlsData(name string) (string, string, string, bool) {
 	}
 
 	return ca, cert, key, true
-}
-
-func getHomeDir(image string) (string, error) {
-	args := []string{"run", "--rm", image, "ls", "/home"}
-
-	slog.Debug(runnerBinary + " " + strings.Join(args, " "))
-	cmd := execabs.Command(runnerBinary, args...)
-
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home dir: %w", err)
-	}
-
-	return filepath.Join("/home", string(bytes.TrimSpace(out))), nil
 }
 
 func hostDbusParams() []string {
