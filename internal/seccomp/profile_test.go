@@ -7,6 +7,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestParseRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	jsonWithUnknownField := []byte(`{
+		"defaultAction": "SCMP_ACT_ERRNO",
+		"defaultErrnoRet": 38,
+		"archMap": [],
+		"syscalls": [],
+		"unknownField": "should be rejected"
+	}`)
+
+	_, err := parse(jsonWithUnknownField)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown field")
+}
+
+func TestParseMalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	_, err := parse([]byte(`{invalid json}`))
+	require.Error(t, err)
+}
+
 func TestLoad(t *testing.T) {
 	t.Parallel()
 
