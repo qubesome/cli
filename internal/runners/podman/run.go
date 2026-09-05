@@ -228,16 +228,18 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, "--privileged")
 	}
 
-	if len(ndevs) > 0 {
-		// Some USB devices, such as YubiKeys, requires --device pointing to both
-		// the hidraw device as well as the respective /dev/usb. The latter by
-		// itself would enable things such as  "ykinfo -a". However, use of SK keys
-		// fails with operation not permitted unless /dev:/dev is also mapped.
-		args = append(args, "-v=/dev/:/dev/")
-
-		for _, ndev := range ndevs {
-			args = append(args, fmt.Sprintf("--device=%s", ndev))
-		}
+	// Some USB devices, such as YubiKeys, require both their own node under
+	// /dev/bus/usb/<bus>/<device> and the hidraw nodes of their interfaces,
+	// which is what NamedDevices returns. --device grants the device
+	// cgroup rule and recreates the node in the container, but it does not
+	// carry over the host ACLs that grant the logged in user access to it,
+	// which is what SK keys rely on: without them their use fails with
+	// operation not permitted. Bind mounting each node on top brings the
+	// host inode, and with it those ACLs. Only the nodes of the requested
+	// devices are shared, never the device tree they live in.
+	for _, ndev := range ndevs {
+		args = append(args, fmt.Sprintf("--device=%s", ndev))
+		args = append(args, fmt.Sprintf("-v=%[1]s:%[1]s", ndev))
 	}
 
 	for _, p := range wl.HostAccess.Paths {
