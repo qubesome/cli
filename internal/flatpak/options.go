@@ -1,14 +1,9 @@
 package flatpak
 
 import (
-	"fmt"
-	"regexp"
-
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/types"
 )
-
-var flatpakRegex = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9]+)+$`)
 
 type Options struct {
 	Name      string
@@ -42,13 +37,5 @@ func WithConfig(cfg *types.Config) command.Option[Options] {
 }
 
 func (o *Options) Validate() error {
-	if o.Name == "" {
-		return fmt.Errorf("missing flatpak name")
-	}
-
-	if !flatpakRegex.MatchString(o.Name) {
-		return fmt.Errorf("invalid flatpak name: %q", o.Name)
-	}
-
-	return nil
+	return types.ValidateFlatpakName(o.Name)
 }

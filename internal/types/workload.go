@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -140,9 +141,18 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	} else if len(w.HostAccess.Devices) > 0 {
 		devs := make([]string, 0, len(w.HostAccess.Devices))
 
-		for _, path := range w.HostAccess.Devices {
-			if pathAllowed(path, p.Devices) {
-				devs = append(devs, path)
+		// Devices are src[:dst[:perms]], so the whole request cannot be
+		// matched against the allowlist as if it were a path. Only the
+		// source names a host device, and that is what the profile grants.
+		for _, device := range w.HostAccess.Devices {
+			src, _, _, err := ParseDevice(device)
+			if err != nil {
+				slog.Warn("dropping device", "device", device, "error", err)
+				continue
+			}
+
+			if pathAllowed(src, p.Devices) {
+				devs = append(devs, device)
 			}
 		}
 
@@ -205,8 +215,29 @@ func (w Workload) Validate() error {
 			return err
 		}
 	}
-	for _, arg := range w.Args {
-		if err := valid(arg, "args", 250, false, nil); err != nil {
+	// x11Args, waylandArgs and noGpuArgs are appended to the same command
+	// line as args, so they are held to the same rules. The order is fixed
+	// so that a workload with more than one invalid field always fails on
+	// the same one.
+	argFields := []struct {
+		name string
+		args []string
+	}{
+		{"args", w.Args},
+		{"x11Args", w.X11Args},
+		{"waylandArgs", w.WaylandArgs},
+		{"noGpuArgs", w.NoGPUArgs},
+	}
+
+	for _, f := range argFields {
+		for _, arg := range f.args {
+			if err := valid(arg, f.name, 250, false, nil); err != nil {
+				return err
+			}
+		}
+	}
+	for _, device := range w.HostAccess.Devices {
+		if _, _, _, err := ParseDevice(device); err != nil {
 			return err
 		}
 	}

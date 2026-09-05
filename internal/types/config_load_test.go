@@ -19,6 +19,7 @@ func TestLoadConfig(t *testing.T) {
 			content: `profiles:
   work:
     display: 1
+    windowManager: exec awesome
     hostAccess:
       camera: true
 `,
@@ -29,6 +30,7 @@ func TestLoadConfig(t *testing.T) {
 			content: `profiles:
   work:
     display: 1
+    windowManager: exec awesome
     notAField: true
 `,
 			wantErr: true,
@@ -52,6 +54,17 @@ func TestLoadConfig(t *testing.T) {
 			content: `profiles:
   work:
     display: not-a-number
+`,
+			wantErr: true,
+		},
+		{
+			name: "invalid profile",
+			content: `profiles:
+  work:
+    display: 1
+    windowManager: exec awesome
+    flatpaks:
+    - ../../etc/passwd
 `,
 			wantErr: true,
 		},

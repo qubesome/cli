@@ -224,6 +224,9 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 	if w.HostAccess.Camera != ew.Workload.HostAccess.Camera {
 		msg = msg + "- camera<br/>"
 	}
+	if w.HostAccess.Microphone != ew.Workload.HostAccess.Microphone {
+		msg = msg + "- microphone<br/>"
+	}
 	if w.HostAccess.Mime != ew.Workload.HostAccess.Mime {
 		msg = msg + "- mime<br/>"
 	}
