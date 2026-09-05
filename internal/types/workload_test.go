@@ -1261,3 +1261,32 @@ func TestWorkloadValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyProfileSeccompUnconfined(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		workload bool
+		profile  bool
+		want     bool
+	}{
+		{name: "neither", workload: false, profile: false, want: false},
+		{name: "workload only", workload: true, profile: false, want: false},
+		{name: "profile only", workload: false, profile: true, want: false},
+		{name: "both", workload: true, profile: true, want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			w := Workload{Name: "w", HostAccess: HostAccess{SeccompUnconfined: tc.workload}}
+			p := &Profile{Name: "p", HostAccess: HostAccess{SeccompUnconfined: tc.profile}}
+
+			if got := w.ApplyProfile(p).Workload.HostAccess.SeccompUnconfined; got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

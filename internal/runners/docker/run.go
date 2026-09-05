@@ -60,9 +60,16 @@ func Run(ew types.EffectiveWorkload) error {
 		"run",
 		"--rm",
 		"-d",
-		"--security-opt=seccomp=unconfined",
 		"--security-opt=label=disable",
 		"--security-opt=no-new-privileges=true",
+		"--cap-drop=ALL",
+	}
+
+	// Workloads run untrusted code, so they keep the runtime's seccomp
+	// profile unless the workload asks for it to be lifted and the profile
+	// allows it.
+	if wl.HostAccess.SeccompUnconfined {
+		args = append(args, "--security-opt=seccomp=unconfined")
 	}
 
 	if ew.Workload.User != nil {

@@ -230,6 +230,9 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 	if w.HostAccess.Mime != ew.Workload.HostAccess.Mime {
 		msg = msg + "- mime<br/>"
 	}
+	if w.HostAccess.SeccompUnconfined != ew.Workload.HostAccess.SeccompUnconfined {
+		msg = msg + "- seccompUnconfined<br/>"
+	}
 	if w.HostAccess.Privileged != ew.Workload.HostAccess.Privileged {
 		msg = msg + "- privileged<br/>"
 	}

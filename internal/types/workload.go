@@ -51,6 +51,16 @@ type HostAccess struct {
 
 	Bluetooth bool `yaml:"bluetooth"`
 
+	// SeccompUnconfined disables the container runtime's seccomp profile
+	// for the workload, exposing the full system call surface to it.
+	//
+	// Some applications bring their own sandbox and need system calls that
+	// the runtime's default profile denies, most notably the user namespace
+	// calls used by Chromium-based browsers. Granting this gives up the
+	// mitigation that stands between a workload and the host kernel, so it
+	// is opt-in at both workload and profile level, exactly like privileged.
+	SeccompUnconfined bool `yaml:"seccompUnconfined"`
+
 	// USBDevices defines the USB devices to be made available to a
 	// workload. Each entry is either a "vendor:product" identifier
 	// (e.g. 1050:0407) matched against the device IDs, or, for backwards
@@ -89,6 +99,7 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e.Workload.HostAccess.Bluetooth = w.HostAccess.Bluetooth && p.Bluetooth
 	e.Workload.HostAccess.Mime = w.HostAccess.Mime && p.Mime
 	e.Workload.HostAccess.Privileged = w.HostAccess.Privileged && p.Privileged
+	e.Workload.HostAccess.SeccompUnconfined = w.HostAccess.SeccompUnconfined && p.SeccompUnconfined
 
 	// TODO: Consider restraining user on workloads.
 	e.Workload.User = w.User
