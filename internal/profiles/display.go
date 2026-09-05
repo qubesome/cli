@@ -4,10 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/qubesome/cli/internal/files"
+	"golang.org/x/sys/execabs"
 )
 
 // displayParams describes the display stack a profile runs: a Wayland
@@ -174,4 +179,63 @@ func waitForSocket(path string, timeout time.Duration) error {
 
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// RunDisplay starts the profile's display stack. It is the entrypoint of
+// the profile container, and it does not return until the window manager
+// exits.
+func RunDisplay(p displayParams) error {
+	// The compositor's runtime dir is private to this container. It must
+	// not be under /run/user/1000, which is bind-mounted into every
+	// workload of this profile.
+	if err := os.MkdirAll(p.RuntimeDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create compositor runtime dir: %w", err)
+	}
+	if err := os.Chmod(p.RuntimeDir, 0o700); err != nil {
+		return fmt.Errorf("failed to set compositor runtime dir mode: %w", err)
+	}
+
+	cArgs, err := compositorArgs(p)
+	if err != nil {
+		return err
+	}
+
+	xArgs, err := xwaylandArgs(p)
+	if err != nil {
+		return err
+	}
+
+	slog.Debug("starting compositor", "binary", files.WestonBinary, "args", cArgs)
+	compositor := execabs.Command(files.WestonBinary, cArgs...)
+	compositor.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+p.RuntimeDir)
+	compositor.Stdout = os.Stdout
+	compositor.Stderr = os.Stderr
+
+	if err := compositor.Start(); err != nil {
+		return fmt.Errorf("failed to start compositor: %w", err)
+	}
+
+	defer func() {
+		if compositor.Process != nil {
+			_ = compositor.Process.Kill()
+			_, _ = compositor.Process.Wait()
+		}
+	}()
+
+	socket := filepath.Join(p.RuntimeDir, p.WaylandSocket)
+	if err := waitForSocket(socket, 15*time.Second); err != nil {
+		return err
+	}
+
+	slog.Debug("starting Xwayland", "binary", files.XwaylandRunBinary, "args", xArgs)
+	x := execabs.Command(files.XwaylandRunBinary, xArgs...)
+	x.Env = append(os.Environ(),
+		"XDG_RUNTIME_DIR="+p.RuntimeDir,
+		"WAYLAND_DISPLAY="+p.WaylandSocket,
+	)
+	x.Stdin = os.Stdin
+	x.Stdout = os.Stdout
+	x.Stderr = os.Stderr
+
+	return x.Run()
 }
