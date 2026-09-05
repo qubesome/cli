@@ -64,3 +64,89 @@ func TestCompositorArgsBadGeometry(t *testing.T) {
 		require.Error(t, err, "geometry %q should be rejected", g)
 	}
 }
+
+func TestXwaylandArgs(t *testing.T) {
+	t.Parallel()
+
+	base := displayParams{
+		Display:       11,
+		Geometry:      "1920x1080",
+		AuthFile:      "/home/xorg-user/.Xserver",
+		WindowManager: "exec dbus-run-session awesome",
+		RuntimeDir:    "/run/qubesome-wl",
+		WaylandSocket: "qubesome",
+		AppRuntimeDir: "/run/user/1000",
+	}
+
+	tests := []struct {
+		name string
+		in   displayParams
+		want []string
+	}{
+		{
+			name: "defaults",
+			in:   base,
+			want: []string{
+				":11",
+				"-host-grab",
+				"-geometry", "1920x1080",
+				"-auth", "/home/xorg-user/.Xserver",
+				"-extension", "MIT-SHM",
+				"-extension", "XTEST",
+				"-extension", "RECORD",
+				"-nopn",
+				"-tst",
+				"-nolisten", "tcp",
+				"--",
+				"env", "-u", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR=/run/user/1000",
+				"dbus-run-session", "awesome",
+			},
+		},
+		{
+			name: "extra args are appended before the separator",
+			in: func() displayParams {
+				p := base
+				p.ExtraArgs = "-verbose 9"
+				return p
+			}(),
+			want: []string{
+				":11",
+				"-host-grab",
+				"-geometry", "1920x1080",
+				"-auth", "/home/xorg-user/.Xserver",
+				"-extension", "MIT-SHM",
+				"-extension", "XTEST",
+				"-extension", "RECORD",
+				"-nopn",
+				"-tst",
+				"-nolisten", "tcp",
+				"-verbose", "9",
+				"--",
+				"env", "-u", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR=/run/user/1000",
+				"dbus-run-session", "awesome",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := xwaylandArgs(tc.in)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestXwaylandArgsRejectsEmptyWindowManager(t *testing.T) {
+	t.Parallel()
+
+	_, err := xwaylandArgs(displayParams{
+		Display:       11,
+		Geometry:      "1920x1080",
+		WindowManager: "exec ",
+		AppRuntimeDir: "/run/user/1000",
+	})
+	require.Error(t, err)
+}

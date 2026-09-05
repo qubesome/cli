@@ -91,3 +91,51 @@ func compositorArgs(p displayParams) ([]string, error) {
 		"--socket=" + p.WaylandSocket,
 	}, nil
 }
+
+// xwaylandArgs returns the arguments for xwayland-run, which starts a
+// rootful Xwayland inside the compositor and runs the window manager as
+// its only client.
+//
+// The window manager is passed as separate arguments rather than through a
+// shell, so a window manager command from a profile's dotfiles cannot be
+// made to run anything else.
+func xwaylandArgs(p displayParams) ([]string, error) {
+	if _, _, err := splitGeometry(p.Geometry); err != nil {
+		return nil, err
+	}
+
+	wm := strings.Fields(strings.TrimPrefix(p.WindowManager, "exec "))
+	if len(wm) == 0 {
+		return nil, fmt.Errorf("profile has no window manager")
+	}
+
+	args := []string{
+		":" + strconv.Itoa(int(p.Display)),
+		"-host-grab",
+		"-geometry", p.Geometry,
+		"-auth", p.AuthFile,
+		// -extension disables an extension. MIT-SHM and XTEST are off so
+		// that workloads sharing this display cannot pass shared memory
+		// between themselves or inject synthetic input into each other.
+		// RECORD is off for the same reason: it would let any client
+		// record every other client's input.
+		"-extension", "MIT-SHM",
+		"-extension", "XTEST",
+		"-extension", "RECORD",
+		"-nopn",
+		"-tst",
+		"-nolisten", "tcp",
+	}
+
+	if p.ExtraArgs != "" {
+		args = append(args, strings.Fields(p.ExtraArgs)...)
+	}
+
+	// The window manager, and everything it launches, must not inherit a
+	// path to the compositor. A client that reaches the Wayland socket
+	// bypasses Xwayland and the isolation set above.
+	args = append(args, "--",
+		"env", "-u", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR="+p.AppRuntimeDir)
+
+	return append(args, wm...), nil
+}
