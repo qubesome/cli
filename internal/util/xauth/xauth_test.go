@@ -26,6 +26,42 @@ func TestAuthPair(t *testing.T) {
 			client:  "ffff0005712d706f6400013000127749542d4d411149432d411f4f4b66452d010010ffffffffffffffffffffffffffffffff",
 		},
 		{
+			name:    "display 11 uses a two digit number",
+			parent:  "01000005712d706f6400013000127749542d4d411149432d411f4f4b66452d01001040cc3e730e6f7a534a3977321b14e0a7",
+			display: 11,
+			server:  "01000005712d706f640002313100127749542d4d411149432d411f4f4b66452d010010ffffffffffffffffffffffffffffffff",
+			client:  "ffff0005712d706f640002313100127749542d4d411149432d411f4f4b66452d010010ffffffffffffffffffffffffffffffff",
+		},
+		{
+			name:    "display 255 uses a three digit number",
+			parent:  "01000005712d706f6400013000127749542d4d411149432d411f4f4b66452d01001040cc3e730e6f7a534a3977321b14e0a7",
+			display: 255,
+			server:  "01000005712d706f64000332353500127749542d4d411149432d411f4f4b66452d010010ffffffffffffffffffffffffffffffff",
+			client:  "ffff0005712d706f64000332353500127749542d4d411149432d411f4f4b66452d010010ffffffffffffffffffffffffffffffff",
+		},
+		{
+			// The address is the host name, so its length varies from
+			// machine to machine. A record was previously built with
+			// the address field fixed at 5 bytes.
+			name:    "address longer than five bytes",
+			parent:  "0100000e656e746972652d32316170746f7000013000124d49542d4d414749432d434f4f4b49452d31001040cc3e730e6f7a534a3977321b14e0a7",
+			display: 11,
+			server:  "0100000e656e746972652d32316170746f700002313100124d49542d4d414749432d434f4f4b49452d310010ffffffffffffffffffffffffffffffff",
+			client:  "ffff000e656e746972652d32316170746f700002313100124d49542d4d414749432d434f4f4b49452d310010ffffffffffffffffffffffffffffffff",
+		},
+		{
+			name:    "truncated record",
+			parent:  "0100000e656e746972652d3231617074",
+			display: 0,
+			err:     "failed to read parent auth file",
+		},
+		{
+			name:    "empty parent",
+			parent:  "",
+			display: 0,
+			err:     "failed to read parent auth file",
+		},
+		{
 			name:    "display 5",
 			parent:  "01000005712d706f6400013000127749542d4d411149432d411f4f4b66452d01001040cc3e730e6f7a534a3977321b14e0a7",
 			display: 5,
