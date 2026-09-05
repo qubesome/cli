@@ -102,12 +102,18 @@ func homeOfUser(user, image string) (string, error) {
 	return "/home/" + name, nil
 }
 
+// envValue returns the value of key in an image's environment.
+//
+// The list may hold a key more than once. Runtimes build the container's
+// environment by walking it in order, so the last entry is the one the
+// process ends up with.
 func envValue(env []string, key string) string {
+	value := ""
 	for _, e := range env {
 		if k, v, ok := strings.Cut(e, "="); ok && k == key {
-			return v
+			value = v
 		}
 	}
 
-	return ""
+	return value
 }

@@ -13,8 +13,14 @@ import (
 // https://gitlab.freedesktop.org/xorg/app/xauth/-/blob/master/process.c?ref_type=heads
 // https://gitlab.freedesktop.org/xorg/app/xauth/-/blob/master/xauth.h?ref_type=heads
 
-// familyLocal marks an entry as matching any local connection.
-const familyLocal = 0xffff
+// familyWild is the wildcard family of X11's Xauth.h, which matches any
+// family rather than naming one. FamilyLocal, the family the host entry
+// carries, is 256.
+//
+// The workload's copy is written as wildcard so that it is accepted from
+// inside a container, where the connection does not look like it came
+// from the host the entry names.
+const familyWild = 0xffff
 
 var cookieFunc = newCookie
 
@@ -40,9 +46,7 @@ func AuthPair(display uint8, parent io.Reader, server, client io.Writer) error {
 		return fmt.Errorf("failed to write server auth file: %w", err)
 	}
 
-	// The workload's copy is family local, which is what lets it connect
-	// from inside a container.
-	rec.family = familyLocal
+	rec.family = familyWild
 
 	if err := rec.writeTo(client); err != nil {
 		return fmt.Errorf("failed to write workload auth file: %w", err)

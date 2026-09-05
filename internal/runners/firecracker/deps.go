@@ -2,6 +2,7 @@ package firecracker
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/util/dbus"
@@ -41,6 +43,7 @@ const (
 
 	MB              = 1024 * 1024
 	maxDownloadSize = 100 * MB
+	downloadTimeout = 10 * time.Minute
 
 	networkDevName = "tap1"
 )
@@ -147,12 +150,29 @@ func download(url, target, wantSHA256 string) error {
 	if err != nil {
 		return err
 	}
+
+	// The file is closed explicitly once it has been written, so that a
+	// failure to flush is reported rather than discarded. This only cleans
+	// up after the paths that return early.
 	defer func() {
-		f.Close()
-		_ = os.Remove(part)
+		if f != nil {
+			_ = f.Close()
+			_ = os.Remove(part)
+		}
 	}()
 
-	r, err := http.Get(url) //nolint
+	// Requests carry no deadline of their own, so a connection that stalls
+	// would hang dependency setup for as long as the peer keeps it open.
+	// The deadline covers reading the body, not just the response.
+	ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -174,17 +194,22 @@ func download(url, target, wantSHA256 string) error {
 		return fmt.Errorf("download is larger than the %d byte limit", int64(maxDownloadSize))
 	}
 
-	if !bytes.Equal(h.Sum(nil), want) {
+	got := h.Sum(nil)
+	if !bytes.Equal(got, want) {
 		return fmt.Errorf("checksum mismatch for %s: got %s, want %s",
-			url, hex.EncodeToString(h.Sum(nil)), wantSHA256)
+			url, hex.EncodeToString(got), wantSHA256)
 	}
 
 	if err := f.Chmod(files.FileMode); err != nil {
 		return err
 	}
+
+	// Closing a file that was written to can fail, and the failure means
+	// the contents are not what was verified above.
 	if err := f.Close(); err != nil {
-		return err
+		return fmt.Errorf("failed to close %s: %w", part, err)
 	}
+	f = nil
 
 	return os.Rename(part, target)
 }

@@ -528,7 +528,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		}
 
 		if t.Before(time.Now()) {
-			return fmt.Errorf("time out waiting for socket to be created")
+			return fmt.Errorf("timed out waiting for socket to be created")
 		}
 
 		// Without this the loop spins on os.Stat for the whole timeout,

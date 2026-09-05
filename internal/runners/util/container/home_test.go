@@ -21,6 +21,16 @@ func TestHomeDir(t *testing.T) {
 		{name: "relative HOME", cfg: imageConfig{Env: []string{"HOME=home/chrome"}}, wantErr: true},
 		{name: "unclean HOME", cfg: imageConfig{Env: []string{"HOME=/home/../etc"}}, wantErr: true},
 		{name: "HOME with a colon", cfg: imageConfig{Env: []string{"HOME=/home/ch:rome"}}, wantErr: true},
+		{
+			name: "duplicate HOME takes the last",
+			cfg:  imageConfig{User: "chrome", Env: []string{"HOME=/home/first", "PATH=/bin", "HOME=/home/last"}},
+			want: "/home/last",
+		},
+		{
+			name: "duplicate HOME where the last is empty falls back to the user",
+			cfg:  imageConfig{User: "chrome", Env: []string{"HOME=/home/first", "HOME="}},
+			want: "/home/chrome",
+		},
 		{name: "user with a colon in the name", cfg: imageConfig{User: "ch:rome:g"}, wantErr: true},
 		{name: "empty HOME falls back", cfg: imageConfig{User: "chrome", Env: []string{"HOME="}}, want: "/home/chrome"},
 	}

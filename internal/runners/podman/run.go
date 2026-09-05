@@ -62,7 +62,14 @@ func Run(ew types.EffectiveWorkload) error {
 		"--security-opt=no-new-privileges=true",
 		"--security-opt=label=disable",
 		"--group-add=keep-groups",
-		"--cap-drop=ALL",
+	}
+
+	// Workloads start with no capabilities and ask for the ones they need
+	// through capsAdd. A privileged workload is the deliberate opt out of
+	// all of this, and combining the two leaves what the container ends up
+	// with down to the runtime and its version.
+	if !wl.HostAccess.Privileged {
+		args = append(args, "--cap-drop=ALL")
 	}
 
 	// Workloads run untrusted code, so they keep the runtime's seccomp

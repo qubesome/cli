@@ -1,6 +1,9 @@
 package types
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseDevice(t *testing.T) {
 	t.Parallel()
@@ -27,6 +30,7 @@ func TestParseDevice(t *testing.T) {
 		{device: "/dev/null:/dev/sda:mwr", wantSrc: "/dev/null", wantDst: "/dev/sda", wantPerms: "mwr"},
 		{device: "/dev/null:/dev/sda:rwm:extra", wantErr: true},
 		{device: "/dev", wantErr: true},
+		{device: "/dev/" + strings.Repeat("a", maxDeviceLen), wantErr: true},
 	}
 
 	for _, tc := range tests {
@@ -121,5 +125,19 @@ func TestApplyProfileDevices(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseDeviceDoesNotEchoOversizedValue(t *testing.T) {
+	t.Parallel()
+
+	device := "/dev/" + strings.Repeat("a", 10_000)
+
+	src, _, _, err := ParseDevice(device)
+	if err == nil {
+		t.Fatalf("expected error, got src %q", src)
+	}
+	if strings.Contains(err.Error(), "aaaa") {
+		t.Errorf("error echoes the oversized value: %d chars", len(err.Error()))
 	}
 }
