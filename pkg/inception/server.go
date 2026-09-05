@@ -91,15 +91,15 @@ func (s *grpcServer) XdgOpen(ctx context.Context, in *pb.XdgOpenRequest) (*pb.Xd
 }
 
 func (s *grpcServer) RunWorkload(ctx context.Context, in *pb.RunWorkloadRequest) (*pb.RunWorkloadReply, error) {
-	worload := in.GetWorkload()
+	workload := in.GetWorkload()
 	args := in.GetArgs()
 	profile := s.profile.Name
-	slog.Debug("[server] run-workload received", "workload", worload, "profile", profile, "args", args)
+	slog.Debug("[server] run-workload received", "workload", workload, "profile", profile, "args", args)
 
 	opts := []command.Option[qubesome.Options]{
 		qubesome.WithConfig(s.config),
 		qubesome.WithProfile(profile),
-		qubesome.WithWorkload(worload),
+		qubesome.WithWorkload(workload),
 	}
 
 	if err := checkRPCArgs(args); err != nil {
@@ -115,15 +115,15 @@ func (s *grpcServer) RunWorkload(ctx context.Context, in *pb.RunWorkloadRequest)
 }
 
 func (s *grpcServer) FlatpakRunWorkload(ctx context.Context, in *pb.FlatpakRunWorkloadRequest) (*pb.FlatpakRunWorkloadReply, error) {
-	worload := in.GetWorkload()
+	workload := in.GetWorkload()
 	args := in.GetArgs()
 	profile := s.profile.Name
-	slog.Debug("[server] flatpak-run-workload received", "workload", worload, "profile", profile, "args", args)
+	slog.Debug("[server] flatpak-run-workload received", "workload", workload, "profile", profile, "args", args)
 
 	opts := []command.Option[flatpak.Options]{
 		flatpak.WithConfig(s.config),
 		flatpak.WithProfile(profile),
-		flatpak.WithName(worload),
+		flatpak.WithName(workload),
 	}
 
 	if err := checkRPCArgs(args); err != nil {

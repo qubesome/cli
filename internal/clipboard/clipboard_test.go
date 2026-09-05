@@ -154,12 +154,28 @@ func TestPipeReportsBothFailures(t *testing.T) {
 	// Both commands fail on their own. Returning only one of them would
 	// hide the other, and when the reading command is the one that failed
 	// the writer's error is just the broken pipe it caused.
-	out := execabs.Command("/usr/bin/env", "sh", "-c", "sleep 0.2; exit 4")
-	in := execabs.Command("/usr/bin/env", "sh", "-c", "exit 3")
+	out := execabs.Command(files.ShBinary, "-c", "sleep 0.2; exit 4") //nolint:gosec // fixed test command.
+	in := execabs.Command(files.ShBinary, "-c", "exit 3")             //nolint:gosec // fixed test command.
 
 	err := pipe(out, in)
 	require.Error(t, err)
 
 	assert.Contains(t, err.Error(), "exit status 3", "the reading command's failure must be reported")
 	assert.Contains(t, err.Error(), "exit status 4", "the writing command's failure must be reported")
+}
+
+func TestCopyCommandsXauthorityTakesEffect(t *testing.T) {
+	t.Setenv("XAUTHORITY", "/from/the/environment")
+
+	const cookiePath = "/run/user/1000/qubesome/work.cookie"
+	_, in := copyCommands(0, 1, "", cookiePath)
+
+	// The value the child actually reads is what matters, not how many
+	// times the key appears in the slice: os/exec keeps the last one.
+	echo := execabs.Command(files.ShBinary, "-c", "printf %s \"$XAUTHORITY\"") //nolint:gosec // fixed test command.
+	echo.Env = in.Env
+
+	out, err := echo.Output()
+	require.NoError(t, err)
+	assert.Equal(t, cookiePath, string(out))
 }

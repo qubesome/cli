@@ -83,6 +83,10 @@ func copyCommands(from, target uint8, contentType, cookiePath string) (out, in *
 	inArgs = append(inArgs, "-i", "-display", display(target))
 
 	in = execabs.Command(files.XclipBinary, inArgs...) //nolint:gosec
+
+	// The environment may already carry an XAUTHORITY, and appending
+	// leaves two entries for the key. os/exec keeps the last value of a
+	// duplicated key, so the cookie set here is the one xclip reads.
 	in.Env = append(os.Environ(), "XAUTHORITY="+cookiePath)
 
 	return out, in
