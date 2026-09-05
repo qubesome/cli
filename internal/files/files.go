@@ -110,6 +110,14 @@ func IsolatedRunUserPath(profile string) (string, error) {
 	return securejoin.SecureJoin(base, fmt.Sprintf("%s/user", profile))
 }
 
+// WorkloadShmPath returns the /dev/shm directory for one workload of a
+// profile. Each workload gets its own, so shared memory is not a channel
+// between them.
+func WorkloadShmPath(profile, workload string) (string, error) {
+	base := RunUserQubesome()
+	return securejoin.SecureJoin(base, fmt.Sprintf("%s/user/shm/%s", profile, workload))
+}
+
 // ServerCookiePath returns the path to the server cookie file for the given profile.
 func ServerCookiePath(profile string) (string, error) {
 	base := RunUserQubesome()
