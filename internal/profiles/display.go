@@ -218,7 +218,18 @@ func RunDisplay(p displayParams) error {
 	defer func() {
 		if compositor.Process != nil {
 			_ = compositor.Process.Kill()
-			_, _ = compositor.Process.Wait()
+
+			// When the socket never appeared, the compositor usually died
+			// during startup rather than being slow, and its exit status
+			// is the diagnostic that says which. Discarding it leaves
+			// only the timeout, which describes the symptom.
+			state, err := compositor.Process.Wait()
+			switch {
+			case err != nil:
+				slog.Debug("failed to reap compositor", "error", err)
+			case state != nil:
+				slog.Debug("compositor exited", "state", state.String())
+			}
 		}
 	}()
 
