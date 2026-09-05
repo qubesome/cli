@@ -106,7 +106,7 @@ func xwaylandArgs(p displayParams) ([]string, error) {
 
 	wm := strings.Fields(strings.TrimPrefix(p.WindowManager, "exec "))
 	if len(wm) == 0 {
-		return nil, fmt.Errorf("profile has no window manager")
+		return nil, fmt.Errorf("profile window manager %q has no command", p.WindowManager)
 	}
 
 	args := []string{

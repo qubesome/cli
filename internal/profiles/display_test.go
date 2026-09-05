@@ -150,3 +150,29 @@ func TestXwaylandArgsRejectsEmptyWindowManager(t *testing.T) {
 	})
 	require.Error(t, err)
 }
+
+func TestXwaylandArgsDisablesEavesdroppingExtensions(t *testing.T) {
+	t.Parallel()
+
+	got, err := xwaylandArgs(displayParams{
+		Display:       11,
+		Geometry:      "1920x1080",
+		AuthFile:      "/home/xorg-user/.Xserver",
+		WindowManager: "awesome",
+		AppRuntimeDir: "/run/user/1000",
+	})
+	require.NoError(t, err)
+
+	var disabled []string
+	for i, arg := range got {
+		require.NotEqual(t, "+extension", arg,
+			"an extension is being enabled, which would let workloads observe each other: %v", got)
+
+		if arg == "-extension" && i+1 < len(got) {
+			disabled = append(disabled, got[i+1])
+		}
+	}
+
+	require.Equal(t, []string{"MIT-SHM", "XTEST", "RECORD"}, disabled,
+		"these extensions must stay disabled, see the comment in xwaylandArgs")
+}
