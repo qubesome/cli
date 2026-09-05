@@ -250,3 +250,45 @@ func RunDisplay(p displayParams) error {
 
 	return x.Run()
 }
+
+// DisplayOptions are the profile-display command's inputs. They mirror
+// displayParams, minus the fields that are fixed for every profile.
+type DisplayOptions struct {
+	Display       uint8
+	Geometry      string
+	AuthFile      string
+	WindowManager string
+	ExtraArgs     string
+	HostWayland   bool
+}
+
+const (
+	// compositorRuntimeDir holds the profile's Wayland socket. It is
+	// deliberately not under /run/user/1000, which workloads share with
+	// the profile.
+	compositorRuntimeDir = "/run/qubesome-wl"
+
+	// compositorSocket is the Wayland socket name within
+	// compositorRuntimeDir.
+	compositorSocket = "qubesome"
+
+	// appRuntimeDir is the XDG_RUNTIME_DIR applications in the profile
+	// see, restored for the window manager and its children.
+	appRuntimeDir = "/run/user/1000"
+)
+
+// RunDisplayWithOptions starts the profile display stack from the values
+// the profile-display command was given.
+func RunDisplayWithOptions(o DisplayOptions) error {
+	return RunDisplay(displayParams{
+		Display:       o.Display,
+		Geometry:      o.Geometry,
+		AuthFile:      o.AuthFile,
+		WindowManager: o.WindowManager,
+		ExtraArgs:     o.ExtraArgs,
+		HostWayland:   o.HostWayland,
+		RuntimeDir:    compositorRuntimeDir,
+		WaylandSocket: compositorSocket,
+		AppRuntimeDir: appRuntimeDir,
+	})
+}
