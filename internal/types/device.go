@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// maxDeviceLen bounds a device request, matching the bound on the other
+// path-like fields.
+const maxDeviceLen = 500
+
 // ParseDevice splits a device request into its source, destination and
 // permissions components.
 //
@@ -17,6 +21,14 @@ import (
 // the r, w and m flags. When omitted, dst defaults to src and perms
 // defaults to rwm, mirroring the runner defaults.
 func ParseDevice(device string) (src, dst, perms string, err error) {
+	// Bound the input before splitting it or quoting it back. Device
+	// requests come from a workload config, and an oversized one would
+	// otherwise be allocated per field and echoed into an error and the
+	// log line that reports it.
+	if len(device) > maxDeviceLen {
+		return "", "", "", fmt.Errorf("invalid device: longer than %d characters", maxDeviceLen)
+	}
+
 	parts := strings.Split(device, ":")
 	if len(parts) > 3 {
 		return "", "", "", fmt.Errorf("invalid device %q: too many fields", device)
@@ -51,7 +63,7 @@ func ParseDevice(device string) (src, dst, perms string, err error) {
 // A grant names a source device, so it is held to the same rules as the
 // source of a workload's device request.
 func ValidateDeviceGrant(device string) error {
-	if err := valid(device, "devices", 500, false, nil); err != nil {
+	if err := valid(device, "devices", maxDeviceLen, false, nil); err != nil {
 		return err
 	}
 
