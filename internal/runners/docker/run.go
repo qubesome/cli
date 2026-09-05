@@ -1,7 +1,6 @@
 package docker
 
 import (
-	"bytes"
 	"fmt"
 	"log/slog"
 	"os"
@@ -60,9 +59,16 @@ func Run(ew types.EffectiveWorkload) error {
 		"run",
 		"--rm",
 		"-d",
-		"--security-opt=seccomp=unconfined",
 		"--security-opt=label=disable",
 		"--security-opt=no-new-privileges=true",
+		"--cap-drop=ALL",
+	}
+
+	// Workloads run untrusted code, so they keep the runtime's seccomp
+	// profile unless the workload asks for it to be lifted and the profile
+	// allows it.
+	if wl.HostAccess.SeccompUnconfined {
+		args = append(args, "--security-opt=seccomp=unconfined")
 	}
 
 	if ew.Workload.User != nil {
@@ -171,7 +177,7 @@ func Run(ew types.EffectiveWorkload) error {
 	//nolint
 	if wl.HostAccess.Mime {
 		pdir := files.ProfileDir(ew.Profile.Name)
-		homedir, err := getHomeDir(wl.Image)
+		homedir, err := container.HomeDir(runnerBinary, wl.Image)
 		if err != nil {
 			return err
 		}
@@ -233,16 +239,18 @@ func Run(ew types.EffectiveWorkload) error {
 		args = append(args, "--privileged")
 	}
 
-	if len(ndevs) > 0 {
-		// Some USB devices, such as YubiKeys, requires --device pointing to both
-		// the hidraw device as well as the respective /dev/usb. The latter by
-		// itself would enable things such as  "ykinfo -a". However, use of SK keys
-		// fails with operation not permitted unless /dev:/dev is also mapped.
-		args = append(args, "-v=/dev/:/dev/")
-
-		for _, ndev := range ndevs {
-			args = append(args, fmt.Sprintf("--device=%s", ndev))
-		}
+	// Some USB devices, such as YubiKeys, require both their own node under
+	// /dev/bus/usb/<bus>/<device> and the hidraw nodes of their interfaces,
+	// which is what NamedDevices returns. --device grants the device
+	// cgroup rule and recreates the node in the container, but it does not
+	// carry over the host ACLs that grant the logged in user access to it,
+	// which is what SK keys rely on: without them their use fails with
+	// operation not permitted. Bind mounting each node on top brings the
+	// host inode, and with it those ACLs. Only the nodes of the requested
+	// devices are shared, never the device tree they live in.
+	for _, ndev := range ndevs {
+		args = append(args, fmt.Sprintf("--device=%s", ndev))
+		args = append(args, fmt.Sprintf("-v=%[1]s:%[1]s", ndev))
 	}
 
 	for _, p := range wl.HostAccess.Paths {
@@ -315,20 +323,6 @@ func mtlsData(name string) (string, string, string, bool) {
 	}
 
 	return ca, cert, key, true
-}
-
-func getHomeDir(image string) (string, error) {
-	args := []string{"run", "--rm", image, "ls", "/home"}
-
-	slog.Debug(runnerBinary + " " + strings.Join(args, " "))
-	cmd := execabs.Command(runnerBinary, args...)
-
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home dir: %w", err)
-	}
-
-	return filepath.Join("/home", string(bytes.TrimSpace(out))), nil
 }
 
 func hostDbusParams() []string {

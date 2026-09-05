@@ -16,7 +16,9 @@ import (
 	"github.com/qubesome/cli/internal/util/mtls"
 	pb "github.com/qubesome/cli/pkg/inception/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
 // NewServer returns a new inception server.
@@ -100,8 +102,12 @@ func (s *grpcServer) RunWorkload(ctx context.Context, in *pb.RunWorkloadRequest)
 		qubesome.WithWorkload(worload),
 	}
 
+	if err := checkRPCArgs(args); err != nil {
+		return &pb.RunWorkloadReply{}, err
+	}
+
 	if len(args) > 0 {
-		opts = append(opts, qubesome.WithExtraArgs(strings.Split(args, " ")))
+		opts = append(opts, qubesome.WithExtraArgs(args))
 	}
 
 	err := qubesome.Run(opts...)
@@ -120,10 +126,36 @@ func (s *grpcServer) FlatpakRunWorkload(ctx context.Context, in *pb.FlatpakRunWo
 		flatpak.WithName(worload),
 	}
 
+	if err := checkRPCArgs(args); err != nil {
+		return &pb.FlatpakRunWorkloadReply{}, err
+	}
+
 	if len(args) > 0 {
-		opts = append(opts, flatpak.WithExtraArgs(strings.Split(args, " ")))
+		opts = append(opts, flatpak.WithExtraArgs(args))
 	}
 
 	err := flatpak.Run(opts...)
 	return &pb.FlatpakRunWorkloadReply{}, err
+}
+
+// checkRPCArgs rejects arguments that the target workload's command would
+// read as flags.
+//
+// Arguments received over the inception socket come from a workload, and
+// are appended to the command line of another workload in the same profile.
+// A workload asks for something to be opened, it does not get to change how
+// the program that opens it is run.
+func checkRPCArgs(args []string) error {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			// The caller sent something the server will not accept, so
+			// say so with a status code. A plain error reaches the
+			// client as codes.Unknown, which reads as a server side
+			// failure and invites a retry that cannot succeed.
+			return status.Errorf(codes.InvalidArgument,
+				"argument %q cannot start with '-'", arg)
+		}
+	}
+
+	return nil
 }

@@ -917,9 +917,9 @@ func Test_ApplyProfile(t *testing.T) {
 			},
 		},
 		{
-			name: "Devices empty: workload /foo + profile empty",
+			name: "Devices empty: workload /dev/foo + profile empty",
 			workload: Workload{
-				HostAccess: HostAccess{Devices: []string{"/foo"}},
+				HostAccess: HostAccess{Devices: []string{"/dev/foo"}},
 			},
 			profile: &Profile{
 				Devices: []string{},
@@ -935,12 +935,12 @@ func Test_ApplyProfile(t *testing.T) {
 			},
 		},
 		{
-			name: "Devices empty: workload empty + profile /foo",
+			name: "Devices empty: workload empty + profile /dev/foo",
 			workload: Workload{
 				HostAccess: HostAccess{Devices: []string{}},
 			},
 			profile: &Profile{
-				Devices: []string{"/foo"},
+				Devices: []string{"/dev/foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -948,53 +948,35 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{}},
 				},
 				Profile: &Profile{
-					Devices: []string{"/foo"},
+					Devices: []string{"/dev/foo"},
 				},
 			},
 		},
 		{
-			name: "Devices /foo: workload /foo + profile /foo",
+			name: "Devices /dev/foo: workload /dev/foo + profile /dev/foo",
 			workload: Workload{
-				HostAccess: HostAccess{Devices: []string{"/foo"}},
+				HostAccess: HostAccess{Devices: []string{"/dev/foo"}},
 			},
 			profile: &Profile{
-				Devices: []string{"/foo"},
+				Devices: []string{"/dev/foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
 				Workload: Workload{
-					HostAccess: HostAccess{Devices: []string{"/foo"}},
+					HostAccess: HostAccess{Devices: []string{"/dev/foo"}},
 				},
 				Profile: &Profile{
-					Devices: []string{"/foo"},
+					Devices: []string{"/dev/foo"},
 				},
 			},
 		},
 		{
-			name: "Devices /foo/: workload /foo/ + profile /foo",
+			name: "Devices empty: workload /dev/foo/ is not a clean path",
 			workload: Workload{
-				HostAccess: HostAccess{Devices: []string{"/foo/"}},
+				HostAccess: HostAccess{Devices: []string{"/dev/foo/"}},
 			},
 			profile: &Profile{
-				Devices: []string{"/foo"},
-			},
-			want: EffectiveWorkload{
-				Name: "-",
-				Workload: Workload{
-					HostAccess: HostAccess{Devices: []string{"/foo/"}},
-				},
-				Profile: &Profile{
-					Devices: []string{"/foo"},
-				},
-			},
-		},
-		{
-			name: "Devices empty: workload /foo + profile /foob",
-			workload: Workload{
-				HostAccess: HostAccess{Devices: []string{"/foo"}},
-			},
-			profile: &Profile{
-				Devices: []string{"/foob"},
+				Devices: []string{"/dev/foo"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -1002,53 +984,17 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{}},
 				},
 				Profile: &Profile{
-					Devices: []string{"/foob"},
+					Devices: []string{"/dev/foo"},
 				},
 			},
 		},
 		{
-			name: "Devices /foo: workload /foo + profile /foo",
+			name: "Devices empty: workload /dev/foo + profile /dev/foob",
 			workload: Workload{
-				HostAccess: HostAccess{Devices: []string{"/foo"}},
+				HostAccess: HostAccess{Devices: []string{"/dev/foo"}},
 			},
 			profile: &Profile{
-				Devices: []string{"/foo"},
-			},
-			want: EffectiveWorkload{
-				Name: "-",
-				Workload: Workload{
-					HostAccess: HostAccess{Devices: []string{"/foo"}},
-				},
-				Profile: &Profile{
-					Devices: []string{"/foo"},
-				},
-			},
-		},
-		{
-			name: "Devices /bar: workload /bar + profile /foo and /bar",
-			workload: Workload{
-				HostAccess: HostAccess{Devices: []string{"/bar"}},
-			},
-			profile: &Profile{
-				Devices: []string{"/foo", "/bar"},
-			},
-			want: EffectiveWorkload{
-				Name: "-",
-				Workload: Workload{
-					HostAccess: HostAccess{Devices: []string{"/bar"}},
-				},
-				Profile: &Profile{
-					Devices: []string{"/foo", "/bar"},
-				},
-			},
-		},
-		{
-			name: "Devices empty: workload /bar + profile /foo",
-			workload: Workload{
-				HostAccess: HostAccess{Devices: []string{"/bar"}},
-			},
-			profile: &Profile{
-				Devices: []string{"/foo"},
+				Devices: []string{"/dev/foob"},
 			},
 			want: EffectiveWorkload{
 				Name: "-",
@@ -1056,7 +1002,61 @@ func Test_ApplyProfile(t *testing.T) {
 					HostAccess: HostAccess{Devices: []string{}},
 				},
 				Profile: &Profile{
-					Devices: []string{"/foo"},
+					Devices: []string{"/dev/foob"},
+				},
+			},
+		},
+		{
+			name: "Devices /dev/foo: workload /dev/foo + profile /dev/foo",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/dev/foo"}},
+			},
+			profile: &Profile{
+				Devices: []string{"/dev/foo"},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{"/dev/foo"}},
+				},
+				Profile: &Profile{
+					Devices: []string{"/dev/foo"},
+				},
+			},
+		},
+		{
+			name: "Devices /dev/bar: workload /dev/bar + profile /dev/foo and /dev/bar",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/dev/bar"}},
+			},
+			profile: &Profile{
+				Devices: []string{"/dev/foo", "/dev/bar"},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{"/dev/bar"}},
+				},
+				Profile: &Profile{
+					Devices: []string{"/dev/foo", "/dev/bar"},
+				},
+			},
+		},
+		{
+			name: "Devices empty: workload /dev/bar + profile /dev/foo",
+			workload: Workload{
+				HostAccess: HostAccess{Devices: []string{"/dev/bar"}},
+			},
+			profile: &Profile{
+				Devices: []string{"/dev/foo"},
+			},
+			want: EffectiveWorkload{
+				Name: "-",
+				Workload: Workload{
+					HostAccess: HostAccess{Devices: []string{}},
+				},
+				Profile: &Profile{
+					Devices: []string{"/dev/foo"},
 				},
 			},
 		},
@@ -1257,6 +1257,35 @@ func TestWorkloadValidate(t *testing.T) {
 			}
 			if !tc.wantErr && err != nil {
 				t.Errorf("did not expect an error but got %v: %+v", err, tc.workload)
+			}
+		})
+	}
+}
+
+func TestApplyProfileSeccompUnconfined(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		workload bool
+		profile  bool
+		want     bool
+	}{
+		{name: "neither", workload: false, profile: false, want: false},
+		{name: "workload only", workload: true, profile: false, want: false},
+		{name: "profile only", workload: false, profile: true, want: false},
+		{name: "both", workload: true, profile: true, want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			w := Workload{Name: "w", HostAccess: HostAccess{SeccompUnconfined: tc.workload}}
+			p := &Profile{Name: "p", HostAccess: HostAccess{SeccompUnconfined: tc.profile}}
+
+			if got := w.ApplyProfile(p).Workload.HostAccess.SeccompUnconfined; got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
 	}

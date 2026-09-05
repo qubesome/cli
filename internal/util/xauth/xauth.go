@@ -13,35 +13,40 @@ import (
 // https://gitlab.freedesktop.org/xorg/app/xauth/-/blob/master/process.c?ref_type=heads
 // https://gitlab.freedesktop.org/xorg/app/xauth/-/blob/master/xauth.h?ref_type=heads
 
+// familyLocal marks an entry as matching any local connection.
+const familyLocal = 0xffff
+
 var cookieFunc = newCookie
 
 func AuthPair(display uint8, parent io.Reader, server, client io.Writer) error {
-	data := make([]byte, 40)
-	n, err := parent.Read(data)
+	rec, err := readRecord(parent)
 	if err != nil {
-		return fmt.Errorf("failed to read from parent auth file: %w", err)
+		return fmt.Errorf("failed to read parent auth file: %w", err)
 	}
-	if n < 40 {
-		return fmt.Errorf("auth file must be at least 40 chars long: was %d instead", n)
-	}
-
-	_, _ = server.Write(data[0:2])
-	// Set family to local, which is required to enable access from a container.
-	_, _ = client.Write([]byte{255, 255}) // ffff
-
-	mw := io.MultiWriter(server, client)
-	_, _ = mw.Write(data[2:11])
-
-	// Set the display which this auth is going to be used for.
-	_, _ = mw.Write([]byte(strconv.Itoa(int(display))))
-	_, _ = mw.Write(data[12:34])
 
 	c, err := cookieFunc()
 	if err != nil {
 		return err
 	}
 
-	_, _ = mw.Write(c)
+	// The display is stored as its ASCII digits, so its field grows with
+	// the number. Reading the parent record instead of indexing fixed
+	// offsets also keeps this correct for any host address length: the
+	// address is the hostname, which is rarely the same length twice.
+	rec.number = []byte(strconv.Itoa(int(display)))
+	rec.data = c
+
+	if err := rec.writeTo(server); err != nil {
+		return fmt.Errorf("failed to write server auth file: %w", err)
+	}
+
+	// The workload's copy is family local, which is what lets it connect
+	// from inside a container.
+	rec.family = familyLocal
+
+	if err := rec.writeTo(client); err != nil {
+		return fmt.Errorf("failed to write workload auth file: %w", err)
+	}
 
 	return nil
 }

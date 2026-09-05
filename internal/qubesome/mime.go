@@ -1,11 +1,19 @@
 package qubesome
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/url"
+	"os"
+	"regexp"
 	"strings"
 )
+
+// Schemes are alpha, followed by alphanumerics and a few punctuation
+// characters, as per RFC 3986.
+var mimeSchemeRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*$`)
 
 func (q *Qubesome) HandleMime(in *WorkloadInfo, args []string, runnerOverride string) error {
 	slog.Debug("handle mime", "profile", in, "args", args)
@@ -20,9 +28,9 @@ func (q *Qubesome) HandleMime(in *WorkloadInfo, args []string, runnerOverride st
 		return fmt.Errorf("missing qubesome config")
 	}
 
-	u, err := url.Parse(args[0])
+	u, err := parseMimeArg(args[0])
 	if err != nil {
-		return fmt.Errorf("failed to parse mime %q: %w", args[0], err)
+		return err
 	}
 
 	if u.Scheme == "" {
@@ -78,4 +86,46 @@ func (q *Qubesome) defaultWorkload(in *WorkloadInfo, args []string) WorkloadInfo
 	}
 	q.overrideWithProfile(in, &wi)
 	return wi
+}
+
+// parseMimeArg parses the single argument xdg-open was called with.
+//
+// The argument reaches the target workload's command line, so it must
+// name something to open and never look like a flag. It is either a URL
+// with a scheme, or a path to a file that exists on the host.
+func parseMimeArg(arg string) (*url.URL, error) {
+	if arg == "" {
+		return nil, fmt.Errorf("mime argument cannot be empty")
+	}
+
+	if strings.HasPrefix(arg, "-") {
+		return nil, fmt.Errorf("mime argument %q cannot start with '-'", arg)
+	}
+
+	u, err := url.Parse(arg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse mime %q: %w", arg, err)
+	}
+
+	if u.Scheme == "" {
+		if _, err := os.Stat(arg); err != nil {
+			// A stat that fails for any other reason, such as a
+			// permission error, says nothing about whether the
+			// argument names a file. Report what happened rather
+			// than claiming it is not one.
+			if !errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("failed to stat mime argument %q: %w", arg, err)
+			}
+
+			return nil, fmt.Errorf("mime argument %q is neither a URL nor an existing file", arg)
+		}
+
+		return u, nil
+	}
+
+	if !mimeSchemeRegex.MatchString(u.Scheme) {
+		return nil, fmt.Errorf("mime argument %q has an invalid scheme", arg)
+	}
+
+	return u, nil
 }

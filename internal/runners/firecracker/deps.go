@@ -1,6 +1,9 @@
 package firecracker
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -27,6 +30,10 @@ const (
 	// kernelUrl from https://s3.amazonaws.com/spec.ccfc.min/
 	kernelURL  = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.11/x86_64/vmlinux-6.1.102"
 	kernelFile = "vmlinux"
+	// kernelSHA256 pins the kernel the VMs boot. Upstream publishes no
+	// digest alongside the artifact, so this one was taken from a download
+	// of it. Update it together with kernelURL.
+	kernelSHA256 = "cf42303c29e8c4a02798f357ba056c5567baf074aaed4eec78c997fb9df08cf9"
 
 	// light-weight image that contains the necessary tools for setting up
 	// firecracker's network taps.
@@ -56,7 +63,7 @@ func ensureDependencies() error {
 		}
 
 		dbus.NotifyOrLog("firecracker", "downloading fresh kernel image")
-		err = download(kernelURL, kfile)
+		err = download(kernelURL, kfile, kernelSHA256)
 		if err != nil {
 			return fmt.Errorf("failed to download kernel image: %w", err)
 		}
@@ -116,14 +123,34 @@ func setupTaps() error {
 	return nil
 }
 
-func download(url, target string) error {
+func download(url, target, wantSHA256 string) error {
 	slog.Info("downloading file", "url", url, "target", target)
 
-	f, err := os.Create(target)
+	// Decode the expected digest up front. Comparing the bytes rather than
+	// the strings takes the case of the hex out of the question, and a
+	// value that is not a SHA-256 digest is a mistake worth reporting
+	// before anything is downloaded.
+	want, err := hex.DecodeString(wantSHA256)
+	if err != nil || len(want) != sha256.Size {
+		return fmt.Errorf("invalid expected checksum %q for %s", wantSHA256, url)
+	}
+
+	// The kernel is only downloaded when it is missing, so whatever lands
+	// at target is trusted from then on. Write to a temporary file next to
+	// it and only move it into place once it has been verified, so an
+	// interrupted or truncated download is never mistaken for a complete
+	// one. The name is derived from the target rather than random, so a
+	// download killed before its cleanup runs leaves one file that the
+	// next attempt truncates, instead of a new one every time.
+	part := target + ".part"
+	f, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, files.FileMode)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		f.Close()
+		_ = os.Remove(part)
+	}()
 
 	r, err := http.Get(url) //nolint
 	if err != nil {
@@ -135,9 +162,29 @@ func download(url, target string) error {
 		return fmt.Errorf("bad status: %s", r.Status)
 	}
 
-	if _, err = io.Copy(f, io.LimitReader(r.Body, maxDownloadSize)); err != nil {
+	h := sha256.New()
+
+	// Read one byte past the limit so that a body of exactly the limit is
+	// told apart from one that was cut short by it.
+	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(r.Body, maxDownloadSize+1))
+	if err != nil {
+		return err
+	}
+	if n > maxDownloadSize {
+		return fmt.Errorf("download is larger than the %d byte limit", int64(maxDownloadSize))
+	}
+
+	if !bytes.Equal(h.Sum(nil), want) {
+		return fmt.Errorf("checksum mismatch for %s: got %s, want %s",
+			url, hex.EncodeToString(h.Sum(nil)), wantSHA256)
+	}
+
+	if err := f.Chmod(files.FileMode); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 
-	return nil
+	return os.Rename(part, target)
 }

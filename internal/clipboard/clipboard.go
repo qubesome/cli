@@ -3,7 +3,10 @@ package clipboard
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
+	"strconv"
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
@@ -46,28 +49,77 @@ func Run(opts ...command.Option[Options]) error {
 		return fmt.Errorf("%w: %s", ErrUnsupportedCopyType, o.ContentType)
 	}
 
-	targetExtra := ""
-	if o.ContentType != "" {
-		targetExtra = fmt.Sprintf("-t %s", o.ContentType)
-	}
-
 	cookiePath, err := files.ServerCookiePath(profile)
 	if err != nil {
 		return fmt.Errorf("cannot get X magic cookie path: %w", err)
 	}
 
-	xclip := fmt.Sprintf("%s -selection clip -o -display :%d | XAUTHORITY=%s %s -selection clip %s -i -display :%d",
-		files.XclipBinary, int(from), cookiePath, files.XclipBinary, targetExtra, int(target))
+	out, in := copyCommands(from, target, o.ContentType, cookiePath)
 
-	slog.Debug("clipboard copy", "command", []string{files.ShBinary, "-c", xclip})
-	cmd := execabs.Command(files.ShBinary, "-c", xclip) //nolint
+	slog.Debug("clipboard copy", "out", out.Args, "in", in.Args)
 
-	err = cmd.Run()
-	if err != nil {
+	if err := pipe(out, in); err != nil {
 		return fmt.Errorf("failed to copy clipboard: %w", err)
 	}
 
 	return nil
+}
+
+// copyCommands returns the pair of xclip invocations that read the clipboard
+// from one display and write it to another.
+//
+// Both are built as argv, so no value below is ever parsed as shell syntax.
+func copyCommands(from, target uint8, contentType, cookiePath string) (out, in *execabs.Cmd) {
+	out = execabs.Command(files.XclipBinary, //nolint:gosec
+		"-selection", "clip",
+		"-o",
+		"-display", display(from),
+	)
+
+	inArgs := []string{"-selection", "clip"}
+	if contentType != "" {
+		inArgs = append(inArgs, "-t", contentType)
+	}
+	inArgs = append(inArgs, "-i", "-display", display(target))
+
+	in = execabs.Command(files.XclipBinary, inArgs...) //nolint:gosec
+	in.Env = append(os.Environ(), "XAUTHORITY="+cookiePath)
+
+	return out, in
+}
+
+func display(d uint8) string {
+	return ":" + strconv.Itoa(int(d))
+}
+
+// pipe connects the output of out to the input of in and runs both.
+func pipe(out, in *execabs.Cmd) error {
+	r, w := io.Pipe()
+	out.Stdout = w
+	in.Stdin = r
+
+	if err := in.Start(); err != nil {
+		// Nothing is going to read or write these ends now. Left open,
+		// anything already blocked on them would stay blocked.
+		_ = w.Close()
+		_ = r.Close()
+
+		return fmt.Errorf("cannot start %s: %w", in.Path, err)
+	}
+
+	outErr := out.Run()
+	// Closing the write end lets the reading command see EOF. The error
+	// from the writer is carried over so it does not read a truncated
+	// clipboard as a complete one.
+	_ = w.CloseWithError(outErr)
+
+	inErr := in.Wait()
+	_ = r.Close()
+
+	// Both are reported. When the reading command fails, the writer sees
+	// a broken pipe, and returning only that would hide the failure that
+	// caused it behind its own symptom.
+	return errors.Join(inErr, outErr)
 }
 
 func validTarget(target string) bool {

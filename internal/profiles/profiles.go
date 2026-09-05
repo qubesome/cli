@@ -2,8 +2,10 @@ package profiles
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -506,18 +508,32 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	t := time.Now().Add(3 * time.Second)
 	for {
+		fi, err := os.Stat(socket)
+		if err == nil {
+			// The path is about to be mounted into every workload of
+			// this profile and used as a socket. Anything else there
+			// fails later, and further from the cause.
+			if fi.Mode().Type()&os.ModeSocket == 0 {
+				return fmt.Errorf("%q is not a socket: %s", socket, fi.Mode().Type())
+			}
+
+			break
+		}
+
+		// Only a missing socket means it may still be on its way. Any
+		// other error, a permission one for instance, would otherwise
+		// be reported three seconds later as a timeout.
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("failed to stat socket %q: %w", socket, err)
+		}
+
 		if t.Before(time.Now()) {
 			return fmt.Errorf("time out waiting for socket to be created")
 		}
 
-		fi, err := os.Stat(socket)
-		if err != nil {
-			continue
-		}
-		if fi.IsDir() {
-			return fmt.Errorf("socket %q cannot be a dir", socket)
-		}
-		break
+		// Without this the loop spins on os.Stat for the whole timeout,
+		// pegging a core whenever the socket takes a moment to appear.
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	x11Dir := "/tmp/.X11-unix"

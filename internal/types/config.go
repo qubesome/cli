@@ -23,6 +23,15 @@ var (
 	runnerRegex       = regexp.MustCompile(`^(docker|podman|firecracker)$`)
 	externalPathRegex = regexp.MustCompile(`^[a-zA-Z0-9\-]+:/[^:]+:/[^:]+$`)
 	pathRegex         = regexp.MustCompile(`^(\${[a-zA-Z0-9\-]+}){0,1}/[^:]+:/[^:]+(:ro){0,1}$`)
+	// Flatpak application IDs are dot-separated elements of alphanumerics,
+	// underscores and hyphens, where no element starts with a digit.
+	// Uppercase is common (e.g. org.freedesktop.Bustle).
+	flatpakRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*)+$`)
+	// Device paths are always absolute and always under /dev. The bare
+	// /dev is excluded on purpose: sharing the whole device tree is not a
+	// device request.
+	devicePathRegex  = regexp.MustCompile(`^/dev(/[a-zA-Z0-9_.\-]+)+$`)
+	devicePermsRegex = regexp.MustCompile(`^[rwm]{1,3}$`)
 )
 
 type Config struct {
@@ -196,6 +205,33 @@ func (p Profile) Validate() error {
 			return err
 		}
 	}
+	// Flatpak names are used to build file paths and are interpolated into
+	// the Exec line of the generated desktop files.
+	for _, fp := range p.Flatpaks {
+		if err := ValidateFlatpakName(fp); err != nil {
+			return err
+		}
+	}
+	// A profile only ever grants a source device, never a mapping.
+	for _, device := range p.Devices {
+		if err := ValidateDeviceGrant(device); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateFlatpakName reports whether name is a valid Flatpak application ID.
+func ValidateFlatpakName(name string) error {
+	if name == "" {
+		return fmt.Errorf("missing flatpak name")
+	}
+	if len(name) > 100 {
+		return fmt.Errorf("invalid flatpak name: %q is too long", name)
+	}
+	if !flatpakRegex.MatchString(name) {
+		return fmt.Errorf("invalid flatpak name: %q", name)
+	}
 	return nil
 }
 
@@ -232,6 +268,15 @@ func LoadConfig(path string) (*Config, error) {
 	for k, v := range cfg.Profiles {
 		v.Name = k
 		cfg.Profiles[k] = v
+	}
+
+	// Profiles are the allowlist every workload is checked against, and
+	// their fields reach file paths and command lines. Validate them at
+	// load time rather than at the point of use.
+	for k, v := range cfg.Profiles {
+		if err := v.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid profile %q: %w", k, err)
+		}
 	}
 
 	return cfg, nil
