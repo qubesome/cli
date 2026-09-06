@@ -9,16 +9,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const fixtureDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+const (
+	xorgRef    = "ghcr.io/qubesome/xorg:latest"
+	kaliRef    = "ghcr.io/qubesome/kali:latest"
+	xorgKey    = "ghcr-io-qubesome-xorg-latest-61412e53772e78b1"
+	kaliKey    = "ghcr-io-qubesome-kali-latest-743894dca414afaf"
+	xorgDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	kaliDigest = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+)
 
 func TestStoreDigest(t *testing.T) {
 	t.Parallel()
 
 	s := &Store{Root: "testdata"}
 
-	d, err := s.Digest("ghcr.io/qubesome/xorg:latest")
+	d, err := s.Digest(xorgRef)
 	require.NoError(t, err)
-	assert.Equal(t, fixtureDigest, d)
+	assert.Equal(t, xorgDigest, d)
+}
+
+// Two references sharing a tag must not share an entry. Keying by tag
+// alone had both resolve to whichever was pulled last, so a profile could
+// silently run the other image.
+func TestStoreDigestDoesNotCollideOnASharedTag(t *testing.T) {
+	t.Parallel()
+
+	s := &Store{Root: "testdata"}
+
+	xorg, err := s.Digest(xorgRef)
+	require.NoError(t, err)
+
+	kali, err := s.Digest(kaliRef)
+	require.NoError(t, err)
+
+	assert.Equal(t, xorgDigest, xorg)
+	assert.Equal(t, kaliDigest, kali)
+	assert.NotEqual(t, xorg, kali)
 }
 
 func TestStoreDigestUnknownTag(t *testing.T) {
@@ -31,23 +57,50 @@ func TestStoreDigestUnknownTag(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing")
 }
 
-func TestTag(t *testing.T) {
+func TestStoreKey(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
+		name string
 		ref  string
 		want string
 	}{
-		{"ghcr.io/qubesome/xorg:latest", "latest"},
-		{"ghcr.io/qubesome/xorg", "latest"},
-		{"localhost:5000/xorg:v1", "v1"},
+		{"tagged", xorgRef, xorgKey},
+		{"same tag, other image", kaliRef, kaliKey},
+		{"registry port", "localhost:5000/xorg:v1", "localhost-5000-xorg-v1-bee0a6947471ff61"},
+		{"traversal", "../../../etc/passwd", "etc-passwd-56bfa7338a2dfd1d"},
+		{"nothing readable", "///", "732c4e9711639ed1"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.ref, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, tag(tt.ref))
+			assert.Equal(t, tt.want, storeKey(tt.ref))
 		})
+	}
+}
+
+// The key names a directory and an OCI ref, so it must be a single path
+// component and must carry no colon for oci:path:ref to stay unambiguous.
+func TestStoreKeyIsASafeSinglePathComponent(t *testing.T) {
+	t.Parallel()
+
+	refs := []string{
+		xorgRef,
+		"../../../etc/passwd",
+		"reg.example.com:5000/a/b@sha256:abc",
+		"///",
+		"",
+		strings.Repeat("ghcr.io/very-long/", 40) + "image:tag",
+	}
+
+	for _, ref := range refs {
+		key := storeKey(ref)
+
+		assert.Equal(t, key, filepath.Base(key), "key %q is not a single path component", key)
+		assert.NotContains(t, key, ":")
+		assert.Regexp(t, `^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$`, key)
+		assert.LessOrEqual(t, len(key), keyReadableMax+1+2*keyDigestBytes)
 	}
 }
 

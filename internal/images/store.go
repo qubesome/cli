@@ -1,6 +1,8 @@
 package images
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,11 +18,11 @@ const refNameAnnotation = "org.opencontainers.image.ref.name"
 
 // Store is an OCI image store on disk.
 //
-// Images are pulled into a shared OCI layout and unpacked once per manifest
-// digest, so profiles sharing an image share one extracted root filesystem
-// and a restart costs no extraction at all.
+// Every image reference gets its own OCI layout, and each is unpacked once
+// per manifest digest, so profiles sharing an image share one extracted
+// root filesystem and a restart costs no extraction at all.
 type Store struct {
-	// Root is the directory holding the oci layout and the unpacked
+	// Root is the directory holding the oci layouts and the unpacked
 	// bundles.
 	Root string
 
@@ -57,14 +59,29 @@ type Bundle struct {
 	Cwd string
 }
 
-func (s *Store) layout() string {
-	return filepath.Join(s.Root, "oci")
+// layout returns the OCI layout directory holding ref.
+//
+// Every reference gets a layout of its own. A shared layout has each pull
+// rewrite the same index.json, and skopeo's read-modify-write of it is
+// unlocked, so two pulls at once can lose one of the entries. Separate
+// layouts remove that between distinct images, and they also mean a
+// reference is looked up in a directory that holds nothing else.
+//
+// The key is a generated single path component, but it is still joined
+// securely, as bundleDir is.
+func (s *Store) layout(ref string) (string, error) {
+	return securejoin.SecureJoin(filepath.Join(s.Root, "oci"), storeKey(ref))
 }
 
 // Digest resolves a reference to the manifest digest recorded in the
 // layout's index.
 func (s *Store) Digest(ref string) (string, error) {
-	path := filepath.Join(s.layout(), "index.json")
+	layout, err := s.layout(ref)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve layout for %q: %w", ref, err)
+	}
+
+	path := filepath.Join(layout, "index.json")
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -81,14 +98,14 @@ func (s *Store) Digest(ref string) (string, error) {
 		return "", fmt.Errorf("failed to parse image index %q: %w", path, err)
 	}
 
-	want := tag(ref)
+	want := storeKey(ref)
 	for _, m := range index.Manifests {
 		if m.Annotations[refNameAnnotation] == want {
 			return m.Digest, nil
 		}
 	}
 
-	return "", fmt.Errorf("image %q is not in the store: no manifest tagged %q", ref, want)
+	return "", fmt.Errorf("image %q is not in the store: no manifest named %q", ref, want)
 }
 
 // Resolve returns the bundle for an image the store already holds, without
@@ -119,26 +136,67 @@ func (s *Store) bundleDir(digest string) (string, error) {
 		strings.ReplaceAll(digest, ":", "-"))
 }
 
-// tag returns the tag of a reference, defaulting to latest.
+const (
+	// keyReadableMax bounds the readable half of a store key, so a long
+	// reference cannot push the key past a filename length limit.
+	keyReadableMax = 64
+
+	// keyDigestBytes is how much of the reference digest the key carries.
+	// Sixty four bits is what makes the mapping injective in practice,
+	// and the key is not a security boundary: an attacker who picks the
+	// references also picks which image each one names.
+	keyDigestBytes = 8
+)
+
+// storeKey returns the key an image reference is stored under.
 //
-// A colon in the final path element separates the tag. A colon earlier in
-// the reference is a registry port, which is why only the last element is
-// considered.
+// It names both the layout directory and the reference within it, and the
+// whole reference goes into it. Keying by tag alone made
+// ghcr.io/qubesome/xorg:latest and ghcr.io/qubesome/kali:latest share one
+// entry in one layout, so whichever was pulled last owned it and a profile
+// could silently run the other image's root filesystem.
 //
-// A digest reference such as name@sha256:abc is not handled specially. The
-// substring after the first colon in the last path element is returned as
-// if it were a tag, which is wrong for a digest reference. Every caller
-// today only passes tagged references, so this is left unhandled rather
-// than guessed at.
-func tag(ref string) string {
-	last := ref
-	if i := strings.LastIndex(ref, "/"); i >= 0 {
-		last = ref[i+1:]
+// The alphabet is what both tools accept as the ref of oci:path:ref.
+// skopeo matches a ref against [A-Za-z0-9._-]+, and umoci applies the OCI
+// ref name grammar, which wants alphanumerics at both ends and single
+// separators between them. So only alphanumerics survive from the
+// reference, a run of anything else becomes a single hyphen, and a digest
+// of the whole reference is appended to keep distinct references distinct.
+// A colon never survives, which also keeps oci:path:ref unambiguous.
+func storeKey(ref string) string {
+	sum := sha256.Sum256([]byte(ref))
+	digest := hex.EncodeToString(sum[:keyDigestBytes])
+
+	var b strings.Builder
+	sep := false
+
+	for i := 0; i < len(ref) && b.Len() < keyReadableMax; i++ {
+		c := ref[i]
+		if !alphanumeric(c) {
+			sep = true
+			continue
+		}
+
+		// A separator is only emitted before the next alphanumeric, so a
+		// key never starts or ends with one and never carries two in a
+		// row.
+		if sep && b.Len() > 0 {
+			b.WriteByte('-')
+		}
+		sep = false
+
+		b.WriteByte(c)
 	}
-	if _, t, ok := strings.Cut(last, ":"); ok {
-		return t
+
+	if b.Len() == 0 {
+		return digest
 	}
-	return "latest"
+
+	return b.String() + "-" + digest
+}
+
+func alphanumeric(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
 // readBundle reads the OCI runtime spec umoci generated for a bundle.

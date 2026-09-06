@@ -15,21 +15,33 @@ import (
 // Pull copies an image into the store. skopeo verifies the manifest and
 // every blob digest, and nothing is unpacked if that fails.
 func (s *Store) Pull(ref string) error {
-	if err := os.MkdirAll(s.layout(), files.DirMode); err != nil {
-		return fmt.Errorf("failed to create image store %q: %w", s.layout(), err)
+	layout, err := s.layout(ref)
+	if err != nil {
+		return fmt.Errorf("failed to resolve layout for %q: %w", ref, err)
+	}
+
+	if err := os.MkdirAll(layout, files.DirMode); err != nil {
+		return fmt.Errorf("failed to create image store %q: %w", layout, err)
 	}
 
 	slog.Info("pulling container image", "image", ref)
 
-	return s.run(files.SkopeoBinary, s.pullArgs(ref))
+	return s.run(files.SkopeoBinary, pullArgs(layout, ref))
 }
 
-func (s *Store) pullArgs(ref string) []string {
+func pullArgs(layout, ref string) []string {
 	return []string{
 		"copy",
 		"docker://" + ref,
-		"oci:" + s.layout() + ":" + tag(ref),
+		ociRef(layout, ref),
 	}
+}
+
+// ociRef is the oci:path:ref both skopeo and umoci take. The ref part
+// carries no colon of its own, so the one separating it from the path is
+// the only one either tool has to find.
+func ociRef(layout, ref string) string {
+	return "oci:" + layout + ":" + storeKey(ref)
 }
 
 // Unpack extracts an image and returns its bundle.
@@ -45,6 +57,11 @@ func (s *Store) pullArgs(ref string) []string {
 // the second rename fails rather than replacing anything. The loser reuses
 // what the winner put there instead of failing the start.
 func (s *Store) Unpack(ref string) (Bundle, error) {
+	layout, err := s.layout(ref)
+	if err != nil {
+		return Bundle{}, fmt.Errorf("failed to resolve layout for %q: %w", ref, err)
+	}
+
 	digest, err := s.Digest(ref)
 	if err != nil {
 		return Bundle{}, err
@@ -76,7 +93,7 @@ func (s *Store) Unpack(ref string) (Bundle, error) {
 	target := filepath.Join(tmp, "bundle")
 
 	slog.Info("unpacking container image", "image", ref, "digest", digest)
-	if err := s.run(files.UmociBinary, s.unpackArgs(ref, target)); err != nil {
+	if err := s.run(files.UmociBinary, unpackArgs(layout, ref, target)); err != nil {
 		return Bundle{}, err
 	}
 
@@ -95,11 +112,11 @@ func (s *Store) Unpack(ref string) (Bundle, error) {
 	return readBundle(dir)
 }
 
-func (s *Store) unpackArgs(ref, dest string) []string {
+func unpackArgs(layout, ref, dest string) []string {
 	return []string{
 		"unpack",
 		"--rootless",
-		"--image", "oci:" + s.layout() + ":" + tag(ref),
+		"--image", ociRef(layout, ref),
 		dest,
 	}
 }

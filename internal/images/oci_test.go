@@ -16,28 +16,35 @@ import (
 // assert it propagates unwrapped through errors.Is.
 var errUnpackFake = errors.New("fake tool failure")
 
-// newTestStore returns a Store whose OCI index is a copy of
-// testdata/oci/index.json under a fresh root, so Digest resolves
-// "ghcr.io/qubesome/xorg:latest" to fixtureDigest.
+// newTestStore returns a Store whose layouts are a copy of testdata/oci
+// under a fresh root, so Digest resolves xorgRef and kaliRef to their
+// fixture digests.
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 
 	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "oci"), 0o700))
 
-	index, err := os.ReadFile("testdata/oci/index.json")
+	layouts, err := os.ReadDir("testdata/oci")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(root, "oci", "index.json"), index, 0o600)) //nolint:gosec // index.json is a fixed fixture name under t.TempDir().
+
+	for _, l := range layouts {
+		dst := filepath.Join(root, "oci", l.Name())
+		require.NoError(t, os.MkdirAll(dst, 0o700))
+
+		index, err := os.ReadFile(filepath.Join("testdata/oci", l.Name(), "index.json"))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(dst, "index.json"), index, 0o600)) //nolint:gosec // index.json is a fixed fixture name under t.TempDir().
+	}
 
 	return &Store{Root: root}
 }
 
-// newExistingBundle populates s's bundle dir for fixtureDigest with the
-// fixture config and an empty rootfs, so Unpack takes the reuse path.
-func newExistingBundle(t *testing.T, s *Store) string {
+// newExistingBundle populates s's bundle dir for digest with the fixture
+// config and an empty rootfs, so Unpack takes the reuse path.
+func newExistingBundle(t *testing.T, s *Store, digest string) string {
 	t.Helper()
 
-	dir, err := s.bundleDir(fixtureDigest)
+	dir, err := s.bundleDir(digest)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "rootfs"), 0o700))
 
@@ -51,26 +58,26 @@ func newExistingBundle(t *testing.T, s *Store) string {
 func TestPullArgs(t *testing.T) {
 	t.Parallel()
 
-	s := &Store{Root: "/store"}
+	layout := "/store/oci/" + xorgKey
 
 	assert.Equal(t, []string{
 		"copy",
 		"docker://ghcr.io/qubesome/xorg:latest",
-		"oci:/store/oci:latest",
-	}, s.pullArgs("ghcr.io/qubesome/xorg:latest"))
+		"oci:/store/oci/" + xorgKey + ":" + xorgKey,
+	}, pullArgs(layout, xorgRef))
 }
 
 func TestUnpackArgs(t *testing.T) {
 	t.Parallel()
 
-	s := &Store{Root: "/store"}
+	layout := "/store/oci/" + xorgKey
 
 	assert.Equal(t, []string{
 		"unpack",
 		"--rootless",
-		"--image", "oci:/store/oci:latest",
+		"--image", "oci:/store/oci/" + xorgKey + ":" + xorgKey,
 		"/store/unpacked/tmp-123",
-	}, s.unpackArgs("ghcr.io/qubesome/xorg:latest", "/store/unpacked/tmp-123"))
+	}, unpackArgs(layout, xorgRef, "/store/unpacked/tmp-123"))
 }
 
 // Unpack must never leave a partially extracted bundle under its final
@@ -79,11 +86,11 @@ func TestUnpackReusesExistingBundle(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	dir := newExistingBundle(t, s)
+	dir := newExistingBundle(t, s, xorgDigest)
 
 	// umoci is not installed in the test environment. Reaching it would
 	// fail, so a pass proves the existing bundle was reused.
-	b, err := s.Unpack("ghcr.io/qubesome/xorg:latest")
+	b, err := s.Unpack(xorgRef)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, "rootfs"), b.Rootfs)
 	assert.Equal(t, 1000, b.UID)
@@ -97,14 +104,14 @@ func TestUnpackReuseDoesNotExec(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	newExistingBundle(t, s)
+	newExistingBundle(t, s, xorgDigest)
 
 	s.cmdRunner = func(bin string, args []string) error {
 		t.Fatalf("unexpected exec of %s %v: the bundle already exists and should have been reused", bin, args)
 		return nil
 	}
 
-	_, err := s.Unpack("ghcr.io/qubesome/xorg:latest")
+	_, err := s.Unpack(xorgRef)
 	require.NoError(t, err)
 }
 
@@ -134,13 +141,13 @@ func TestUnpackBuildsUnderTempAndRenames(t *testing.T) {
 		return os.WriteFile(filepath.Join(dest, "config.json"), cfg, 0o600) //nolint:gosec // dest is the temp bundle dir Unpack itself created under t.TempDir().
 	}
 
-	b, err := s.Unpack("ghcr.io/qubesome/xorg:latest")
+	b, err := s.Unpack(xorgRef)
 	require.NoError(t, err)
 
 	assert.Equal(t, files.UmociBinary, gotBin)
 	assert.Equal(t, "--rootless", gotArgs[1])
 
-	dir, err := s.bundleDir(fixtureDigest)
+	dir, err := s.bundleDir(xorgDigest)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, "rootfs"), b.Rootfs)
 
@@ -174,14 +181,14 @@ func TestUnpackReusesTheWinnersBundleWhenTheRenameLoses(t *testing.T) {
 
 		// The other start wins the race and claims the digest dir while
 		// this one is still extracting.
-		newExistingBundle(t, s)
+		newExistingBundle(t, s, xorgDigest)
 		return nil
 	}
 
-	b, err := s.Unpack("ghcr.io/qubesome/xorg:latest")
+	b, err := s.Unpack(xorgRef)
 	require.NoError(t, err)
 
-	dir, err := s.bundleDir(fixtureDigest)
+	dir, err := s.bundleDir(xorgDigest)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, "rootfs"), b.Rootfs)
 	assert.Equal(t, 1000, b.UID)
@@ -206,14 +213,14 @@ func TestUnpackFailsWhenTheDestinationHasNoBundle(t *testing.T) {
 			return err
 		}
 
-		dir, dirErr := s.bundleDir(fixtureDigest)
+		dir, dirErr := s.bundleDir(xorgDigest)
 		if dirErr != nil {
 			return dirErr
 		}
 		return os.MkdirAll(dir, 0o700)
 	}
 
-	_, err = s.Unpack("ghcr.io/qubesome/xorg:latest")
+	_, err = s.Unpack(xorgRef)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to move bundle into place")
 }
@@ -229,10 +236,10 @@ func TestUnpackPropagatesRunError(t *testing.T) {
 		return errUnpackFake
 	}
 
-	_, err := s.Unpack("ghcr.io/qubesome/xorg:latest")
+	_, err := s.Unpack(xorgRef)
 	require.ErrorIs(t, err, errUnpackFake)
 
-	dir, err := s.bundleDir(fixtureDigest)
+	dir, err := s.bundleDir(xorgDigest)
 	require.NoError(t, err)
 	_, statErr := os.Stat(dir)
 	assert.True(t, os.IsNotExist(statErr), "bundle dir must not exist after a failed unpack")
@@ -256,16 +263,18 @@ func TestPullInvokesSkopeoAndCreatesLayout(t *testing.T) {
 		return nil
 	}
 
-	require.NoError(t, s.Pull("ghcr.io/qubesome/xorg:latest"))
+	require.NoError(t, s.Pull(xorgRef))
+
+	layout := filepath.Join(root, "oci", xorgKey)
 
 	assert.Equal(t, files.SkopeoBinary, gotBin)
 	assert.Equal(t, []string{
 		"copy",
 		"docker://ghcr.io/qubesome/xorg:latest",
-		"oci:" + filepath.Join(root, "oci") + ":latest",
+		"oci:" + layout + ":" + xorgKey,
 	}, gotArgs)
 
-	_, err := os.Stat(filepath.Join(root, "oci"))
+	_, err := os.Stat(layout)
 	require.NoError(t, err)
 }
 
@@ -277,7 +286,7 @@ func TestPullPropagatesRunError(t *testing.T) {
 		return errUnpackFake
 	}
 
-	err := s.Pull("ghcr.io/qubesome/xorg:latest")
+	err := s.Pull(xorgRef)
 	require.ErrorIs(t, err, errUnpackFake)
 }
 
@@ -334,11 +343,48 @@ func TestStoreResolve(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	dir := newExistingBundle(t, s)
+	dir := newExistingBundle(t, s, xorgDigest)
 
-	b, err := s.Resolve("ghcr.io/qubesome/xorg:latest")
+	b, err := s.Resolve(xorgRef)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, "rootfs"), b.Rootfs)
+}
+
+// Two images sharing a tag each resolve to their own bundle. Keying by
+// tag alone had one layout entry serve both, so whichever was pulled last
+// owned it.
+func TestStoreResolveDoesNotCollideOnASharedTag(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	xorg := newExistingBundle(t, s, xorgDigest)
+	kali := newExistingBundle(t, s, kaliDigest)
+	require.NotEqual(t, xorg, kali)
+
+	bx, err := s.Resolve(xorgRef)
+	require.NoError(t, err)
+
+	bk, err := s.Resolve(kaliRef)
+	require.NoError(t, err)
+
+	assert.Equal(t, filepath.Join(xorg, "rootfs"), bx.Rootfs)
+	assert.Equal(t, filepath.Join(kali, "rootfs"), bk.Rootfs)
+}
+
+// A store holding only xorg must not report kali as present. This was the
+// deterministic form of the collision: Resolve answered with xorg's
+// bundle, the pull was skipped, and the profile ran the wrong root
+// filesystem.
+func TestStoreResolveRejectsAnotherImageWithTheSameTag(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(s.Root, "oci", kaliKey)))
+	newExistingBundle(t, s, xorgDigest)
+
+	_, err := s.Resolve(kaliRef)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), kaliKey)
 }
 
 func TestStoreResolveNotUnpacked(t *testing.T) {
@@ -346,7 +392,7 @@ func TestStoreResolveNotUnpacked(t *testing.T) {
 
 	s := newTestStore(t)
 
-	_, err := s.Resolve("ghcr.io/qubesome/xorg:latest")
+	_, err := s.Resolve(xorgRef)
 	require.Error(t, err)
 }
 
@@ -365,7 +411,7 @@ func TestPullProfileImageSkipsAWarmStore(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	dir := newExistingBundle(t, s)
+	dir := newExistingBundle(t, s, xorgDigest)
 
 	var ran []string
 	s.cmdRunner = func(bin string, _ []string) error {
@@ -373,7 +419,7 @@ func TestPullProfileImageSkipsAWarmStore(t *testing.T) {
 		return nil
 	}
 
-	b, err := pullProfileImage(s, "ghcr.io/qubesome/xorg:latest")
+	b, err := pullProfileImage(s, xorgRef)
 	require.NoError(t, err)
 
 	assert.Equal(t, filepath.Join(dir, "rootfs"), b.Rootfs)
@@ -388,11 +434,11 @@ func TestPullProfileImagePullsAColdStore(t *testing.T) {
 	var ran []string
 	s.cmdRunner = func(bin string, _ []string) error {
 		ran = append(ran, filepath.Base(bin))
-		newExistingBundle(t, s)
+		newExistingBundle(t, s, xorgDigest)
 		return nil
 	}
 
-	_, err := pullProfileImage(s, "ghcr.io/qubesome/xorg:latest")
+	_, err := pullProfileImage(s, xorgRef)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{filepath.Base(files.SkopeoBinary)}, ran)
@@ -404,7 +450,7 @@ func TestRefreshProfileImagePullsAWarmStore(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	newExistingBundle(t, s)
+	newExistingBundle(t, s, xorgDigest)
 
 	var ran []string
 	s.cmdRunner = func(bin string, _ []string) error {
@@ -412,7 +458,7 @@ func TestRefreshProfileImagePullsAWarmStore(t *testing.T) {
 		return nil
 	}
 
-	_, err := refreshProfileImage(s, "ghcr.io/qubesome/xorg:latest")
+	_, err := refreshProfileImage(s, xorgRef)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{filepath.Base(files.SkopeoBinary)}, ran)

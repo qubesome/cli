@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 2,
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "size": 123,
+      "annotations": {"org.opencontainers.image.ref.name": "ghcr-io-qubesome-kali-latest-743894dca414afaf"}
+    }
+  ]
+}
