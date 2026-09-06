@@ -23,6 +23,20 @@ type Store struct {
 	// Root is the directory holding the oci layout and the unpacked
 	// bundles.
 	Root string
+
+	// cmdRunner is a test seam for Pull and Unpack. Production shells out
+	// to skopeo and umoci through runCmd, and tests substitute a fake so
+	// the pull, unpack, reuse and error paths can be verified without
+	// either binary installed.
+	cmdRunner func(bin string, args []string) error
+}
+
+// run invokes cmdRunner if a test has set one, and runCmd otherwise.
+func (s *Store) run(bin string, args []string) error {
+	if s.cmdRunner != nil {
+		return s.cmdRunner(bin, args)
+	}
+	return runCmd(bin, args)
 }
 
 // NewStore returns the store under the qubesome directory.

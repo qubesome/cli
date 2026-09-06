@@ -30,6 +30,17 @@ const (
 	// InProfileBinary is where the qubesome binary is bind-mounted inside
 	// the profile container.
 	InProfileBinary = "/usr/local/bin/qubesome"
+
+	// BwrapBinary creates the profile sandbox. Like the container runner
+	// it enforces every isolation setting qubesome asks for, so it is not
+	// resolved through PATH.
+	BwrapBinary = "/usr/bin/bwrap"
+
+	// SkopeoBinary pulls images, verifying manifest and blob digests.
+	SkopeoBinary = "/usr/bin/skopeo"
+
+	// UmociBinary applies image layers, rootless.
+	UmociBinary = "/usr/bin/umoci"
 )
 
 // runnerDirs holds the directories searched for a container runner, in
