@@ -601,6 +601,14 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		return err
 	}
 
+	// Workload shared memory lives beside the profile's runtime dir rather
+	// than inside it, because that dir is mounted into every workload.
+	// EnsureMappedDir creates one workload's directory, not this parent.
+	workloadShm := filepath.Join(files.ProfileDir(profile.Name), "shm")
+	if err := os.MkdirAll(workloadShm, files.DirMode); err != nil {
+		return fmt.Errorf("failed to create workload shm dir: %w", err)
+	}
+
 	err = setupAppsDir(profile, cfg)
 	if err != nil {
 		return err
