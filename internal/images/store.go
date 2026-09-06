@@ -170,7 +170,7 @@ func storeKey(ref string) string {
 	var b strings.Builder
 	sep := false
 
-	for i := 0; i < len(ref) && b.Len() < keyReadableMax; i++ {
+	for i := 0; i < len(ref); i++ {
 		c := ref[i]
 		if !alphanumeric(c) {
 			sep = true
@@ -179,8 +179,17 @@ func storeKey(ref string) string {
 
 		// A separator is only emitted before the next alphanumeric, so a
 		// key never starts or ends with one and never carries two in a
-		// row.
+		// row. It counts towards the bound with the byte it precedes, so
+		// the two are written together or not at all.
+		need := 1
 		if sep && b.Len() > 0 {
+			need = 2
+		}
+		if b.Len()+need > keyReadableMax {
+			break
+		}
+
+		if need == 2 {
 			b.WriteByte('-')
 		}
 		sep = false

@@ -92,6 +92,9 @@ func TestStoreKeyIsASafeSinglePathComponent(t *testing.T) {
 		"///",
 		"",
 		strings.Repeat("ghcr.io/very-long/", 40) + "image:tag",
+		// A reference whose separators fall so that the readable half
+		// ends one byte short of its bound.
+		"bbbab-baa.:./a/.bbaab-b-.b.:b/:.a.aa//./a:bb-b-::b:b-bb.bbabb/..:aaaaa-.a./:.b/a-:ab/aab//:",
 	}
 
 	for _, ref := range refs {
