@@ -113,12 +113,26 @@ func validGitDir(path string) bool {
 	return err == nil
 }
 
+// sandboxStatePath returns where a running profile sandbox is recorded.
+func sandboxStatePath(profile string) string {
+	return filepath.Join(files.ProfileDir(profile), "sandbox.json")
+}
+
+// errAlreadyStarted reports a profile whose sandbox is still running.
+func errAlreadyStarted(profile string) error {
+	return fmt.Errorf("profile %q is already started", profile)
+}
+
 func StartFromGit(runner, name, gitURL, path, local string, interactive bool) error {
 	ln := files.ProfileConfig(name)
 
 	if _, err := os.Lstat(ln); err == nil {
-		if sandbox.Alive(filepath.Join(files.ProfileDir(name), "sandbox.json")) {
-			return fmt.Errorf("profile %q is already started", name)
+		// Start checks this too, and has to, because it is also reached
+		// without a symlink. The check stays here as well so a running
+		// profile does not lose its config symlink on the way to that
+		// error.
+		if sandbox.Alive(sandboxStatePath(name)) {
+			return errAlreadyStarted(name)
 		}
 
 		if err = os.Remove(ln); err != nil {
@@ -223,6 +237,15 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 
 	if err := profile.Validate(); err != nil {
 		return err
+	}
+
+	// Both entry paths land here, and docker used to refuse a second
+	// start through the container name. bwrap has no such thing, so a
+	// second start would truncate the running profile's X cookies, race
+	// for its display, and on the way out delete its socket, shm backing
+	// and runtime dir.
+	if sandbox.Alive(sandboxStatePath(profile.Name)) {
+		return errAlreadyStarted(profile.Name)
 	}
 
 	// If runner is not being overwritten (via -runner), use the runner
@@ -344,11 +367,13 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 	}()
 
 	defer func() {
-		// Clean up the profile dir once profile finishes.
+		// Clean up the profile dir once profile finishes. The error is
+		// kept out of the named return, which already carries the reason
+		// the start ended and must not be replaced by a successful
+		// removal.
 		pd := files.ProfileDir(profile.Name)
-		err = os.RemoveAll(pd)
-		if err != nil {
-			slog.Warn("failed to remove profile dir", "path", pd, "error", err)
+		if rerr := os.RemoveAll(pd); rerr != nil {
+			slog.Warn("failed to remove profile dir", "path", pd, "error", rerr)
 		}
 	}()
 
@@ -366,9 +391,18 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
-	statePath := filepath.Join(files.ProfileDir(profile.Name), "sandbox.json")
-	if err := sandbox.WriteState(statePath, cmd.Process.Pid); err != nil {
-		slog.Warn("failed to record sandbox state", "error", err)
+	if err := sandbox.WriteState(sandboxStatePath(profile.Name), cmd.Process.Pid); err != nil {
+		// The state file is the gate that stops a second start from
+		// trampling this one, so a sandbox that cannot be recorded must
+		// not keep running. Recording also fails when the sandbox is
+		// already gone, and reporting that beats waiting forever on a
+		// profile that is not there.
+		if kerr := cmd.Process.Kill(); kerr != nil {
+			slog.Warn("failed to kill the unrecorded sandbox", "error", kerr)
+		}
+		_ = cmd.Wait()
+
+		return fmt.Errorf("failed to record sandbox state: %w", err)
 	}
 
 	// The host process serves this profile's socket for as long as the
