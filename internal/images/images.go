@@ -82,18 +82,27 @@ func PreemptWorkloadImages(bin string, cfg *types.Config) {
 	if err != nil && os.IsNotExist(err) {
 		fmt.Println("INFO: Preemptively pulling workload images. This only happens on first execution and aims to avoid delays opening apps.")
 
-		_ = PullAll(bin, cfg)
+		_ = pullWorkloadImages(bin, cfg)
 		_ = os.WriteFile(fn, []byte{}, files.FileMode)
 	}
 }
 
+// PullAll refreshes every image in a config.
+//
+// Profile images are pulled whether or not the store already holds them,
+// because refreshing is the whole point of the command behind this.
 func PullAll(bin string, cfg *types.Config) error {
+	s := NewStore()
 	for _, img := range ProfileImages(cfg) {
-		if _, err := PullProfileImage(img); err != nil {
+		if _, err := refreshProfileImage(s, img); err != nil {
 			slog.Error("cannot pull profile image", "image", img, "error", err)
 		}
 	}
 
+	return pullWorkloadImages(bin, cfg)
+}
+
+func pullWorkloadImages(bin string, cfg *types.Config) error {
 	imgs, err := UniqueImages(cfg)
 	if err != nil {
 		return fmt.Errorf("cannot get images: %w", err)
@@ -108,13 +117,32 @@ func PullAll(bin string, cfg *types.Config) error {
 	return nil
 }
 
-// PullProfileImage pulls and unpacks a profile image into the OCI store.
+// PullProfileImage returns the bundle for a profile image, pulling it into
+// the OCI store only when the store cannot already provide it.
 //
 // Workload images still go through the container runner, because workloads
 // still run under it. The two stores coexist until workloads move.
 func PullProfileImage(ref string) (Bundle, error) {
-	s := NewStore()
+	return pullProfileImage(NewStore(), ref)
+}
 
+// pullProfileImage skips the pull for an image the store already holds.
+//
+// A warm store lets a profile start with no network, which is what the
+// runner backed path gave through PullImageIfNotPresent. Refreshing is
+// PullAll's job, not a side effect of starting a profile.
+func pullProfileImage(s *Store, ref string) (Bundle, error) {
+	if b, err := s.Resolve(ref); err == nil {
+		slog.Debug("profile image is already in the store", "image", ref)
+		return b, nil
+	}
+
+	return refreshProfileImage(s, ref)
+}
+
+// refreshProfileImage pulls and unpacks ref whether or not the store
+// already holds it.
+func refreshProfileImage(s *Store, ref string) (Bundle, error) {
 	if err := s.Pull(ref); err != nil {
 		return Bundle{}, err
 	}

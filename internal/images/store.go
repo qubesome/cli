@@ -91,6 +91,26 @@ func (s *Store) Digest(ref string) (string, error) {
 	return "", fmt.Errorf("image %q is not in the store: no manifest tagged %q", ref, want)
 }
 
+// Resolve returns the bundle for an image the store already holds, without
+// reaching the network.
+//
+// It is what lets a profile start offline: the image is pulled only when
+// this fails. A bundle is renamed into place complete, so a readable
+// config.json means the unpack finished.
+func (s *Store) Resolve(ref string) (Bundle, error) {
+	digest, err := s.Digest(ref)
+	if err != nil {
+		return Bundle{}, err
+	}
+
+	dir, err := s.bundleDir(digest)
+	if err != nil {
+		return Bundle{}, fmt.Errorf("failed to resolve bundle dir for %q: %w", ref, err)
+	}
+
+	return readBundle(dir)
+}
+
 // bundleDir returns the unpack destination for a digest. The digest comes
 // from the index rather than from user input, but it still names a
 // directory, so it is joined securely.
