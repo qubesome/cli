@@ -44,11 +44,15 @@ var (
 	ContainerNameFormat = "qubesome-%s"
 	defaultProfileImage = "ghcr.io/qubesome/xorg:latest"
 
-	// profileStartGrace is how long the profile container is given to
-	// fail before it is considered started. It only has to outlast an
-	// entrypoint that cannot run at all, not a slow compositor, because
-	// the compositor is waited for inside the container.
+	// profileStartGrace is how long the profile container is watched for
+	// an early exit before it is considered started. It does not have to
+	// outlast a slow compositor, because the compositor is waited for
+	// inside the container, only an entrypoint that fails outright.
 	profileStartGrace = 500 * time.Millisecond
+
+	// profileStartCheck is how often the container is checked during that
+	// grace period.
+	profileStartCheck = 50 * time.Millisecond
 
 	appTemplate = `[Desktop Entry]
 Version=1.0
@@ -523,7 +527,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver", server))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority", workload))
-	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
+	paths = append(paths, fmt.Sprintf("-v=%s:%s:ro", binPath, files.InProfileBinary))
 
 	for _, p := range profile.Paths {
 		p = env.Expand(p)
@@ -679,10 +683,23 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	// says nothing about whether its entrypoint survived. A profile whose
 	// image is missing the compositor would otherwise start cleanly and
 	// simply never show a window.
+	// Watching for the whole grace period rather than sleeping through it
+	// and looking once. A compositor that dies just after a fixed check
+	// would otherwise pass it and leave the user with no window and no
+	// error, which is the failure this exists to catch.
 	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
-	time.Sleep(profileStartGrace)
+	deadline := time.Now().Add(profileStartGrace)
+	running := true
 
-	if !container.Running(bin, name) {
+	for time.Now().Before(deadline) {
+		if running = container.Running(bin, name); !running {
+			break
+		}
+
+		time.Sleep(profileStartCheck)
+	}
+
+	if !running {
 		msg := fmt.Sprintf("profile %s exited immediately, check %s logs %s",
 			profile.Name, bin, name)
 		dbus.NotifyOrLog("qubesome start error", msg)

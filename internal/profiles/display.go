@@ -80,10 +80,13 @@ func compositorArgs(p displayParams) ([]string, error) {
 	}
 
 	return []string{
-		// The compositor always presents through the host X server. A
-		// Wayland host runs its own Xwayland, so this reaches it either
-		// way, and it means the profile needs nothing from the host
-		// session beyond the display socket it already has.
+		// The compositor always presents through the host X server, so
+		// the profile needs nothing from the host session beyond the
+		// display socket it already has. A Wayland desktop reaches it
+		// through its own Xwayland, which every mainstream one runs. A
+		// Wayland session without Xwayland is the case this does not
+		// cover, and it would need the host compositor socket mounting
+		// in and a second backend here.
 		"--backend=x11",
 		"--width=" + w,
 		"--height=" + h,

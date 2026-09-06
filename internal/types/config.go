@@ -109,6 +109,14 @@ type MimeHandler struct {
 	Profile  string `yaml:"profile"`
 }
 
+// Profile is the isolation boundary.
+//
+// Its workloads share one X display, so any of them can read another's
+// window contents, observe its keystrokes and read its selections. The
+// per-workload hostAccess grants govern what each workload reaches on the
+// host, which stays meaningful, but they do not make workloads private
+// from each other. Anything that needs to be unobservable by another
+// application belongs in its own profile.
 type Profile struct {
 	Name string
 	// Path defines the root path for the given profile. All other
@@ -140,8 +148,12 @@ type Profile struct {
 	ExternalDrives []string `yaml:"externalDrives"`
 
 	// Image is the container image name used for running the profile.
-	// It should contain a Wayland compositor, Xwayland and any additional
-	// window managers required.
+	//
+	// It must provide weston at /usr/bin/weston and xwayland-run at
+	// /usr/bin/xwayland-run, which the profile's entrypoint runs by
+	// absolute path, along with any window managers the profile uses. An
+	// image missing either starts and exits immediately, reported as the
+	// profile exiting before it was ready.
 	Image string `yaml:"image"`
 
 	Timezone string `yaml:"timezone"`

@@ -20,11 +20,14 @@ type Workload struct {
 	X11Args []string `yaml:"x11Args"`
 	// WaylandArgs defines Wayland-specific arguments.
 	//
-	// They are no longer applied. Workloads connect to the profile's
+	// They are reserved and currently not applied. Workloads connect to
+	// the profile's
 	// Xwayland, which is an X server whatever the host session is, so
 	// X11Args is what takes effect. The field is still parsed so that an
 	// existing dotfiles repository keeps loading, and setting it logs a
-	// warning.
+	// warning. It is kept rather than removed because a workload that
+	// speaks Wayland to the profile directly is a plausible future, and
+	// this is the field it would use.
 	WaylandArgs []string `yaml:"waylandArgs"`
 	// NoGPUArgs defines arguments to be used when no GPU is available.
 	NoGPUArgs      []string   `yaml:"noGpuArgs"`
