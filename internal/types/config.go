@@ -140,7 +140,8 @@ type Profile struct {
 	ExternalDrives []string `yaml:"externalDrives"`
 
 	// Image is the container image name used for running the profile.
-	// It should contain Xephyr and any additional window managers required.
+	// It should contain a Wayland compositor, Xwayland and any additional
+	// window managers required.
 	Image string `yaml:"image"`
 
 	Timezone string `yaml:"timezone"`
@@ -148,12 +149,21 @@ type Profile struct {
 	DNS string `yaml:"dns"`
 
 	// WindowManager holds the command to run the Window Manager once
-	// the X server is running.
+	// the X server is running. It runs as the X server's only client, and
+	// is split into arguments without a shell, so shell syntax in it is
+	// not interpreted.
 	//
 	// Example: exec awesome
 	WindowManager string `yaml:"windowManager"`
 
-	// XephyrArgs defines additional args to be passed on to Xephyr.
+	// XephyrArgs defines additional args to be passed on to the profile's
+	// X server.
+	//
+	// The name is kept for compatibility. Profiles used to run Xephyr, and
+	// renaming the field would break every existing dotfiles repository.
+	// The arguments now reach Xwayland, which accepts the same X server
+	// options, so a Xephyr specific flag configured here will no longer
+	// have an effect.
 	XephyrArgs string `yaml:"xephyrArgs"`
 }
 
