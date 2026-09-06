@@ -57,17 +57,23 @@ func (f *fakeEnv) Output(name string, args ...string) ([]byte, error) {
 }
 
 type fakeFileInfo struct {
-	name  string
-	isDir bool
+	name   string
+	isDir  bool
+	isSock bool
+	size   int64
 }
 
 func (f fakeFileInfo) Name() string { return f.name }
-func (f fakeFileInfo) Size() int64  { return 0 }
+func (f fakeFileInfo) Size() int64  { return f.size }
 func (f fakeFileInfo) Mode() os.FileMode {
-	if f.isDir {
+	switch {
+	case f.isDir:
 		return os.ModeDir | 0o755
+	case f.isSock:
+		return os.ModeSocket | 0o755
+	default:
+		return 0o644
 	}
-	return 0o644
 }
 func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
 func (f fakeFileInfo) IsDir() bool        { return f.isDir }
@@ -79,6 +85,18 @@ func dirInfo(name string) os.FileInfo {
 
 func fileInfo(name string) os.FileInfo {
 	return fakeFileInfo{name: name, isDir: false}
+}
+
+// socketInfo is used by the profile checks that stat a unix socket path,
+// since a regular file left where a socket should be is itself a finding.
+func socketInfo(name string) os.FileInfo {
+	return fakeFileInfo{name: name, isSock: true}
+}
+
+// sizedFileInfo is used by the profile cookie checks, which treat a
+// zero-sized cookie file the same as a missing one.
+func sizedFileInfo(name string, size int64) os.FileInfo {
+	return fakeFileInfo{name: name, size: size}
 }
 
 type exitError struct {
