@@ -41,6 +41,15 @@ import (
 	"golang.org/x/term"
 )
 
+// The user a profile image runs as. The X cookies and the desktop files
+// are mounted into this home, so the profile image has to provide it, and
+// the sandbox environment names the same user rather than trusting
+// whatever the image left in its own environment.
+const (
+	profileUser = "xorg-user"
+	profileHome = "/home/" + profileUser
+)
+
 var (
 	ContainerNameFormat = "qubesome-%s"
 	defaultProfileImage = "ghcr.io/qubesome/xorg:latest"
@@ -483,6 +492,37 @@ func createMagicCookie(profile *types.Profile) error {
 	return xauth.AuthPair(profile.Display, parent, server, client)
 }
 
+// sandboxEnv returns the environment of the profile sandbox, without the
+// session specific variables the caller adds.
+//
+// The image environment comes first. Container runners applied it
+// implicitly and bwrap does not, so without it the profile loses the PATH
+// its own binaries are on.
+//
+// HOME and USER follow it rather than come from it. bwrap sets neither,
+// and the image is not a reliable source: it only carries what its build
+// happened to leave behind. Without HOME every X client resolves
+// ~/.Xauthority to nowhere and cannot authenticate to the nested display.
+// The values are profileHome and profileUser, which is where the cookies
+// and the desktop files are mounted, so the environment and the mount
+// list cannot disagree. bwrap applies --setenv in order, so these are the
+// values that survive.
+func sandboxEnv(bundle images.Bundle, ca, cert, key []byte) []string {
+	const extra = 6
+
+	env := make([]string, 0, len(bundle.Env)+extra)
+	env = append(env, bundle.Env...)
+
+	return append(env,
+		"HOME="+profileHome,
+		"USER="+profileUser,
+		"DISPLAY="+os.Getenv("DISPLAY"),
+		"Q_MTLS_CA="+string(ca),
+		"Q_MTLS_CERT="+string(cert),
+		"Q_MTLS_KEY="+string(key),
+	)
+}
+
 // shellQuote renders args as a single line that a shell will split back
 // into exactly these arguments.
 //
@@ -512,7 +552,7 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		"profile-display",
 		"--display", display,
 		"--geometry", res,
-		"--auth", "/home/xorg-user/.Xserver",
+		"--auth", profileHome + "/.Xserver",
 		"--wm", profile.WindowManager,
 	}
 	if profile.XephyrArgs != "" {
@@ -622,8 +662,8 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		{Src: "/etc/localtime", Dst: "/etc/localtime", ReadOnly: true},
 		{Src: x11Dir, Dst: "/tmp/.X11-unix"},
 		{Src: socket, Dst: "/tmp/qube.sock", ReadOnly: true},
-		{Src: server, Dst: "/home/xorg-user/.Xserver"},
-		{Src: workload, Dst: "/home/xorg-user/.Xauthority"},
+		{Src: server, Dst: profileHome + "/.Xserver"},
+		{Src: workload, Dst: profileHome + "/.Xauthority"},
 		{Src: binPath, Dst: files.InProfileBinary, ReadOnly: true},
 	}
 
@@ -664,12 +704,12 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 	mounts = append(mounts,
 		sandbox.Mount{
 			Src:      filepath.Join(files.ProfileDir(profile.Name), "applications"),
-			Dst:      "/home/xorg-user/.local/share/applications",
+			Dst:      profileHome + "/.local/share/applications",
 			ReadOnly: true,
 		},
 		sandbox.Mount{
 			Src:      filepath.Join(files.ProfileDir(profile.Name), "icons"),
-			Dst:      "/home/xorg-user/.local/share/icons",
+			Dst:      profileHome + "/.local/share/icons",
 			ReadOnly: true,
 		},
 	)
@@ -698,16 +738,7 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		}
 	}
 
-	// The image environment comes first. Container runners applied it
-	// implicitly and bwrap does not, so without it the profile loses the
-	// PATH its own binaries are on.
-	senv := append([]string{}, bundle.Env...)
-	senv = append(senv,
-		"DISPLAY="+os.Getenv("DISPLAY"),
-		"Q_MTLS_CA="+string(ca),
-		"Q_MTLS_CERT="+string(cert),
-		"Q_MTLS_KEY="+string(key),
-	)
+	senv := sandboxEnv(bundle, ca, cert, key)
 
 	// The profile runs its own compositor, so it needs nothing from the
 	// host session beyond the display socket mounted above. The session
@@ -740,6 +771,7 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		Devices:     devices,
 		Mounts:      mounts,
 		Args:        initArgs,
+		Cwd:         bundle.Cwd,
 	}
 
 	// os/exec numbers ExtraFiles from descriptor 3 upwards in the child.

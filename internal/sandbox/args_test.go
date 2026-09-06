@@ -64,10 +64,22 @@ func TestArgsProfile(t *testing.T) {
 			{Src: "/home/levi/git", Dst: "/data/git"},
 		},
 		Args: []string{"/usr/local/bin/qubesome", "profile-display"},
+		Cwd:  "/home/xorg-user",
 	}, 7)
 	require.NoError(t, err)
 
 	golden(t, "profile", args)
+}
+
+// bwrap has no default of its own to fall back on here: with no --chdir
+// it starts in /, which is what a spec with no working directory wants.
+func TestArgsOmitsAnEmptyCwd(t *testing.T) {
+	t.Parallel()
+
+	args, err := Args(Spec{Rootfs: "/rootfs", Args: []string{"/bin/sh"}}, -1)
+	require.NoError(t, err)
+
+	assert.NotContains(t, args, "--chdir")
 }
 
 // /tmp is a tmpfs, and the X11 socket dir and qube.sock are bound inside

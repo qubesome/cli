@@ -44,6 +44,13 @@ type Spec struct {
 	// Args is the command to run, argv[0] first.
 	Args []string
 
+	// Cwd is the working directory of the sandboxed process. Container
+	// runners took it from the image and bwrap does not, so without it
+	// the sandbox inherits qubesome's own working directory, which
+	// usually does not exist inside the root filesystem. Empty leaves it
+	// at bwrap's default of /.
+	Cwd string
+
 	// UID and GID are the credentials inside the sandbox's user
 	// namespace. The zero value maps to root within that namespace, which
 	// is not host root: --cap-drop ALL still empties its bounding

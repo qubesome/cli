@@ -26,6 +26,8 @@ ALL
 --unshare-net
 --hostname
 qubesome-work
+--chdir
+/home/xorg-user
 --new-session
 --dev-bind
 /dev/dri/renderD128

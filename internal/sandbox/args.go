@@ -68,6 +68,13 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		args = append(args, "--hostname", s.Hostname)
 	}
 
+	// --chdir takes the directory as its single argument, and bwrap
+	// applies it once the sandbox is set up, so the directory is resolved
+	// inside the sandbox rather than on the host.
+	if s.Cwd != "" {
+		args = append(args, "--chdir", s.Cwd)
+	}
+
 	if !s.Interactive {
 		args = append(args, "--new-session")
 	}
