@@ -3,6 +3,7 @@ package seccomp
 import (
 	"encoding/binary"
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -130,6 +131,105 @@ func TestProgramSocketDeniesNetlinkAudit(t *testing.T) {
 	assert.False(t, deniedOutright(p)["socket"])
 }
 
+// TCGETS is an ordinary terminal request, so it stands for everything the
+// broad allow group still lets through.
+func TestProgramDeniesTerminalInjectionIoctls(t *testing.T) {
+	t.Parallel()
+
+	const tcgets = 0x5401
+
+	m := vm(t)
+	for _, request := range []uint64{tiocsti, tioclinux} {
+		assert.Equal(t, uint32(retErrno|eperm), run(t, m, "ioctl", 0, request),
+			"expected ioctl(_, %#x) to return EPERM", request)
+	}
+
+	assert.Equal(t, uint32(retAllow), run(t, m, "ioctl", 0, tcgets))
+
+	// The request is the second argument, so the same value in the first
+	// one must not match.
+	assert.Equal(t, uint32(retAllow), run(t, m, "ioctl", tiocsti, tcgets))
+}
+
+// The kernel declares the request as an unsigned int and truncates it, so
+// a caller can set any bit above the low word and still reach TIOCSTI. An
+// equality over the whole register would let that through, which is why the
+// rule masks. Verified on this host: ioctl on a pty with
+// 0xffffffff00005401 performs TCGETS and returns 0.
+func TestProgramDeniesTerminalInjectionIoctlsWithHighBitsSet(t *testing.T) {
+	t.Parallel()
+
+	m := vm(t)
+	for _, request := range []uint64{tiocsti, tioclinux} {
+		for _, high := range []uint64{1 << 32, 1 << 40, 0xffffffff << 32} {
+			got := run(t, m, "ioctl", 0, request|high)
+			assert.Equal(t, uint32(retErrno|eperm), got,
+				"expected ioctl(_, %#x) to return EPERM", request|high)
+		}
+	}
+}
+
+// Value is the mask and ValueTwo the datum, and both words are masked
+// before they are compared.
+func TestCompareMaskedEqual(t *testing.T) {
+	t.Parallel()
+
+	insns, err := rule(1, retAllow, []Arg{{
+		Index:    0,
+		Value:    0xff00ff00ff00ff00,
+		ValueTwo: 0xaa00bb00cc00dd00,
+		Op:       opMaskedEqual,
+	}})
+	require.NoError(t, err)
+
+	// A rule fragment expects the syscall number already in A, and falls
+	// through to the next rule when the condition fails.
+	prog := make([]bpf.Instruction, 0, len(insns)+2)
+	prog = append(prog, bpf.LoadAbsolute{Off: offNr, Size: 4})
+	prog = append(prog, insns...)
+	prog = append(prog, bpf.RetConstant{Val: retErrno})
+
+	m, err := bpf.NewVM(prog)
+	require.NoError(t, err)
+
+	for _, arg := range []uint64{
+		0xaa00bb00cc00dd00,
+		0xaaffbbffccffddff,
+		0xaa11bb22cc33dd44,
+	} {
+		assert.Equal(t, uint32(retAllow), ret(t, m, data(1, auditArch, arg)),
+			"expected %#x to match", arg)
+	}
+
+	for _, arg := range []uint64{
+		0,
+		0xab00bb00cc00dd00,
+		0xaa00bb00cc00de00,
+	} {
+		assert.Equal(t, uint32(retErrno), ret(t, m, data(1, auditArch, arg)),
+			"expected %#x not to match", arg)
+	}
+}
+
+// The vendored profile allows ioctl with no argument conditions, so a
+// denial appended after it would never be reached, and the outright denial
+// pre-pass does not cover argument carrying rules.
+func TestInjectedRulesPrecedeTheProfile(t *testing.T) {
+	t.Parallel()
+
+	p, err := Load()
+	require.NoError(t, err)
+
+	assert.False(t, deniedOutright(p)["ioctl"])
+
+	for _, r := range p.Syscalls {
+		if slices.Contains(r.Names, "ioctl") {
+			assert.Equal(t, actionAllow, r.Action)
+			assert.Empty(t, r.Args)
+		}
+	}
+}
+
 func TestProgramFitsInstructionLimit(t *testing.T) {
 	t.Parallel()
 
@@ -187,10 +287,14 @@ func TestProgramDropsAnAllowCoveredByAnOutrightDenial(t *testing.T) {
 // checked against it rather than against a handful of hand written cases.
 // It shares applies and action with the emitter, so what it independently
 // checks is the jump arithmetic, which is where the risk lives.
+//
+// The injected rules are part of what the emitter walks, so they are part
+// of what this walks. Leaving them out would only make the two disagree
+// about ioctl.
 func expectedAction(t *testing.T, p *Profile, denied map[string]bool, nr uint32, args [6]uint64) uint32 {
 	t.Helper()
 
-	for _, r := range p.Syscalls {
+	for _, r := range slices.Concat(injected(), p.Syscalls) {
 		if !applies(r) {
 			continue
 		}
@@ -210,6 +314,8 @@ func expectedAction(t *testing.T, p *Profile, denied map[string]bool, nr uint32,
 				matched = args[a.Index] == a.Value
 			case opNotEqual:
 				matched = args[a.Index] != a.Value
+			case opMaskedEqual:
+				matched = args[a.Index]&a.Value == a.ValueTwo
 			default:
 				t.Fatalf("unsupported operator %q", a.Op)
 			}
@@ -263,6 +369,10 @@ func TestProgramMatchesTheProfileForEverySyscall(t *testing.T) {
 		{0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff},
 		{0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff},
 		{1 << 40, 1 << 40, 1 << 40, 1 << 40, 1 << 40, 1 << 40},
+		{0, tiocsti},
+		{0, tioclinux},
+		{0, tiocsti | 1<<40},
+		{0, 0x5401},
 	}
 
 	seen := make(map[uint32]bool)

@@ -26,9 +26,72 @@ const (
 	actionAllow = "SCMP_ACT_ALLOW"
 	actionErrno = "SCMP_ACT_ERRNO"
 
-	opEqual    = "SCMP_CMP_EQ"
-	opNotEqual = "SCMP_CMP_NE"
+	opEqual       = "SCMP_CMP_EQ"
+	opNotEqual    = "SCMP_CMP_NE"
+	opMaskedEqual = "SCMP_CMP_MASKED_EQ"
 )
+
+const (
+	// eperm is the errno the vendored profile returns for the privileged
+	// operations it denies, so the rules below return it too.
+	eperm = 1
+
+	// ioctlRequest is the index of the request in
+	// ioctl(int fd, unsigned long request, ...), so it is the argument the
+	// rules below test.
+	ioctlRequest = 1
+
+	// requestMask keeps the comparison to the bits the kernel reads. The
+	// syscall declares the request as an unsigned int, so the kernel
+	// truncates it, and a plain equality over the whole 64 bit register
+	// would miss a request carrying any bit above the low word. Verified
+	// against this host: ioctl on a pty with 0xffffffff00005401 performs
+	// TCGETS and succeeds.
+	requestMask = 0xffffffff
+
+	// TIOCSTI and TIOCLINUX both push bytes into a terminal's input queue.
+	// The values are from asm-generic/ioctls.h, which is the definition
+	// both architectures with a syscall table here use.
+	tiocsti   = 0x5412
+	tioclinux = 0x541c
+)
+
+// injected are qubesome's own rules, which the emitter puts in front of the
+// vendored profile.
+//
+// An interactive sandbox skips --new-session, so it holds the terminal that
+// ran qubesome, and a process inside could use either of these requests to
+// queue a command that the shell runs once qubesome exits. bubblewrap's own
+// manpage warns about exactly this. Docker was not exposed the same way,
+// because it attached through a pty pair of its own rather than handing the
+// container the user's terminal.
+//
+// They live here rather than in seccomp.json because that file is upstream
+// data, and a re-vendor would drop them. They have to precede the vendored
+// groups: rules are emitted in profile order, the first match wins, and the
+// broad allow group allows ioctl outright, so a denial behind it is
+// unreachable. The deniedOutright pre-pass does not help, as it only covers
+// argument free denials.
+func injected() []Rule {
+	rules := make([]Rule, 0, 2)
+
+	for _, request := range []uint64{tiocsti, tioclinux} {
+		errno := uint32(eperm)
+		rules = append(rules, Rule{
+			Names:    []string{"ioctl"},
+			Action:   actionErrno,
+			ErrnoRet: &errno,
+			Args: []Arg{{
+				Index:    ioctlRequest,
+				Value:    requestMask,
+				ValueTwo: request,
+				Op:       opMaskedEqual,
+			}},
+		})
+	}
+
+	return rules
+}
 
 // Program renders the profile as a BPF program.
 //
@@ -45,7 +108,8 @@ const (
 //
 // Rules are emitted in profile order and the first match wins, which is
 // what makes the conditional socket rules behave as written: the netlink
-// audit denial precedes the allow rules that exclude it.
+// audit denial precedes the allow rules that exclude it. It is also why
+// qubesome's own rules go in front of the profile, see injected.
 //
 // The shape is a comparison chain rather than the balanced search
 // libseccomp emits. No conditional jump travels further than one rule
@@ -72,7 +136,7 @@ func (p *Profile) Program() ([]bpf.Instruction, error) {
 		bpf.LoadAbsolute{Off: offNr, Size: 4},
 	}
 
-	for _, r := range p.Syscalls {
+	for _, r := range slices.Concat(injected(), p.Syscalls) {
 		if !applies(r) {
 			continue
 		}
@@ -191,9 +255,10 @@ func rule(nr, ret uint32, args []Arg) ([]bpf.Instruction, error) {
 	)
 
 	// The leading test skips the whole body, so the body has to stay within
-	// reach of an 8 bit offset. Two conditions over 64 bit arguments need 12
-	// instructions, so this cannot trigger with the vendored profile. It
-	// guards a future one that packs far more conditions into a rule.
+	// reach of an 8 bit offset. The widest condition emitted here is eight
+	// instructions and no rule carries more than two, so this cannot
+	// trigger with the vendored profile. It guards a future one that packs
+	// far more conditions into a rule.
 	size := len(body)
 	if size > math.MaxUint8 {
 		return nil, fmt.Errorf("rule body of %d instructions exceeds the jump range", size)
@@ -254,6 +319,26 @@ func compare(a Arg) ([]bpf.Instruction, error) {
 			bpf.Jump{Skip: failJump},
 			bpf.LoadAbsolute{Off: lo, Size: 4},
 			bpf.JumpIf{Cond: bpf.JumpEqual, Val: valLo, SkipTrue: 1},
+			bpf.Jump{Skip: failJump},
+		}, nil
+	case opMaskedEqual:
+		// Value is the mask and ValueTwo the datum, which is how
+		// libseccomp orders the pair and how the profile schema carries
+		// it. Both words are masked and compared, so a mask that clears a
+		// word makes that word's test pass unconditionally.
+		maskLo := uint32(a.Value & math.MaxUint32)
+		maskHi := uint32(a.Value >> 32)
+		datumLo := uint32(a.ValueTwo & math.MaxUint32)
+		datumHi := uint32(a.ValueTwo >> 32)
+
+		return []bpf.Instruction{
+			bpf.LoadAbsolute{Off: hi, Size: 4},
+			bpf.ALUOpConstant{Op: bpf.ALUOpAnd, Val: maskHi},
+			bpf.JumpIf{Cond: bpf.JumpEqual, Val: datumHi, SkipTrue: 1},
+			bpf.Jump{Skip: failJump},
+			bpf.LoadAbsolute{Off: lo, Size: 4},
+			bpf.ALUOpConstant{Op: bpf.ALUOpAnd, Val: maskLo},
+			bpf.JumpIf{Cond: bpf.JumpEqual, Val: datumLo, SkipTrue: 1},
 			bpf.Jump{Skip: failJump},
 		}, nil
 	case opNotEqual:
