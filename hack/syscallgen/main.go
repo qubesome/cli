@@ -30,6 +30,10 @@ var auditArch = map[string]uint32{
 	"arm64": 0xc00000b7, // AUDIT_ARCH_AARCH64
 }
 
+// sysRe matches the decimal constant form the zsysnum files currently use.
+// A future form, iota or hex for instance, would be skipped silently rather
+// than reported, because the only guard below is that the file yielded no
+// syscalls at all. Check the reported counts after a dependency bump.
 var sysRe = regexp.MustCompile(`^\s*SYS_([A-Z0-9_]+)\s+=\s+(\d+)$`)
 
 func main() {
@@ -82,6 +86,10 @@ func sysUnixDir() (string, error) {
 // generator may also be invoked directly (for example from the repo
 // root), so anchoring to its own source path keeps the output landing in
 // the same place either way.
+// This depends on the generator running from source, which is how the
+// generate directive invokes it. Built with -trimpath and shipped as a
+// binary the embedded path becomes an import path rather than a filesystem
+// one, and the write then fails loudly instead of landing somewhere wrong.
 func seccompDir() (string, error) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -146,5 +154,9 @@ func write(outDir, arch string, nums map[string]uint32) error {
 	}
 
 	path := filepath.Join(outDir, "zsyscalls_linux_"+arch+".go")
-	return os.WriteFile(path, src, 0o600)
+	if err := os.WriteFile(path, src, 0o600); err != nil {
+		return fmt.Errorf("failed to write %q: %w", path, err)
+	}
+
+	return nil
 }
