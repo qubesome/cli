@@ -700,8 +700,12 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	}
 
 	if !running {
-		msg := fmt.Sprintf("profile %s exited immediately, check %s logs %s",
-			profile.Name, bin, name)
+		// The container runs with --rm, so it is already gone and its
+		// logs with it. Re-running interactively keeps a shell alive and
+		// prints the display command to run by hand, which is where the
+		// real error appears.
+		msg := fmt.Sprintf("profile %s exited immediately, run it with -i and start the display by hand to see why",
+			profile.Name)
 		dbus.NotifyOrLog("qubesome start error", msg)
 
 		return errors.New(msg)

@@ -259,10 +259,18 @@ type DisplayOptions struct {
 }
 
 const (
-	// compositorRuntimeDir holds the profile's Wayland socket. It is
-	// deliberately not under /run/user/1000, which workloads share with
-	// the profile.
-	compositorRuntimeDir = "/run/qubesome-wl"
+	// compositorRuntimeDir holds the profile's Wayland socket.
+	//
+	// It is under /tmp because the profile runs as an unprivileged user
+	// with no capabilities, and /run in the image is owned by root, so
+	// there is nowhere to create it there. The profile container's /tmp is
+	// its own. Workloads mount host paths at /tmp/.X11-unix and
+	// /tmp/qube.sock rather than the profile's /tmp itself, so nothing
+	// here is reachable from a workload.
+	//
+	// It is deliberately not under /run/user/1000, which every workload of
+	// the profile mounts.
+	compositorRuntimeDir = "/tmp/qubesome-wl"
 
 	// compositorSocket is the Wayland socket name within
 	// compositorRuntimeDir.
