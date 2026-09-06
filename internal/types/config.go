@@ -168,15 +168,6 @@ type Profile struct {
 	// Example: exec awesome
 	WindowManager string `yaml:"windowManager"`
 
-	// PassthroughShortcut is the host window manager binding that releases
-	// its own shortcuts so this profile receives them.
-	//
-	// qubesome cannot set it, because it belongs to the host window
-	// manager's configuration rather than to a profile. It is declared
-	// here so that starting a profile can say which key to press, and it
-	// is only ever printed.
-	PassthroughShortcut string `yaml:"passthroughShortcut"`
-
 	// Fullscreen makes the profile fill a host screen instead of being a
 	// window the host window manager places.
 	//

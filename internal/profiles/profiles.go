@@ -651,16 +651,10 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		dockerArgs = append(dockerArgs, command)
 		dockerArgs = append(dockerArgs, cArgs...)
 
-		if profile.PassthroughShortcut != "" {
-			fmt.Printf("INFO: profile %s is on display :%d. Press %s to send "+
-				"host window manager shortcuts to it.\n",
-				profile.Name, profile.Display, profile.PassthroughShortcut)
-		} else {
-			fmt.Printf("INFO: profile %s is on display :%d. Host window "+
-				"manager shortcuts take precedence over it. Bind a passthrough "+
-				"mode on the host and set passthroughShortcut to name it here.\n",
-				profile.Name, profile.Display)
-		}
+		fmt.Printf("INFO: profile %s is on display :%d. On an X11 host its "+
+			"window manager sees these keys first, so bind a passthrough mode "+
+			"there for a better experience.\n",
+			profile.Name, profile.Display)
 	}
 
 	slog.Debug("exec", "binary", bin, "args", container.RedactEnvArgs(dockerArgs))
