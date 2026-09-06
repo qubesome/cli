@@ -52,6 +52,8 @@ func TestArgsProfile(t *testing.T) {
 		GID:      1000,
 		Net:      NetNone,
 		Seccomp:  true,
+
+		DisableUserns: true,
 		Env: []string{
 			"PATH=/usr/local/bin:/usr/bin:/bin",
 			"DISPLAY=:21",
@@ -69,6 +71,49 @@ func TestArgsProfile(t *testing.T) {
 	require.NoError(t, err)
 
 	golden(t, "profile", args)
+}
+
+// Nested user namespaces are how a sandboxed process regains the
+// capabilities needed to reach the mount syscalls the vendored seccomp
+// profile allows, so the flag is the profile's answer to that. It stays off
+// by default for workloads that nest a sandbox of their own.
+func TestArgsDisableUserns(t *testing.T) {
+	t.Parallel()
+
+	on, err := Args(Spec{
+		Rootfs:        "/rootfs",
+		Args:          []string{"/bin/sh"},
+		DisableUserns: true,
+	}, -1)
+	require.NoError(t, err)
+	assert.Contains(t, on, "--disable-userns")
+
+	// bwrap refuses --disable-userns without --unshare-user.
+	assert.Contains(t, on, "--unshare-user")
+
+	off, err := Args(Spec{
+		Rootfs: "/rootfs",
+		Args:   []string{"/bin/sh"},
+	}, -1)
+	require.NoError(t, err)
+	assert.NotContains(t, off, "--disable-userns")
+}
+
+// The flag is a bwrap option rather than a seccomp rule, so a profile that
+// asks for no filter still gets it.
+func TestArgsDisableUsernsIsIndependentOfSeccomp(t *testing.T) {
+	t.Parallel()
+
+	args, err := Args(Spec{
+		Rootfs:        "/rootfs",
+		Args:          []string{"/bin/sh"},
+		DisableUserns: true,
+		Seccomp:       false,
+	}, -1)
+	require.NoError(t, err)
+
+	assert.Contains(t, args, "--disable-userns")
+	assert.NotContains(t, args, "--seccomp")
 }
 
 // bwrap has no default of its own to fall back on here: with no --chdir

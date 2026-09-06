@@ -767,11 +767,14 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		Net:         sandbox.NetNone,
 		Seccomp:     !profile.SeccompUnconfined,
 		Interactive: interactive,
-		Env:         senv,
-		Devices:     devices,
-		Mounts:      mounts,
-		Args:        initArgs,
-		Cwd:         bundle.Cwd,
+		// The profile sandbox runs a compositor, an X server and a
+		// window manager, none of which nest a sandbox of their own.
+		DisableUserns: true,
+		Env:           senv,
+		Devices:       devices,
+		Mounts:        mounts,
+		Args:          initArgs,
+		Cwd:           bundle.Cwd,
 	}
 
 	// os/exec numbers ExtraFiles from descriptor 3 upwards in the child.

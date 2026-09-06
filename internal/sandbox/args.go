@@ -31,7 +31,7 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		return nil, errors.New("sandbox: seccomp is enabled but no filter descriptor was given")
 	}
 
-	args := make([]string, 0, 32+3*len(s.Devices)+3*len(s.Mounts)+3*len(s.Env)+len(s.Args))
+	args := make([]string, 0, 33+3*len(s.Devices)+3*len(s.Mounts)+3*len(s.Env)+len(s.Args))
 	args = append(args,
 		// The image is shared read-only and every write lands in a tmpfs
 		// that goes away with the sandbox.
@@ -62,6 +62,17 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 
 	if s.Net == NetNone {
 		args = append(args, "--unshare-net")
+	}
+
+	// --disable-userns takes no argument and bwrap rejects it without
+	// --unshare-user, which is always passed above. bubblewrap 0.11.2
+	// implements it by setting user.max_user_namespaces to 1 and then
+	// spending that one on a second level namespace of its own, so
+	// nothing inside has any budget left. It then unshares once more to
+	// prove the block took, which is what --assert-userns-disabled would
+	// check on its own, so pairing the two adds nothing.
+	if s.DisableUserns {
+		args = append(args, "--disable-userns")
 	}
 
 	if s.Hostname != "" {

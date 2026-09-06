@@ -24,6 +24,7 @@ ALL
 --tmpfs
 /run
 --unshare-net
+--disable-userns
 --hostname
 qubesome-work
 --chdir

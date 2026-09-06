@@ -72,4 +72,16 @@ type Spec struct {
 	// --new-session, which calls setsid and would detach the controlling
 	// terminal an interactive shell needs.
 	Interactive bool
+
+	// DisableUserns stops the sandbox creating further user namespaces.
+	// Without it a process inside can unshare one, hold every capability
+	// in the child and reach the mount syscalls the vendored seccomp
+	// profile allows. It is a bwrap flag, so it holds even for a sandbox
+	// that runs with no seccomp filter at all.
+	//
+	// It is off by default because a workload may legitimately need
+	// nesting. Chromium's own sandbox is the case that matters, and it
+	// builds a user namespace of its own. A profile runs no such thing,
+	// so the profile turns it on.
+	DisableUserns bool
 }
