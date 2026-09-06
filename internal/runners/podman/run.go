@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/qubesome/cli/internal/files"
@@ -117,39 +116,31 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	display := ew.Profile.Display
-	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") { //nolint
-		display = 0
 
-		xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR")
-		if xdgRuntimeDir == "" {
-			uid := os.Getuid()
-			if uid < 1000 {
-				return fmt.Errorf("qubesome does not support running under privileged users")
-			}
-			xdgRuntimeDir = "/run/user/" + strconv.Itoa(uid)
-		}
+	userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
+	}
 
-		// TODO: Investigate ways to avoid sharing /run/user/1000 on Wayland.
-		args = append(args, "-e XDG_RUNTIME_DIR")
-		args = append(args, "-v="+xdgRuntimeDir+":/run/user/1000")
-	} else {
-		if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
-			args = append(args, "-v=/run/user/1000:/run/user/1000:z")
-		}
+	shmDir, err := files.WorkloadShmPath(ew.Profile.Name, wl.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get workload shm path: %w", err)
+	}
+	if err := files.EnsureMappedDir(shmDir + string(filepath.Separator)); err != nil {
+		return fmt.Errorf("failed to create workload shm dir: %w", err)
+	}
 
-		userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
-		if err != nil {
-			return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
-		}
-		paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
-		if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
-			args = append(args, hostDbusParams()...)
-		} else {
-			paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000:z", userDir))
+	runUserArgs, runUserPaths := runUserParams(runUserInput{
+		UserDir:    userDir,
+		ProfileDir: files.ProfileDir(ew.Profile.Name),
+		ShmDir:     shmDir,
+		HostAccess: wl.HostAccess,
+	})
+	args = append(args, runUserArgs...)
+	paths = append(paths, runUserPaths...)
 
-			machineIDPath := filepath.Join(files.ProfileDir(ew.Profile.Name), "machine-id")
-			paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
-		}
+	if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
+		args = append(args, hostDbusParams()...)
 	}
 
 	args = append(args, paths...)
