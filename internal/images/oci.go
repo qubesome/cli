@@ -38,6 +38,12 @@ func (s *Store) pullArgs(ref string) []string {
 // reused as it is. The bundle is built under a temporary name and renamed
 // into place, so an interrupted unpack is never visible under the name a
 // later start looks for.
+//
+// Two starts can unpack the same image at once, and profiles do share
+// images, so this happens in practice. Both extract, then both rename onto
+// the same digest directory. os.Rename refuses an existing directory, so
+// the second rename fails rather than replacing anything. The loser reuses
+// what the winner put there instead of failing the start.
 func (s *Store) Unpack(ref string) (Bundle, error) {
 	digest, err := s.Digest(ref)
 	if err != nil {
@@ -75,6 +81,14 @@ func (s *Store) Unpack(ref string) (Bundle, error) {
 	}
 
 	if err := os.Rename(target, dir); err != nil {
+		// A concurrent unpack of the same image is the expected reason to
+		// land here, and it leaves a complete bundle behind, so reuse it.
+		// Any other rename failure has no bundle to fall back on.
+		if _, statErr := os.Stat(filepath.Join(dir, "config.json")); statErr == nil {
+			slog.Debug("bundle already unpacked by a concurrent start", "digest", digest)
+			return readBundle(dir)
+		}
+
 		return Bundle{}, fmt.Errorf("failed to move bundle into place: %w", err)
 	}
 

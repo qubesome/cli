@@ -151,6 +151,73 @@ func TestUnpackBuildsUnderTempAndRenames(t *testing.T) {
 	}
 }
 
+// TestUnpackReusesTheWinnersBundleWhenTheRenameLoses simulates two starts
+// unpacking the same image at once. os.Rename refuses an existing
+// directory, so whichever finishes second cannot move its bundle into
+// place. It must reuse the bundle already there rather than fail the start.
+func TestUnpackReusesTheWinnersBundleWhenTheRenameLoses(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+
+	cfg, err := os.ReadFile("testdata/bundle/config.json")
+	require.NoError(t, err)
+
+	s.cmdRunner = func(bin string, args []string) error {
+		dest := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Join(dest, "rootfs"), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dest, "config.json"), cfg, 0o600); err != nil { //nolint:gosec // dest is the temp bundle dir Unpack itself created under t.TempDir().
+			return err
+		}
+
+		// The other start wins the race and claims the digest dir while
+		// this one is still extracting.
+		newExistingBundle(t, s)
+		return nil
+	}
+
+	b, err := s.Unpack("ghcr.io/qubesome/xorg:latest")
+	require.NoError(t, err)
+
+	dir, err := s.bundleDir(fixtureDigest)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "rootfs"), b.Rootfs)
+	assert.Equal(t, 1000, b.UID)
+}
+
+// A rename failure with no usable bundle at the destination is still a
+// failure. Only the concurrent unpack case is recovered from.
+func TestUnpackFailsWhenTheDestinationHasNoBundle(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+
+	cfg, err := os.ReadFile("testdata/bundle/config.json")
+	require.NoError(t, err)
+
+	s.cmdRunner = func(bin string, args []string) error {
+		dest := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Join(dest, "rootfs"), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dest, "config.json"), cfg, 0o600); err != nil { //nolint:gosec // dest is the temp bundle dir Unpack itself created under t.TempDir().
+			return err
+		}
+
+		dir, dirErr := s.bundleDir(fixtureDigest)
+		if dirErr != nil {
+			return dirErr
+		}
+		return os.MkdirAll(dir, 0o700)
+	}
+
+	_, err = s.Unpack("ghcr.io/qubesome/xorg:latest")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to move bundle into place")
+}
+
 // TestUnpackPropagatesRunError confirms a failed extraction never renames
 // a partial temp directory into place, and that the temp directory is
 // still cleaned up.
