@@ -1,0 +1,9 @@
+{
+  "ociVersion": "1.0.2",
+  "process": {
+    "user": {"uid": 1000, "gid": 1000},
+    "cwd": "/home/xorg-user",
+    "env": ["PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/home/xorg-user"]
+  },
+  "root": {"path": "rootfs"}
+}
