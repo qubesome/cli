@@ -651,10 +651,16 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		dockerArgs = append(dockerArgs, command)
 		dockerArgs = append(dockerArgs, cArgs...)
 
-		fmt.Printf("INFO: profile %s is on display :%d. "+
-			"Host window manager shortcuts take precedence over it, so bind a "+
-			"passthrough mode on the host to send everything to the profile.\n",
-			profile.Name, profile.Display)
+		if profile.PassthroughShortcut != "" {
+			fmt.Printf("INFO: profile %s is on display :%d. Press %s to send "+
+				"host window manager shortcuts to it.\n",
+				profile.Name, profile.Display, profile.PassthroughShortcut)
+		} else {
+			fmt.Printf("INFO: profile %s is on display :%d. Host window "+
+				"manager shortcuts take precedence over it. Bind a passthrough "+
+				"mode on the host and set passthroughShortcut to name it here.\n",
+				profile.Name, profile.Display)
+		}
 	}
 
 	slog.Debug("exec", "binary", bin, "args", container.RedactEnvArgs(dockerArgs))
@@ -746,14 +752,6 @@ func deleteMtlsData(profile string) error {
 		return err
 	}
 	return nil
-}
-
-func grabberShortcut() string {
-	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		return "<Super> + <Esc>"
-	}
-
-	return "<Ctrl> + <Shift>"
 }
 
 func setupRunUserDir(dir string) error {
