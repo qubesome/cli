@@ -13,9 +13,8 @@ import (
 func TestCompositorArgs(t *testing.T) {
 	t.Parallel()
 
-	got, err := compositorArgs(displayParams{
-		Geometry:      "1920x1080",
-		WaylandSocket: "qubesome",
+	got, err := compositorArgs(DisplayParams{
+		Geometry: "1920x1080",
 	})
 	require.NoError(t, err)
 
@@ -31,10 +30,9 @@ func TestCompositorArgs(t *testing.T) {
 func TestCompositorArgsFullscreen(t *testing.T) {
 	t.Parallel()
 
-	got, err := compositorArgs(displayParams{
-		Geometry:      "1920x1080",
-		WaylandSocket: "qubesome",
-		Fullscreen:    true,
+	got, err := compositorArgs(DisplayParams{
+		Geometry:   "1920x1080",
+		Fullscreen: true,
 	})
 	require.NoError(t, err)
 
@@ -45,7 +43,7 @@ func TestCompositorArgsBadGeometry(t *testing.T) {
 	t.Parallel()
 
 	for _, g := range []string{"", "1920", "1920x", "x1080", "axb", "1920x1080x1"} {
-		_, err := compositorArgs(displayParams{Geometry: g, WaylandSocket: "qubesome"})
+		_, err := compositorArgs(DisplayParams{Geometry: g})
 		require.Error(t, err, "geometry %q should be rejected", g)
 	}
 }
@@ -53,20 +51,16 @@ func TestCompositorArgsBadGeometry(t *testing.T) {
 func TestXwaylandArgs(t *testing.T) {
 	t.Parallel()
 
-	base := displayParams{
-		Display:        11,
-		Geometry:       "1920x1080",
-		AuthFile:       "/home/xorg-user/.Xserver",
-		WindowManager:  "exec dbus-run-session awesome",
-		RuntimeDir:     "/tmp/qubesome-wl",
-		WaylandSocket:  "qubesome",
-		AppRuntimeDir:  "/run/user/1000",
-		ClientAuthFile: "/home/xorg-user/.Xauthority",
+	base := DisplayParams{
+		Display:       11,
+		Geometry:      "1920x1080",
+		AuthFile:      "/home/xorg-user/.Xserver",
+		WindowManager: "exec dbus-run-session awesome",
 	}
 
 	tests := []struct {
 		name string
-		in   displayParams
+		in   DisplayParams
 		want []string
 	}{
 		{
@@ -92,7 +86,7 @@ func TestXwaylandArgs(t *testing.T) {
 		},
 		{
 			name: "extra args are appended before the separator",
-			in: func() displayParams {
+			in: func() DisplayParams {
 				p := base
 				p.ExtraArgs = "-verbose 9"
 				return p
@@ -132,11 +126,10 @@ func TestXwaylandArgs(t *testing.T) {
 func TestXwaylandArgsRejectsEmptyWindowManager(t *testing.T) {
 	t.Parallel()
 
-	_, err := xwaylandArgs(displayParams{
+	_, err := xwaylandArgs(DisplayParams{
 		Display:       11,
 		Geometry:      "1920x1080",
 		WindowManager: "exec ",
-		AppRuntimeDir: "/run/user/1000",
 	})
 	require.Error(t, err)
 }
@@ -144,12 +137,11 @@ func TestXwaylandArgsRejectsEmptyWindowManager(t *testing.T) {
 func TestXwaylandArgsDisablesEavesdroppingExtensions(t *testing.T) {
 	t.Parallel()
 
-	got, err := xwaylandArgs(displayParams{
+	got, err := xwaylandArgs(DisplayParams{
 		Display:       11,
 		Geometry:      "1920x1080",
 		AuthFile:      "/home/xorg-user/.Xserver",
 		WindowManager: "awesome",
-		AppRuntimeDir: "/run/user/1000",
 	})
 	require.NoError(t, err)
 
@@ -217,4 +209,35 @@ func TestWaitForSocketRejectsNonSocket(t *testing.T) {
 
 	err := waitForSocket(path, time.Second)
 	require.ErrorContains(t, err, "not a socket")
+}
+
+func TestCompositorEnvOverridesInherited(t *testing.T) {
+	t.Parallel()
+
+	got := compositorEnv([]string{"PATH=/bin", "XDG_RUNTIME_DIR=/run/user/1000"})
+
+	require.Equal(t, "XDG_RUNTIME_DIR="+compositorRuntimeDir, got[len(got)-1],
+		"the private runtime dir must win over an inherited one, os/exec takes the last duplicate")
+	require.Contains(t, got, "PATH=/bin")
+}
+
+func TestXwaylandEnvPointsAtTheProfileCompositor(t *testing.T) {
+	t.Parallel()
+
+	got := xwaylandEnv([]string{"WAYLAND_DISPLAY=host-socket"})
+
+	require.Equal(t, []string{
+		"WAYLAND_DISPLAY=host-socket",
+		"XDG_RUNTIME_DIR=" + compositorRuntimeDir,
+		"WAYLAND_DISPLAY=" + compositorSocket,
+	}, got)
+}
+
+func TestChildEnvNeverUsesTheSharedRuntimeDir(t *testing.T) {
+	t.Parallel()
+
+	for _, got := range [][]string{compositorEnv(nil), xwaylandEnv(nil)} {
+		require.NotContains(t, got, "XDG_RUNTIME_DIR="+appRuntimeDir,
+			"the compositor socket would be reachable by every workload")
+	}
 }

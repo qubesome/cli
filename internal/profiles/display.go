@@ -15,10 +15,10 @@ import (
 	"golang.org/x/sys/execabs"
 )
 
-// displayParams describes the display stack a profile runs: a Wayland
+// DisplayParams describes the display stack a profile runs: a Wayland
 // compositor hosting a rootful Xwayland, with the window manager as
 // Xwayland's only client.
-type displayParams struct {
+type DisplayParams struct {
 	// Display is the X display number workloads are pointed at.
 	Display uint8
 
@@ -37,29 +37,6 @@ type displayParams struct {
 	// Fullscreen makes the compositor fill a host screen rather than
 	// being a window the host window manager places.
 	Fullscreen bool
-
-	// RuntimeDir is the compositor's XDG_RUNTIME_DIR. It holds the Wayland
-	// socket and must not be reachable by workloads, so it is a directory
-	// private to the profile container rather than the /run/user/1000
-	// that workloads share with the profile.
-	RuntimeDir string
-
-	// WaylandSocket is the compositor socket name within RuntimeDir.
-	WaylandSocket string
-
-	// AppRuntimeDir is the XDG_RUNTIME_DIR restored for the window manager
-	// and everything it spawns, so they do not inherit a path to the
-	// compositor.
-	AppRuntimeDir string
-
-	// ClientAuthFile is the X cookie the window manager connects with.
-	//
-	// xwayland-run generates an Xauthority of its own and points the
-	// client at it, while the server is left using the one qubesome
-	// passes. The two hold different cookies, so the client has to be
-	// pointed back at qubesome's. Workloads mount this same file, so it
-	// is also what makes them able to connect at all.
-	ClientAuthFile string
 }
 
 // splitGeometry splits a WIDTHxHEIGHT string into its two parts. Both are
@@ -86,7 +63,7 @@ func splitGeometry(geometry string) (string, string, error) {
 
 // compositorArgs returns the arguments for the Wayland compositor that
 // hosts the profile's Xwayland.
-func compositorArgs(p displayParams) ([]string, error) {
+func compositorArgs(p DisplayParams) ([]string, error) {
 	w, h, err := splitGeometry(p.Geometry)
 	if err != nil {
 		return nil, err
@@ -107,7 +84,7 @@ func compositorArgs(p displayParams) ([]string, error) {
 		// fills the compositor window instead of being framed by a
 		// second desktop.
 		"--shell=kiosk-shell.so",
-		"--socket=" + p.WaylandSocket,
+		"--socket=" + compositorSocket,
 	}
 
 	if p.Fullscreen {
@@ -124,7 +101,7 @@ func compositorArgs(p displayParams) ([]string, error) {
 // The window manager is passed as separate arguments rather than through a
 // shell, so a window manager command from a profile's dotfiles cannot be
 // made to run anything else.
-func xwaylandArgs(p displayParams) ([]string, error) {
+func xwaylandArgs(p DisplayParams) ([]string, error) {
 	if _, _, err := splitGeometry(p.Geometry); err != nil {
 		return nil, err
 	}
@@ -161,8 +138,8 @@ func xwaylandArgs(p displayParams) ([]string, error) {
 	// bypasses Xwayland and the isolation set above.
 	args = append(args, "--",
 		"env", "-u", "WAYLAND_DISPLAY",
-		"XDG_RUNTIME_DIR="+p.AppRuntimeDir,
-		"XAUTHORITY="+p.ClientAuthFile)
+		"XDG_RUNTIME_DIR="+appRuntimeDir,
+		"XAUTHORITY="+clientAuthFile)
 
 	return append(args, wm...), nil
 }
@@ -199,17 +176,39 @@ func waitForSocket(path string, timeout time.Duration) error {
 	}
 }
 
+// compositorEnv returns the environment the compositor runs with.
+//
+// XDG_RUNTIME_DIR is the profile's private directory rather than the one
+// workloads share, which is what keeps the Wayland socket out of their
+// reach. It is appended last because a later entry wins, so it overrides
+// whatever the profile container inherited.
+func compositorEnv(base []string) []string {
+	return append(base, "XDG_RUNTIME_DIR="+compositorRuntimeDir)
+}
+
+// xwaylandEnv returns the environment xwayland-run runs with.
+//
+// It needs the same private runtime directory as the compositor, plus the
+// socket name within it, so that it connects to the profile's compositor
+// rather than looking for one elsewhere.
+func xwaylandEnv(base []string) []string {
+	return append(base,
+		"XDG_RUNTIME_DIR="+compositorRuntimeDir,
+		"WAYLAND_DISPLAY="+compositorSocket,
+	)
+}
+
 // RunDisplay starts the profile's display stack. It is the entrypoint of
 // the profile container, and it does not return until the window manager
 // exits.
-func RunDisplay(p displayParams) error {
+func RunDisplay(p DisplayParams) error {
 	// The compositor's runtime dir is private to this container. It must
 	// not be under /run/user/1000, which is bind-mounted into every
 	// workload of this profile.
-	if err := os.MkdirAll(p.RuntimeDir, 0o700); err != nil {
+	if err := os.MkdirAll(compositorRuntimeDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create compositor runtime dir: %w", err)
 	}
-	if err := os.Chmod(p.RuntimeDir, 0o700); err != nil {
+	if err := os.Chmod(compositorRuntimeDir, 0o700); err != nil {
 		return fmt.Errorf("failed to set compositor runtime dir mode: %w", err)
 	}
 
@@ -225,7 +224,7 @@ func RunDisplay(p displayParams) error {
 
 	slog.Debug("starting compositor", "binary", files.WestonBinary, "args", cArgs)
 	compositor := execabs.Command(files.WestonBinary, cArgs...)
-	compositor.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+p.RuntimeDir)
+	compositor.Env = compositorEnv(os.Environ())
 	compositor.Stdout = os.Stdout
 	compositor.Stderr = os.Stderr
 
@@ -251,33 +250,19 @@ func RunDisplay(p displayParams) error {
 		}
 	}()
 
-	socket := filepath.Join(p.RuntimeDir, p.WaylandSocket)
+	socket := filepath.Join(compositorRuntimeDir, compositorSocket)
 	if err := waitForSocket(socket, 15*time.Second); err != nil {
 		return err
 	}
 
 	slog.Debug("starting Xwayland", "binary", files.XwaylandRunBinary, "args", xArgs)
 	x := execabs.Command(files.XwaylandRunBinary, xArgs...)
-	x.Env = append(os.Environ(),
-		"XDG_RUNTIME_DIR="+p.RuntimeDir,
-		"WAYLAND_DISPLAY="+p.WaylandSocket,
-	)
+	x.Env = xwaylandEnv(os.Environ())
 	x.Stdin = os.Stdin
 	x.Stdout = os.Stdout
 	x.Stderr = os.Stderr
 
 	return x.Run()
-}
-
-// DisplayOptions are the profile-display command's inputs. They mirror
-// displayParams, minus the fields that are fixed for every profile.
-type DisplayOptions struct {
-	Display       uint8
-	Geometry      string
-	AuthFile      string
-	WindowManager string
-	ExtraArgs     string
-	Fullscreen    bool
 }
 
 const (
@@ -298,28 +283,17 @@ const (
 	// compositorRuntimeDir.
 	compositorSocket = "qubesome"
 
-	// appRuntimeDir is the XDG_RUNTIME_DIR applications in the profile
-	// see, restored for the window manager and its children.
+	// appRuntimeDir is the XDG_RUNTIME_DIR restored for the window manager
+	// and everything it spawns, so they do not inherit a path to the
+	// compositor.
 	appRuntimeDir = "/run/user/1000"
 
-	// clientAuthFile is where the profile's client X cookie is mounted.
-	// It is the same file every workload of the profile mounts.
+	// clientAuthFile is the X cookie the window manager connects with.
+	//
+	// xwayland-run generates an Xauthority of its own and points the
+	// client at it, while the server is left using the one qubesome
+	// passes. The two hold different cookies, so the client has to be
+	// pointed back at qubesome's. Workloads mount this same file, so it
+	// is also what makes them able to connect at all.
 	clientAuthFile = "/home/xorg-user/.Xauthority"
 )
-
-// RunDisplayWithOptions starts the profile display stack from the values
-// the profile-display command was given.
-func RunDisplayWithOptions(o DisplayOptions) error {
-	return RunDisplay(displayParams{
-		Display:        o.Display,
-		Geometry:       o.Geometry,
-		AuthFile:       o.AuthFile,
-		WindowManager:  o.WindowManager,
-		ExtraArgs:      o.ExtraArgs,
-		Fullscreen:     o.Fullscreen,
-		RuntimeDir:     compositorRuntimeDir,
-		WaylandSocket:  compositorSocket,
-		AppRuntimeDir:  appRuntimeDir,
-		ClientAuthFile: clientAuthFile,
-	})
-}

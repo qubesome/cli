@@ -38,7 +38,7 @@ func profileDisplayCommand() *cli.Command {
 				return fmt.Errorf("display %d is out of range", display)
 			}
 
-			return profiles.RunDisplayWithOptions(profiles.DisplayOptions{
+			return profiles.RunDisplay(profiles.DisplayParams{
 				Display:       uint8(display),
 				Geometry:      geometry,
 				AuthFile:      authFile,
