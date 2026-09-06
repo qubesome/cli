@@ -28,6 +28,19 @@ func TestCompositorArgs(t *testing.T) {
 	}, got)
 }
 
+func TestCompositorArgsFullscreen(t *testing.T) {
+	t.Parallel()
+
+	got, err := compositorArgs(displayParams{
+		Geometry:      "1920x1080",
+		WaylandSocket: "qubesome",
+		Fullscreen:    true,
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, "--fullscreen", got[len(got)-1])
+}
+
 func TestCompositorArgsBadGeometry(t *testing.T) {
 	t.Parallel()
 

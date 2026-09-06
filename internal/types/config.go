@@ -168,6 +168,13 @@ type Profile struct {
 	// Example: exec awesome
 	WindowManager string `yaml:"windowManager"`
 
+	// Fullscreen makes the profile fill a host screen instead of being a
+	// window the host window manager places.
+	//
+	// It does not grab input. Host window manager shortcuts still take
+	// precedence over the profile, whether it is fullscreen or not.
+	Fullscreen bool `yaml:"fullscreen"`
+
 	// XephyrArgs defines additional args to be passed on to the profile's
 	// X server.
 	//

@@ -18,6 +18,7 @@ func profileDisplayCommand() *cli.Command {
 		authFile      string
 		windowManager string
 		extraArgs     string
+		fullscreen    bool
 	)
 
 	return &cli.Command{
@@ -30,6 +31,7 @@ func profileDisplayCommand() *cli.Command {
 			&cli.StringFlag{Name: "auth", Destination: &authFile, Required: true},
 			&cli.StringFlag{Name: "wm", Destination: &windowManager, Required: true},
 			&cli.StringFlag{Name: "extra", Destination: &extraArgs},
+			&cli.BoolFlag{Name: "fullscreen", Destination: &fullscreen},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if display > 255 {
@@ -42,6 +44,7 @@ func profileDisplayCommand() *cli.Command {
 				AuthFile:      authFile,
 				WindowManager: windowManager,
 				ExtraArgs:     extraArgs,
+				Fullscreen:    fullscreen,
 			})
 		},
 	}

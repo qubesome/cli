@@ -455,6 +455,9 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	if profile.XephyrArgs != "" {
 		cArgs = append(cArgs, "--extra", profile.XephyrArgs)
 	}
+	if profile.Fullscreen {
+		cArgs = append(cArgs, "--fullscreen")
+	}
 
 	server, err := files.ServerCookiePath(profile.Name)
 	if err != nil {
@@ -648,9 +651,10 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		dockerArgs = append(dockerArgs, command)
 		dockerArgs = append(dockerArgs, cArgs...)
 
-		fmt.Println(
-			"INFO: For best experience use input grabber shortcuts:",
-			grabberShortcut())
+		fmt.Printf("INFO: profile %s is on display :%d. "+
+			"Host window manager shortcuts take precedence over it, so bind a "+
+			"passthrough mode on the host to send everything to the profile.\n",
+			profile.Name, profile.Display)
 	}
 
 	slog.Debug("exec", "binary", bin, "args", container.RedactEnvArgs(dockerArgs))

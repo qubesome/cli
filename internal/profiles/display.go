@@ -34,6 +34,10 @@ type displayParams struct {
 	// ExtraArgs are additional Xwayland arguments from profile config.
 	ExtraArgs string
 
+	// Fullscreen makes the compositor fill a host screen rather than
+	// being a window the host window manager places.
+	Fullscreen bool
+
 	// RuntimeDir is the compositor's XDG_RUNTIME_DIR. It holds the Wayland
 	// socket and must not be reachable by workloads, so it is a directory
 	// private to the profile container rather than the /run/user/1000
@@ -88,7 +92,7 @@ func compositorArgs(p displayParams) ([]string, error) {
 		return nil, err
 	}
 
-	return []string{
+	args := []string{
 		// The compositor always presents through the host X server, so
 		// the profile needs nothing from the host session beyond the
 		// display socket it already has. A Wayland desktop reaches it
@@ -104,7 +108,13 @@ func compositorArgs(p displayParams) ([]string, error) {
 		// second desktop.
 		"--shell=kiosk-shell.so",
 		"--socket=" + p.WaylandSocket,
-	}, nil
+	}
+
+	if p.Fullscreen {
+		args = append(args, "--fullscreen")
+	}
+
+	return args, nil
 }
 
 // xwaylandArgs returns the arguments for xwayland-run, which starts a
@@ -267,6 +277,7 @@ type DisplayOptions struct {
 	AuthFile      string
 	WindowManager string
 	ExtraArgs     string
+	Fullscreen    bool
 }
 
 const (
@@ -305,6 +316,7 @@ func RunDisplayWithOptions(o DisplayOptions) error {
 		AuthFile:       o.AuthFile,
 		WindowManager:  o.WindowManager,
 		ExtraArgs:      o.ExtraArgs,
+		Fullscreen:     o.Fullscreen,
 		RuntimeDir:     compositorRuntimeDir,
 		WaylandSocket:  compositorSocket,
 		AppRuntimeDir:  appRuntimeDir,
