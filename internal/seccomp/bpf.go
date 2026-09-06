@@ -32,16 +32,27 @@ const (
 
 // Program renders the profile as a BPF program.
 //
+// Only the native architecture is filtered. The profile's archMap is not
+// consulted, so a process making a syscall under any other ABI, a 32 bit
+// i386 binary being the realistic case, is killed by the leading
+// architecture guard rather than filtered. Docker would have filtered it
+// against the same policy. Killing is the safer side to err on for a
+// desktop sandbox and it keeps one filter to reason about.
+//
 // Rule groups the sandbox does not qualify for are dropped, see applies.
+// An argument free allow is dropped when an argument free denial elsewhere
+// in the profile covers the same syscall, see deniedOutright.
 //
 // Rules are emitted in profile order and the first match wins, which is
 // what makes the conditional socket rules behave as written: the netlink
 // audit denial precedes the allow rules that exclude it.
 //
 // The shape is a comparison chain rather than the balanced search
-// libseccomp emits. Every conditional jump travels at most a rule body, so
-// the 8 bit jump offsets can never overflow, at the cost of a longer
-// average walk per syscall. BenchmarkProgram measures it.
+// libseccomp emits. No conditional jump travels further than one rule
+// body, and rule rejects a body too long for an 8 bit offset, so the
+// vendored profile stays far inside the range. The cost is a longer
+// average walk per syscall. BenchmarkProgram times that walk through the
+// x/net/bpf userspace interpreter, which is not the kernel's cost for it.
 func (p *Profile) Program() ([]bpf.Instruction, error) {
 	if auditArch == 0 {
 		return nil, ErrUnsupportedArch
@@ -51,6 +62,8 @@ func (p *Profile) Program() ([]bpf.Instruction, error) {
 	if err != nil {
 		return nil, fmt.Errorf("default action: %w", err)
 	}
+
+	denied := deniedOutright(p)
 
 	insns := []bpf.Instruction{
 		bpf.LoadAbsolute{Off: offArch, Size: 4},
@@ -70,6 +83,10 @@ func (p *Profile) Program() ([]bpf.Instruction, error) {
 		}
 
 		for _, name := range r.Names {
+			if len(r.Args) == 0 && r.Action == actionAllow && denied[name] {
+				continue
+			}
+
 			nr, ok := SyscallNumber(name)
 			if !ok {
 				// The syscall does not exist on this architecture, so the
@@ -86,6 +103,26 @@ func (p *Profile) Program() ([]bpf.Instruction, error) {
 	}
 
 	return append(insns, bpf.RetConstant{Val: def}), nil
+}
+
+// deniedOutright collects the syscalls an applicable rule group denies with
+// no argument conditions. The profile puts its capability overrides after
+// the broad allow list, so first match wins would let the allow win for a
+// syscall named in both. Only argument free groups take part, which leaves
+// the argument partitioned socket rules to first match wins as written.
+func deniedOutright(p *Profile) map[string]bool {
+	denied := make(map[string]bool)
+
+	for _, r := range p.Syscalls {
+		if !applies(r) || len(r.Args) > 0 || r.Action != actionErrno {
+			continue
+		}
+		for _, n := range r.Names {
+			denied[n] = true
+		}
+	}
+
+	return denied
 }
 
 // applies reports whether a rule group is in force for the sandbox.

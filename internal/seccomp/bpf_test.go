@@ -121,6 +121,13 @@ func TestProgramSocketDeniesNetlinkAudit(t *testing.T) {
 	assert.Equal(t, uint32(retErrno|22), run(t, m, "socket", 16, 0, 9))
 	assert.Equal(t, uint32(retAllow), run(t, m, "socket", 2, 0, 0))
 	assert.Equal(t, uint32(retAllow), run(t, m, "socket", 16, 0, 0))
+
+	// socket also appears in an ERRNO group, but that group carries argument
+	// conditions, so the outright denial pre-pass leaves these three
+	// verdicts exactly as profile order produces them.
+	p, err := Load()
+	require.NoError(t, err)
+	assert.False(t, deniedOutright(p)["socket"])
 }
 
 func TestProgramFitsInstructionLimit(t *testing.T) {
@@ -147,30 +154,52 @@ func TestProgramSkipsCapabilityGatedAllowRules(t *testing.T) {
 	// gated allow must not be emitted, or the denial never gets reached.
 	for _, name := range []string{
 		"open_by_handle_at", "sethostname", "setdomainname",
-		"quotactl", "lookup_dcookie", "perf_event_open", "delete_module",
+		"quotactl", "quotactl_fd", "lookup_dcookie", "delete_module",
 		"finit_module", "query_module", "kcmp", "process_madvise",
 		"ioperm", "clock_settime", "vhangup",
 	} {
 		assert.Equal(t, uint32(retErrno|1), run(t, m, name),
 			"expected %q to return EPERM", name)
 	}
+}
 
-	// setns is the one syscall the profile both allows unconditionally and
-	// denies under a capability exclusion. The unconditional allow comes
-	// first, so it wins. The kernel still requires CAP_SYS_ADMIN in the
-	// target namespace, which the sandbox does not have.
-	assert.Equal(t, uint32(retAllow), run(t, m, "setns"))
+func TestProgramDropsAnAllowCoveredByAnOutrightDenial(t *testing.T) {
+	t.Parallel()
+
+	p, err := Load()
+	require.NoError(t, err)
+
+	// setns is the only syscall the profile both allows with no argument
+	// conditions and denies with none. Profile order alone would let the
+	// allow win, which would leave the filter permitting a syscall the
+	// policy denies without CAP_SYS_ADMIN.
+	denied := deniedOutright(p)
+	assert.True(t, denied["setns"])
+	assert.Equal(t, uint32(retErrno|1), run(t, vm(t), "setns"))
+
+	// Argument partitioned groups stay out of the pre-pass, so the socket
+	// rules keep resolving by profile order.
+	assert.False(t, denied["socket"])
+	assert.False(t, denied["personality"])
 }
 
 // expectedAction evaluates the profile directly, so the program can be
 // checked against it rather than against a handful of hand written cases.
 // It shares applies and action with the emitter, so what it independently
 // checks is the jump arithmetic, which is where the risk lives.
-func expectedAction(t *testing.T, p *Profile, nr uint32, args [6]uint64) uint32 {
+func expectedAction(t *testing.T, p *Profile, denied map[string]bool, nr uint32, args [6]uint64) uint32 {
 	t.Helper()
 
 	for _, r := range p.Syscalls {
-		if !applies(r) || !names(r, nr) {
+		if !applies(r) {
+			continue
+		}
+
+		name, ok := nameFor(r, nr)
+		if !ok {
+			continue
+		}
+		if len(r.Args) == 0 && r.Action == actionAllow && denied[name] {
 			continue
 		}
 
@@ -202,13 +231,15 @@ func expectedAction(t *testing.T, p *Profile, nr uint32, args [6]uint64) uint32 
 	return def
 }
 
-func names(r Rule, nr uint32) bool {
+// nameFor returns the first name in the group that resolves to nr, which is
+// the name whose fragment the emitter reaches first.
+func nameFor(r Rule, nr uint32) (string, bool) {
 	for _, n := range r.Names {
 		if v, ok := SyscallNumber(n); ok && v == nr {
-			return true
+			return n, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func TestProgramMatchesTheProfileForEverySyscall(t *testing.T) {
@@ -218,6 +249,7 @@ func TestProgramMatchesTheProfileForEverySyscall(t *testing.T) {
 	require.NoError(t, err)
 
 	m := vm(t)
+	denied := deniedOutright(p)
 
 	// The last two vectors set bits above the low word, which the profile
 	// never matches on, so they check that the emitter compares both halves
@@ -243,7 +275,7 @@ func TestProgramMatchesTheProfileForEverySyscall(t *testing.T) {
 			seen[nr] = true
 
 			for _, v := range vectors {
-				assert.Equal(t, expectedAction(t, p, nr, v),
+				assert.Equal(t, expectedAction(t, p, denied, nr, v),
 					ret(t, m, data(nr, auditArch, v[:]...)),
 					"syscall %s with args %v", name, v)
 			}
