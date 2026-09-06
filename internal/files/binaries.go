@@ -41,6 +41,11 @@ const (
 
 	// UmociBinary applies image layers, rootless.
 	UmociBinary = "/usr/bin/umoci"
+
+	// GetfaclBinary reports the ACLs on a device node. deps uses it to
+	// check for the uaccess ACL that systemd-logind grants the seat's
+	// user, without which a profile silently drops to software rendering.
+	GetfaclBinary = "/usr/bin/getfacl"
 )
 
 // runnerDirs holds the directories searched for a container runner, in
