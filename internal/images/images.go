@@ -88,19 +88,65 @@ func PreemptWorkloadImages(bin string, cfg *types.Config) {
 }
 
 func PullAll(bin string, cfg *types.Config) error {
+	for _, img := range ProfileImages(cfg) {
+		if _, err := PullProfileImage(img); err != nil {
+			slog.Error("cannot pull profile image", "image", img, "error", err)
+		}
+	}
+
 	imgs, err := UniqueImages(cfg)
 	if err != nil {
 		return fmt.Errorf("cannot get images: %w", err)
 	}
 
 	for _, img := range imgs {
-		err = PullImage(bin, img)
-		if err != nil {
-			slog.Error("cannot pull image %q: %w", img, err)
+		if err := PullImage(bin, img); err != nil {
+			slog.Error("cannot pull workload image", "image", img, "error", err)
 		}
 	}
 
 	return nil
+}
+
+// PullProfileImage pulls and unpacks a profile image into the OCI store.
+//
+// Workload images still go through the container runner, because workloads
+// still run under it. The two stores coexist until workloads move.
+func PullProfileImage(ref string) (Bundle, error) {
+	s := NewStore()
+
+	if err := s.Pull(ref); err != nil {
+		return Bundle{}, err
+	}
+
+	return s.Unpack(ref)
+}
+
+// ProfileImages returns the unique profile images in a config.
+//
+// Profile images live in the OCI store and workload images live in the
+// container runner's store, because only profiles have moved to bwrap. The
+// two coexist until workloads follow.
+func ProfileImages(cfg *types.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+
+	seen := map[string]struct{}{}
+	imgs := make([]string, 0, len(cfg.Profiles))
+
+	for _, p := range cfg.Profiles {
+		if p.Image == "" {
+			continue
+		}
+		if _, ok := seen[p.Image]; ok {
+			continue
+		}
+		seen[p.Image] = struct{}{}
+		imgs = append(imgs, p.Image)
+	}
+
+	return imgs
 }
 
 func PullImage(bin, image string) error {
@@ -162,12 +208,6 @@ func UniqueImages(cfg *types.Config) ([]string, error) {
 	missing := []string{}
 
 	seen := map[string]struct{}{}
-	for _, p := range cfg.Profiles {
-		if _, ok := seen[p.Image]; !ok {
-			seen[p.Image] = struct{}{}
-			missing = append(missing, p.Image)
-		}
-	}
 
 	wf, err := cfg.WorkloadFiles()
 	if err != nil {

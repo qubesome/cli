@@ -39,6 +39,16 @@ func TestRedactEnvArgs(t *testing.T) {
 			want: []string{"run", "-e", "TOKEN", "--env=PASSWORD", "image"},
 		},
 		{
+			name: "setenv with name and value as separate arguments",
+			args: []string{"--setenv", "Q_MTLS_KEY", "-----BEGIN PRIVATE KEY-----", "--", "/bin/sh"},
+			want: []string{"--setenv", "Q_MTLS_KEY", "REDACTED", "--", "/bin/sh"},
+		},
+		{
+			name: "setenv missing its value",
+			args: []string{"--setenv", "Q_MTLS_KEY"},
+			want: []string{"--setenv", "Q_MTLS_KEY"},
+		},
+		{
 			name: "unrelated arguments",
 			args: []string{"run", "--entrypoint=/bin/env", "image", "TOKEN=secret"},
 			want: []string{"run", "--entrypoint=/bin/env", "image", "TOKEN=secret"},

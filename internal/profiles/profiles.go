@@ -25,6 +25,8 @@ import (
 	"github.com/qubesome/cli/internal/keyring"
 	"github.com/qubesome/cli/internal/keyring/backend"
 	"github.com/qubesome/cli/internal/runners/util/container"
+	"github.com/qubesome/cli/internal/sandbox"
+	"github.com/qubesome/cli/internal/seccomp"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/drive"
@@ -42,20 +44,6 @@ import (
 var (
 	ContainerNameFormat = "qubesome-%s"
 	defaultProfileImage = "ghcr.io/qubesome/xorg:latest"
-
-	// profileStartGrace is how long the profile container is watched for
-	// an early exit before it is considered started. It does not have to
-	// outlast a slow compositor, because the compositor is waited for
-	// inside the container, only an entrypoint that fails outright.
-	profileStartGrace = 500 * time.Millisecond
-
-	// profileStartCheck is how often the container is checked during that
-	// grace period.
-	profileStartCheck = 50 * time.Millisecond
-
-	// profileWatchInterval is how often a started profile is checked for
-	// having gone away.
-	profileWatchInterval = time.Second
 
 	appTemplate = `[Desktop Entry]
 Version=1.0
@@ -129,7 +117,7 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 	ln := files.ProfileConfig(name)
 
 	if _, err := os.Lstat(ln); err == nil {
-		if container.Running(runner, fmt.Sprintf(ContainerNameFormat, name)) {
+		if sandbox.Alive(filepath.Join(files.ProfileDir(name), "sandbox.json")) {
 			return fmt.Errorf("profile %q is already started", name)
 		}
 
@@ -243,37 +231,37 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		runner = profile.Runner
 	}
 
-	binary := files.ContainerRunnerBinary(runner)
-	fi, err := os.Lstat(binary)
-	if err != nil || !fi.Mode().IsRegular() {
-		return fmt.Errorf("could not find container runner %q", binary)
+	bundle, err := images.PullProfileImage(profile.Image)
+	if err != nil {
+		return fmt.Errorf("cannot prepare profile image: %w", err)
 	}
+
+	// Workloads still run under the container runner, so their images are
+	// still its to pull.
+	binary := files.ContainerRunnerBinary(runner)
 
 	imgs, err := images.MissingImages(binary, cfg)
 	if err != nil {
 		return err
 	}
 
-	for _, img := range imgs {
-		if img == profile.Image {
-			fmt.Println("Pulling profile image:", profile.Image)
-			err = images.PullImageIfNotPresent(binary, profile.Image)
-			if err != nil {
-				return fmt.Errorf("cannot pull profile image: %w", err)
-			}
-		}
-	}
-
-	if len(imgs) > 1 && term.IsTerminal(int(os.Stdout.Fd())) {
+	if len(imgs) > 0 && term.IsTerminal(int(os.Stdout.Fd())) {
 		if proceed("Not all workload images are present. Start loading them on the background?") {
 			go images.PreemptWorkloadImages(binary, cfg)
 		}
 	}
 
 	if profile.Gpus != "" {
-		if _, ok := gpu.Params(runner); !ok {
+		switch {
+		case gpu.NvidiaToolkitPresent():
 			profile.Gpus = ""
-			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
+			dbus.NotifyOrLog("qubesome error",
+				"GPU passthrough for nvidia is not supported for profiles, disabling it")
+		default:
+			if _, _, err := gpu.SandboxEdits("/"); err != nil {
+				profile.Gpus = ""
+				dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
+			}
 		}
 	}
 
@@ -371,21 +359,26 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		}
 	}()
 
-	err = createNewDisplay(binary,
-		creds.CA, creds.ClientPEM, creds.ClientKeyPEM,
+	cmd, err := createNewDisplay(bundle, creds.CA, creds.ClientPEM, creds.ClientKeyPEM,
 		profile, strconv.Itoa(int(profile.Display)), interactive, cfg)
 	if err != nil {
 		slog.Warn("failed to create display", "error", err)
 		return err
 	}
 
+	statePath := filepath.Join(files.ProfileDir(profile.Name), "sandbox.json")
+	if err := sandbox.WriteState(statePath, cmd.Process.Pid); err != nil {
+		slog.Warn("failed to record sandbox state", "error", err)
+	}
+
 	// The host process serves this profile's socket for as long as the
-	// profile runs, so it waits here rather than returning. Nothing used
-	// to tell it the profile had gone, so it outlived the container it
-	// was serving and had to be interrupted by hand.
-	watched := fmt.Sprintf(ContainerNameFormat, profile.Name)
-	for container.Running(binary, watched) {
-		time.Sleep(profileWatchInterval)
+	// profile runs, so it waits here rather than returning. The sandbox is
+	// no longer detached, so its exit is observed directly rather than by
+	// polling the container runner, and --die-with-parent closes the same
+	// loop from the other direction: a qubesome that dies no longer leaves
+	// a profile running with nothing attached to it.
+	if werr := cmd.Wait(); werr != nil {
+		slog.Warn("profile sandbox exited", "error", werr)
 	}
 
 	slog.Debug("profile has gone, stopping", "profile", profile.Name)
@@ -471,10 +464,10 @@ func shellQuote(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
-func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, display string, interactive bool, cfg *types.Config) error {
+func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types.Profile, display string, interactive bool, cfg *types.Config) (*execabs.Cmd, error) {
 	res, err := resolution.Primary()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// The display stack runs from the qubesome binary already mounted in
@@ -497,27 +490,28 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	server, err := files.ServerCookiePath(profile.Name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	workload, err := files.ClientCookiePath(profile.Name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// If no server cookie is found or it is empty, fail safe.
 	if fi, err := os.Stat(server); err != nil || fi.Size() == 0 {
-		return fmt.Errorf("server cookie %q is missing or empty", server)
+		return nil, fmt.Errorf("server cookie %q is missing or empty", server)
 	}
 
+	// The qubesome binary is bind-mounted into the sandbox and is also
+	// what runs as its init, so a profile cannot start without it.
 	binPath, err := os.Executable()
 	if err != nil {
-		slog.Debug("failed to get exec path", "error", err)
-		slog.Debug("profile won't be able to open applications")
+		return nil, fmt.Errorf("failed to get qubesome binary path: %w", err)
 	}
 
 	socket, err := files.SocketPath(profile.Name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	t := time.Now().Add(3 * time.Second)
@@ -528,7 +522,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 			// this profile and used as a socket. Anything else there
 			// fails later, and further from the cause.
 			if fi.Mode().Type()&os.ModeSocket == 0 {
-				return fmt.Errorf("%q is not a socket: %s", socket, fi.Mode().Type())
+				return nil, fmt.Errorf("%q is not a socket: %s", socket, fi.Mode().Type())
 			}
 
 			break
@@ -538,11 +532,11 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		// other error, a permission one for instance, would otherwise
 		// be reported three seconds later as a timeout.
 		if !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("failed to stat socket %q: %w", socket, err)
+			return nil, fmt.Errorf("failed to stat socket %q: %w", socket, err)
 		}
 
 		if t.Before(time.Now()) {
-			return fmt.Errorf("timed out waiting for socket to be created")
+			return nil, fmt.Errorf("timed out waiting for socket to be created")
 		}
 
 		// Without this the loop spins on os.Stat for the whole timeout,
@@ -555,76 +549,9 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		fmt.Println("\033[33mWARN: Running qubesome in WSL is experimental. Some features may not work as expected.\033[0m")
 		fp, err := filepath.EvalSymlinks(x11Dir)
 		if err != nil {
-			return fmt.Errorf("failed to eval symlink: %w", err)
+			return nil, fmt.Errorf("failed to eval symlink: %w", err)
 		}
 		x11Dir = fp
-	}
-
-	var paths []string
-	paths = append(paths, "-v=/etc/localtime:/etc/localtime:ro")
-	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/.X11-unix:rw", x11Dir))
-	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
-	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver", server))
-	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority", workload))
-	paths = append(paths, fmt.Sprintf("-v=%s:%s:ro", binPath, files.InProfileBinary))
-
-	for _, p := range profile.Paths {
-		p = env.Expand(p)
-
-		src := strings.Split(p, ":")
-		// Mapped dirs are created upfront, otherwise the container runner
-		// creates them owned by root.
-		if err := files.EnsureMappedDir(src[0]); err != nil {
-			fmt.Printf("\033[33mWARN: skipping mapped dir %s: %v.\033[0m\n", src[0], err)
-			continue
-		}
-		paths = append(paths, "-v="+p)
-	}
-
-	dockerArgs := []string{
-		"run",
-		"--rm",
-		// rely on currently set DISPLAY.
-		"-e", "DISPLAY",
-		"-e", "Q_MTLS_CA",
-		"-e", "Q_MTLS_CERT",
-		"-e", "Q_MTLS_KEY",
-		"--device", "/dev/dri",
-		"--security-opt=no-new-privileges=true",
-		"--security-opt=label=disable",
-		"--cap-drop=ALL",
-	}
-
-	if interactive {
-		dockerArgs = append(dockerArgs, "-it")
-	} else {
-		dockerArgs = append(dockerArgs, "-d")
-	}
-
-	if strings.HasSuffix(bin, "podman") {
-		dockerArgs = append(dockerArgs, "--userns=keep-id")
-	}
-	// The profile runs its own compositor, so it needs nothing from the
-	// host session beyond the display socket already mounted below. The
-	// session type is reported as X11 because the window manager runs on
-	// Xwayland regardless of what the host session is.
-	dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE=X11")
-	if profile.Gpus != "" {
-		if gpus, ok := gpu.Params(profile.Runner); ok {
-			dockerArgs = append(dockerArgs, gpus...)
-		}
-	}
-
-	if profile.DNS != "" {
-		dockerArgs = append(dockerArgs, "--dns", profile.DNS)
-	}
-
-	if profile.Network == "" {
-		// Generally, xorg does not require network access so by
-		// default sets network to none.
-		dockerArgs = append(dockerArgs, "--network=none")
-	} else {
-		dockerArgs = append(dockerArgs, "--network="+profile.Network)
 	}
 
 	// Write the machine-id file regardless of the profile using host dbus or not,
@@ -632,16 +559,16 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	machineIDPath := filepath.Join(files.ProfileDir(profile.Name), "machine-id")
 	err = writeMachineID(machineIDPath)
 	if err != nil {
-		return fmt.Errorf("failed to write machine-id: %w", err)
+		return nil, fmt.Errorf("failed to write machine-id: %w", err)
 	}
 
 	userDir, err := files.IsolatedRunUserPath(profile.Name)
 	if err != nil {
-		return fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
+		return nil, fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
 	}
 	err = setupRunUserDir(userDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Workload shared memory lives beside the profile's runtime dir rather
@@ -649,43 +576,113 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	// EnsureMappedDir creates one workload's directory, not this parent.
 	workloadShm := filepath.Join(files.ProfileDir(profile.Name), "shm")
 	if err := os.MkdirAll(workloadShm, files.DirMode); err != nil {
-		return fmt.Errorf("failed to create workload shm dir: %w", err)
+		return nil, fmt.Errorf("failed to create workload shm dir: %w", err)
 	}
 
 	err = setupAppsDir(profile, cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", filepath.Join(userDir, "shm")))
+	mounts := []sandbox.Mount{
+		{Src: "/etc/localtime", Dst: "/etc/localtime", ReadOnly: true},
+		{Src: x11Dir, Dst: "/tmp/.X11-unix"},
+		{Src: socket, Dst: "/tmp/qube.sock", ReadOnly: true},
+		{Src: server, Dst: "/home/xorg-user/.Xserver"},
+		{Src: workload, Dst: "/home/xorg-user/.Xauthority"},
+		{Src: binPath, Dst: files.InProfileBinary, ReadOnly: true},
+	}
+
+	for _, p := range profile.Paths {
+		p = env.Expand(p)
+
+		parts := strings.Split(p, ":")
+		// Mapped dirs are created upfront, otherwise they would be
+		// created owned by root.
+		if err := files.EnsureMappedDir(parts[0]); err != nil {
+			fmt.Printf("\033[33mWARN: skipping mapped dir %s: %v.\033[0m\n", parts[0], err)
+			continue
+		}
+
+		m := sandbox.Mount{Src: parts[0], Dst: parts[0]}
+		if len(parts) > 1 {
+			m.Dst = parts[1]
+		}
+		m.ReadOnly = len(parts) > 2 && parts[2] == "ro"
+
+		mounts = append(mounts, m)
+	}
+
+	mounts = append(mounts, sandbox.Mount{Src: filepath.Join(userDir, "shm"), Dst: "/dev/shm"})
+
 	if profile.Dbus {
-		paths = append(paths, "-v=/run/dbus/system_bus_socket:/run/dbus/system_bus_socket")
-		paths = append(paths, "-v=/etc/machine-id:/etc/machine-id:ro")
+		mounts = append(mounts,
+			sandbox.Mount{Src: "/run/dbus/system_bus_socket", Dst: "/run/dbus/system_bus_socket"},
+			sandbox.Mount{Src: "/etc/machine-id", Dst: "/etc/machine-id", ReadOnly: true},
+		)
 	} else {
-		paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000", userDir))
-		paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro", machineIDPath))
+		mounts = append(mounts,
+			sandbox.Mount{Src: userDir, Dst: "/run/user/1000"},
+			sandbox.Mount{Src: machineIDPath, Dst: "/etc/machine-id", ReadOnly: true},
+		)
 	}
 
-	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.local/share/applications:ro",
-		filepath.Join(files.ProfileDir(profile.Name), "applications")))
-	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.local/share/icons:ro",
-		filepath.Join(files.ProfileDir(profile.Name), "icons")))
+	mounts = append(mounts,
+		sandbox.Mount{
+			Src:      filepath.Join(files.ProfileDir(profile.Name), "applications"),
+			Dst:      "/home/xorg-user/.local/share/applications",
+			ReadOnly: true,
+		},
+		sandbox.Mount{
+			Src:      filepath.Join(files.ProfileDir(profile.Name), "icons"),
+			Dst:      "/home/xorg-user/.local/share/icons",
+			ReadOnly: true,
+		},
+	)
 
-	dockerArgs = append(dockerArgs, paths...)
+	devices := []string{"/dev/dri"}
+	devices = append(devices, profile.Devices...)
 
-	// Share IPC from the profile container to its workloads.
-	// dockerArgs = append(dockerArgs, "--ipc=shareable")
-	dockerArgs = append(dockerArgs, "--shm-size=128m")
+	if profile.Gpus != "" {
+		nodes, gpuMounts, err := gpu.SandboxEdits("/")
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve GPU devices: %w", err)
+		}
+		for _, n := range nodes {
+			devices = append(devices, n.Path)
+		}
+		for _, m := range gpuMounts {
+			mounts = append(mounts, sandbox.Mount{
+				Src:      m.HostPath,
+				Dst:      m.ContainerPath,
+				ReadOnly: true,
+			})
+		}
+	}
 
-	dockerArgs = append(dockerArgs, fmt.Sprintf("--name=%s", fmt.Sprintf(ContainerNameFormat, profile.Name)))
-	dockerArgs = append(dockerArgs, profile.Image)
+	// The image environment comes first. Container runners applied it
+	// implicitly and bwrap does not, so without it the profile loses the
+	// PATH its own binaries are on.
+	senv := append([]string{}, bundle.Env...)
+	senv = append(senv,
+		"DISPLAY="+os.Getenv("DISPLAY"),
+		"Q_MTLS_CA="+string(ca),
+		"Q_MTLS_CERT="+string(cert),
+		"Q_MTLS_KEY="+string(key),
+	)
+
+	// The profile runs its own compositor, so it needs nothing from the
+	// host session beyond the display socket mounted above. The session
+	// type is reported as X11 because the window manager runs on Xwayland
+	// regardless of what the host session is.
+	senv = append(senv, "XDG_SESSION_TYPE=X11")
+
+	initArgs := []string{files.ShBinary}
 	if interactive {
-		dockerArgs = append(dockerArgs, "sh")
 		fmt.Println("To manually start the display:")
 		fmt.Printf("\t%s %s\n", command, shellQuote(cArgs))
 	} else {
-		dockerArgs = append(dockerArgs, command)
-		dockerArgs = append(dockerArgs, cArgs...)
+		initArgs = append([]string{command}, cArgs...)
 
 		fmt.Printf("INFO: profile %s is on display :%d. On an X11 host its "+
 			"window manager sees these keys first, so bind a passthrough mode "+
@@ -693,65 +690,59 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 			profile.Name, profile.Display)
 	}
 
-	slog.Debug("exec", "binary", bin, "args", container.RedactEnvArgs(dockerArgs))
-	cmd := execabs.Command(bin, dockerArgs...)
-	cmd.Env = append(cmd.Env, os.Environ()...)
-
-	cmd.Env = append(os.Environ(), "Q_MTLS_CA="+string(ca))
-	cmd.Env = append(cmd.Env, "Q_MTLS_CERT="+string(cert))
-	cmd.Env = append(cmd.Env, "Q_MTLS_KEY="+string(key))
-
-	if interactive {
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		return cmd.Run()
+	spec := sandbox.Spec{
+		Rootfs:      bundle.Rootfs,
+		Hostname:    fmt.Sprintf(ContainerNameFormat, profile.Name),
+		UID:         bundle.UID,
+		GID:         bundle.GID,
+		Net:         sandbox.NetNone,
+		Seccomp:     !profile.SeccompUnconfined,
+		Interactive: interactive,
+		Env:         senv,
+		Devices:     devices,
+		Mounts:      mounts,
+		Args:        initArgs,
 	}
 
-	err = storeMtlsData(profile.Name, string(ca), string(cert), string(key))
+	var extra []*os.File
+	fd := -1
+
+	if spec.Seccomp {
+		filter, err := seccomp.MemFD()
+		if err != nil {
+			return nil, err
+		}
+		defer filter.Close()
+
+		// ExtraFiles[0] is descriptor 3 in the child.
+		extra = append(extra, filter)
+		fd = 3
+	}
+
+	args, err := sandbox.Args(spec, fd)
 	if err != nil {
+		return nil, err
+	}
+
+	slog.Debug("exec", "binary", files.BwrapBinary, "args", container.RedactEnvArgs(args))
+
+	cmd := execabs.Command(files.BwrapBinary, args...) //nolint:gosec // the arguments are built from the profile config.
+	cmd.ExtraFiles = extra
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if interactive {
+		cmd.Stdin = os.Stdin
+	}
+
+	if err := storeMtlsData(profile.Name, string(ca), string(cert), string(key)); err != nil {
 		slog.Error("failed storing mtls data", "error", err)
 	}
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %w", output, err)
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start profile sandbox: %w", err)
 	}
 
-	// docker run -d reports success once the container is created, which
-	// says nothing about whether its entrypoint survived. A profile whose
-	// image is missing the compositor would otherwise start cleanly and
-	// simply never show a window.
-	// Watching for the whole grace period rather than sleeping through it
-	// and looking once. A compositor that dies just after a fixed check
-	// would otherwise pass it and leave the user with no window and no
-	// error, which is the failure this exists to catch.
-	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
-	deadline := time.Now().Add(profileStartGrace)
-	running := true
-
-	for time.Now().Before(deadline) {
-		if running = container.Running(bin, name); !running {
-			break
-		}
-
-		time.Sleep(profileStartCheck)
-	}
-
-	if !running {
-		// The container runs with --rm, so it is already gone and its
-		// logs with it. Re-running interactively keeps a shell alive and
-		// prints the display command to run by hand, which is where the
-		// real error appears.
-		msg := fmt.Sprintf("profile %s exited immediately, run it with -i and start the display by hand to see why",
-			profile.Name)
-		dbus.NotifyOrLog("qubesome start error", msg)
-
-		return errors.New(msg)
-	}
-
-	return nil
+	return cmd, nil
 }
 
 func storeMtlsData(profile, ca, cert, key string) error {
