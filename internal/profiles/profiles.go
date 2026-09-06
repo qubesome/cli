@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -53,6 +52,10 @@ var (
 	// profileStartCheck is how often the container is checked during that
 	// grace period.
 	profileStartCheck = 50 * time.Millisecond
+
+	// profileWatchInterval is how often a started profile is checked for
+	// having gone away.
+	profileWatchInterval = time.Second
 
 	appTemplate = `[Desktop Entry]
 Version=1.0
@@ -304,9 +307,6 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-
 	sockPath, err := files.SocketPath(profile.Name)
 	if err != nil {
 		return err
@@ -316,16 +316,24 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 	if err != nil {
 		return err
 	}
-	go func() {
-		defer wg.Done()
 
+	// A profile that was killed rather than stopped leaves its socket
+	// behind, and listening on a path that already exists fails. That
+	// left the profile running with nothing serving it, and every
+	// workload it launched failing to reach the host.
+	if err := os.Remove(sockPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to remove stale socket %q: %w", sockPath, err)
+	}
+
+	go func() {
 		server := inception.NewServer(profile, cfg)
-		err1 := server.Listen(creds.ServerCert, creds.CA, sockPath)
-		if err1 != nil {
-			slog.Debug("error listening to socket", "error", err1)
-			if err == nil {
-				err = err1
-			}
+		if err := server.Listen(creds.ServerCert, creds.CA, sockPath); err != nil {
+			// Reported rather than recorded, because the profile is
+			// already starting and this is the only sign that nothing
+			// will answer it.
+			slog.Error("profile socket is not being served", "error", err)
+			dbus.NotifyOrLog("qubesome start error",
+				fmt.Sprintf("profile %s cannot serve workloads: %v", profile.Name, err))
 		}
 	}()
 
@@ -353,7 +361,17 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
-	wg.Wait()
+	// The host process serves this profile's socket for as long as the
+	// profile runs, so it waits here rather than returning. Nothing used
+	// to tell it the profile had gone, so it outlived the container it
+	// was serving and had to be interrupted by hand.
+	watched := fmt.Sprintf(ContainerNameFormat, profile.Name)
+	for container.Running(binary, watched) {
+		time.Sleep(profileWatchInterval)
+	}
+
+	slog.Debug("profile has gone, stopping", "profile", profile.Name)
+
 	return nil
 }
 
