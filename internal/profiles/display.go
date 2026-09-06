@@ -34,11 +34,6 @@ type displayParams struct {
 	// ExtraArgs are additional Xwayland arguments from profile config.
 	ExtraArgs string
 
-	// HostWayland selects the compositor backend. The compositor presents
-	// to the host session either way, as a Wayland surface when true and
-	// as an X11 window when false.
-	HostWayland bool
-
 	// RuntimeDir is the compositor's XDG_RUNTIME_DIR. It holds the Wayland
 	// socket and must not be reachable by workloads, so it is a directory
 	// private to the profile container rather than the /run/user/1000
@@ -84,13 +79,12 @@ func compositorArgs(p displayParams) ([]string, error) {
 		return nil, err
 	}
 
-	backend := "x11"
-	if p.HostWayland {
-		backend = "wayland"
-	}
-
 	return []string{
-		"--backend=" + backend,
+		// The compositor always presents through the host X server. A
+		// Wayland host runs its own Xwayland, so this reaches it either
+		// way, and it means the profile needs nothing from the host
+		// session beyond the display socket it already has.
+		"--backend=x11",
 		"--width=" + w,
 		"--height=" + h,
 		// The kiosk shell draws no panel or background, so the profile
@@ -259,7 +253,6 @@ type DisplayOptions struct {
 	AuthFile      string
 	WindowManager string
 	ExtraArgs     string
-	HostWayland   bool
 }
 
 const (
@@ -286,7 +279,6 @@ func RunDisplayWithOptions(o DisplayOptions) error {
 		AuthFile:      o.AuthFile,
 		WindowManager: o.WindowManager,
 		ExtraArgs:     o.ExtraArgs,
-		HostWayland:   o.HostWayland,
 		RuntimeDir:    compositorRuntimeDir,
 		WaylandSocket: compositorSocket,
 		AppRuntimeDir: appRuntimeDir,

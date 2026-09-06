@@ -451,9 +451,6 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	if profile.XephyrArgs != "" {
 		cArgs = append(cArgs, "--extra", profile.XephyrArgs)
 	}
-	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		cArgs = append(cArgs, "--host-wayland")
-	}
 
 	server, err := files.ServerCookiePath(profile.Name)
 	if err != nil {

@@ -184,10 +184,16 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 		slog.Debug("unknown objects mismatch", "w", w, "ew", ew)
 	}
 
-	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		ew.Workload.Args = append(ew.Workload.Args, ew.Workload.WaylandArgs...)
-	} else {
-		ew.Workload.Args = append(ew.Workload.Args, ew.Workload.X11Args...)
+	// Workloads connect to the profile's Xwayland, which is an X server
+	// whatever the host session is, so the X11 arguments are the ones that
+	// apply. This used to follow the host session type, which meant a
+	// workload on a Wayland host was given its Wayland arguments and an X11
+	// display to use them against.
+	ew.Workload.Args = append(ew.Workload.Args, ew.Workload.X11Args...)
+
+	if len(ew.Workload.WaylandArgs) > 0 {
+		slog.Warn("waylandArgs are no longer applied, workloads run on the profile's X server",
+			"workload", ew.Workload.Name)
 	}
 
 	if len(ew.Workload.HostAccess.Gpus) == 0 {

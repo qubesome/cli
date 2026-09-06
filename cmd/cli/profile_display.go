@@ -18,7 +18,6 @@ func profileDisplayCommand() *cli.Command {
 		authFile      string
 		windowManager string
 		extraArgs     string
-		hostWayland   bool
 	)
 
 	return &cli.Command{
@@ -31,7 +30,6 @@ func profileDisplayCommand() *cli.Command {
 			&cli.StringFlag{Name: "auth", Destination: &authFile, Required: true},
 			&cli.StringFlag{Name: "wm", Destination: &windowManager, Required: true},
 			&cli.StringFlag{Name: "extra", Destination: &extraArgs},
-			&cli.BoolFlag{Name: "host-wayland", Destination: &hostWayland},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if display > 255 {
@@ -44,7 +42,6 @@ func profileDisplayCommand() *cli.Command {
 				AuthFile:      authFile,
 				WindowManager: windowManager,
 				ExtraArgs:     extraArgs,
-				HostWayland:   hostWayland,
 			})
 		},
 	}

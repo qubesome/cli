@@ -13,51 +13,19 @@ import (
 func TestCompositorArgs(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		in   displayParams
-		want []string
-	}{
-		{
-			name: "x11 host",
-			in: displayParams{
-				Geometry:      "1920x1080",
-				WaylandSocket: "qubesome",
-			},
-			want: []string{
-				"--backend=x11",
-				"--width=1920",
-				"--height=1080",
-				"--shell=kiosk-shell.so",
-				"--socket=qubesome",
-			},
-		},
-		{
-			name: "wayland host",
-			in: displayParams{
-				Geometry:      "3440x1440",
-				WaylandSocket: "qubesome",
-				HostWayland:   true,
-			},
-			want: []string{
-				"--backend=wayland",
-				"--width=3440",
-				"--height=1440",
-				"--shell=kiosk-shell.so",
-				"--socket=qubesome",
-			},
-		},
-	}
+	got, err := compositorArgs(displayParams{
+		Geometry:      "1920x1080",
+		WaylandSocket: "qubesome",
+	})
+	require.NoError(t, err)
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := compositorArgs(tc.in)
-			require.NoError(t, err)
-			require.Equal(t, tc.want, got)
-		})
-	}
+	require.Equal(t, []string{
+		"--backend=x11",
+		"--width=1920",
+		"--height=1080",
+		"--shell=kiosk-shell.so",
+		"--socket=qubesome",
+	}, got)
 }
 
 func TestCompositorArgsBadGeometry(t *testing.T) {
