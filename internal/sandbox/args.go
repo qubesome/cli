@@ -28,7 +28,7 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		return nil, errors.New("sandbox: seccomp is enabled but no filter descriptor was given")
 	}
 
-	args := make([]string, 0, 32+4*len(s.Devices)+3*len(s.Mounts)+3*len(s.Env)+len(s.Args))
+	args := make([]string, 0, 32+3*len(s.Devices)+3*len(s.Mounts)+3*len(s.Env)+len(s.Args))
 	args = append(args,
 		// The image is shared read-only and every write lands in a tmpfs
 		// that goes away with the sandbox.
