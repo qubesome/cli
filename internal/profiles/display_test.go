@@ -41,13 +41,14 @@ func TestXwaylandArgs(t *testing.T) {
 	t.Parallel()
 
 	base := displayParams{
-		Display:       11,
-		Geometry:      "1920x1080",
-		AuthFile:      "/home/xorg-user/.Xserver",
-		WindowManager: "exec dbus-run-session awesome",
-		RuntimeDir:    "/run/qubesome-wl",
-		WaylandSocket: "qubesome",
-		AppRuntimeDir: "/run/user/1000",
+		Display:        11,
+		Geometry:       "1920x1080",
+		AuthFile:       "/home/xorg-user/.Xserver",
+		WindowManager:  "exec dbus-run-session awesome",
+		RuntimeDir:     "/tmp/qubesome-wl",
+		WaylandSocket:  "qubesome",
+		AppRuntimeDir:  "/run/user/1000",
+		ClientAuthFile: "/home/xorg-user/.Xauthority",
 	}
 
 	tests := []struct {
@@ -70,7 +71,9 @@ func TestXwaylandArgs(t *testing.T) {
 				"-tst",
 				"-nolisten", "tcp",
 				"--",
-				"env", "-u", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR=/run/user/1000",
+				"env", "-u", "WAYLAND_DISPLAY",
+				"XDG_RUNTIME_DIR=/run/user/1000",
+				"XAUTHORITY=/home/xorg-user/.Xauthority",
 				"dbus-run-session", "awesome",
 			},
 		},
@@ -94,7 +97,9 @@ func TestXwaylandArgs(t *testing.T) {
 				"-nolisten", "tcp",
 				"-verbose", "9",
 				"--",
-				"env", "-u", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR=/run/user/1000",
+				"env", "-u", "WAYLAND_DISPLAY",
+				"XDG_RUNTIME_DIR=/run/user/1000",
+				"XAUTHORITY=/home/xorg-user/.Xauthority",
 				"dbus-run-session", "awesome",
 			},
 		},

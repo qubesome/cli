@@ -47,6 +47,15 @@ type displayParams struct {
 	// and everything it spawns, so they do not inherit a path to the
 	// compositor.
 	AppRuntimeDir string
+
+	// ClientAuthFile is the X cookie the window manager connects with.
+	//
+	// xwayland-run generates an Xauthority of its own and points the
+	// client at it, while the server is left using the one qubesome
+	// passes. The two hold different cookies, so the client has to be
+	// pointed back at qubesome's. Workloads mount this same file, so it
+	// is also what makes them able to connect at all.
+	ClientAuthFile string
 }
 
 // splitGeometry splits a WIDTHxHEIGHT string into its two parts. Both are
@@ -141,7 +150,9 @@ func xwaylandArgs(p displayParams) ([]string, error) {
 	// path to the compositor. A client that reaches the Wayland socket
 	// bypasses Xwayland and the isolation set above.
 	args = append(args, "--",
-		"env", "-u", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR="+p.AppRuntimeDir)
+		"env", "-u", "WAYLAND_DISPLAY",
+		"XDG_RUNTIME_DIR="+p.AppRuntimeDir,
+		"XAUTHORITY="+p.ClientAuthFile)
 
 	return append(args, wm...), nil
 }
@@ -279,19 +290,24 @@ const (
 	// appRuntimeDir is the XDG_RUNTIME_DIR applications in the profile
 	// see, restored for the window manager and its children.
 	appRuntimeDir = "/run/user/1000"
+
+	// clientAuthFile is where the profile's client X cookie is mounted.
+	// It is the same file every workload of the profile mounts.
+	clientAuthFile = "/home/xorg-user/.Xauthority"
 )
 
 // RunDisplayWithOptions starts the profile display stack from the values
 // the profile-display command was given.
 func RunDisplayWithOptions(o DisplayOptions) error {
 	return RunDisplay(displayParams{
-		Display:       o.Display,
-		Geometry:      o.Geometry,
-		AuthFile:      o.AuthFile,
-		WindowManager: o.WindowManager,
-		ExtraArgs:     o.ExtraArgs,
-		RuntimeDir:    compositorRuntimeDir,
-		WaylandSocket: compositorSocket,
-		AppRuntimeDir: appRuntimeDir,
+		Display:        o.Display,
+		Geometry:       o.Geometry,
+		AuthFile:       o.AuthFile,
+		WindowManager:  o.WindowManager,
+		ExtraArgs:      o.ExtraArgs,
+		RuntimeDir:     compositorRuntimeDir,
+		WaylandSocket:  compositorSocket,
+		AppRuntimeDir:  appRuntimeDir,
+		ClientAuthFile: clientAuthFile,
 	})
 }
