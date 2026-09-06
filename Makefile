@@ -26,6 +26,7 @@ verify-lint: $(GOLANGCI)
 	$(GOLANGCI) run
 
 generate: $(PROTOC)
+	go generate ./internal/seccomp/...
 	rm $(PROTO)/*.pb.go || true
 	PATH=$(TOOLS_BIN) $(PROTOC) --go_out=. --go_opt=paths=source_relative \
     	--go-grpc_out=. --go-grpc_opt=paths=source_relative \
