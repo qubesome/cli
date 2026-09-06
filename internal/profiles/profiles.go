@@ -640,8 +640,12 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		},
 	)
 
+	// profile.Devices is deliberately absent. It is the allowlist that
+	// bounds what a workload may ask for, applied by types.ApplyProfile
+	// when a workload starts, and it was never handed to the profile
+	// container itself. The display server needs the render nodes and,
+	// with GPU passthrough on, the GPU nodes below.
 	devices := []string{"/dev/dri"}
-	devices = append(devices, profile.Devices...)
 
 	if profile.Gpus != "" {
 		nodes, gpuMounts, err := gpu.SandboxEdits("/")
