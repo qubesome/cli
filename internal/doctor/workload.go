@@ -44,7 +44,7 @@ func Workload(env Env, cfg *types.Config, runner, profileName, workloadName stri
 		checkWorkloadImage(env, bin, w.Image),
 		checkWorkloadProfileRunning(env, bin, profileName),
 		checkWorkloadHostAccess(w, effective),
-		checkWorkloadDevices(env, effective),
+		checkDevices(env, "workload devices", effective.Workload.HostAccess),
 		checkWorkloadPaths(env, effective),
 		checkWorkloadValidation(effective),
 	}
@@ -318,47 +318,6 @@ func listDrops(label string, requested, got []string) []string {
 	}
 
 	return dropped
-}
-
-// checkWorkloadDevices reports on the host side of the effective
-// workload's device requests, since a missing one stops the container
-// from starting rather than merely degrading it.
-func checkWorkloadDevices(env Env, effective types.EffectiveWorkload) Check {
-	devices := effective.Workload.HostAccess.Devices
-	if len(devices) == 0 {
-		return Check{
-			Name:   "workload devices",
-			Status: OK,
-			Detail: "no devices are configured",
-		}
-	}
-
-	var missing []string
-	for _, d := range devices {
-		src, _, _, err := types.ParseDevice(d)
-		if err != nil {
-			src = d
-		}
-
-		if _, err := env.Stat(src); err != nil {
-			missing = append(missing, src)
-		}
-	}
-
-	if len(missing) > 0 {
-		return Check{
-			Name:   "workload devices",
-			Status: Fail,
-			Detail: fmt.Sprintf("missing on the host: %s", strings.Join(missing, ", ")),
-			Fix:    "The container will fail to start without them. Attach the device, or remove it from the config.",
-		}
-	}
-
-	return Check{
-		Name:   "workload devices",
-		Status: OK,
-		Detail: fmt.Sprintf("all %d device(s) are present", len(devices)),
-	}
 }
 
 // checkWorkloadPaths reports on the host source side of the effective

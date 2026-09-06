@@ -16,6 +16,9 @@ type fakeEnv struct {
 	stats  map[string]os.FileInfo
 	env    map[string]string
 	output map[string]fakeOutput
+	globs  map[string][]string
+	usb    map[string][]string
+	usbErr map[string]error
 }
 
 type fakeOutput struct {
@@ -54,6 +57,27 @@ func (f *fakeEnv) Output(name string, args ...string) ([]byte, error) {
 	}
 
 	return nil, exec.ErrNotFound
+}
+
+func (f *fakeEnv) Glob(pattern string) ([]string, error) {
+	return f.globs[pattern], nil
+}
+
+// USBNamed resolves each requested name against f.usb and f.usbErr, keyed
+// by the single name it was asked about, since checkDevices always asks
+// one name at a time.
+func (f *fakeEnv) USBNamed(names []string) ([]string, error) {
+	var matches []string
+
+	for _, name := range names {
+		if err, ok := f.usbErr[name]; ok {
+			return nil, err
+		}
+
+		matches = append(matches, f.usb[name]...)
+	}
+
+	return matches, nil
 }
 
 type fakeFileInfo struct {

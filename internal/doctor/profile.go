@@ -44,6 +44,7 @@ func Profile(env Env, cfg *types.Config, runner, name string) []Check {
 		checkProfileSocket(env, name, state),
 		checkProfileCookies(env, name, state),
 		checkProfilePaths(env, profile.Paths),
+		checkDevices(env, "profile devices", profile.HostAccess),
 		checkExternalDrives(env, profile.ExternalDrives),
 		checkProfileDisplay(env, profile.Display, state),
 	}

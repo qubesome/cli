@@ -3,8 +3,10 @@ package doctor
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/qubesome/cli/internal/runners/util/usb"
 	"golang.org/x/sys/execabs"
 )
 
@@ -27,6 +29,16 @@ type Env interface {
 	// says whether it failed, and the output usually says why, so both
 	// are reported together.
 	Output(name string, args ...string) ([]byte, error)
+
+	// Glob reports the paths matching a shell pattern. It is how the
+	// checks ask whether a class of device is present at all, since a
+	// camera may be video0 or video2 and neither name is fixed.
+	Glob(pattern string) ([]string, error)
+
+	// USBNamed resolves the USB device names a workload asks for into the
+	// device nodes they refer to, returning nothing for a name that
+	// matches no attached device.
+	USBNamed(names []string) ([]string, error)
 }
 
 // OSEnv is the real host.
@@ -61,6 +73,14 @@ func (e *OSEnv) Output(name string, args ...string) ([]byte, error) {
 	cmd := execabs.CommandContext(ctx, name, args...)
 
 	return cmd.CombinedOutput()
+}
+
+func (e *OSEnv) Glob(pattern string) ([]string, error) {
+	return filepath.Glob(pattern)
+}
+
+func (e *OSEnv) USBNamed(names []string) ([]string, error) {
+	return usb.NamedDevices(names)
 }
 
 func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {

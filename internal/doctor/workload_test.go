@@ -158,7 +158,7 @@ func TestCheckWorkloadHostAccess(t *testing.T) {
 			},
 		}
 		p := validProfile("work")
-		p.HostAccess.Camera = true
+		p.Camera = true
 		eff := w.ApplyProfile(&p)
 
 		c := checkWorkloadHostAccess(w, eff)
@@ -206,55 +206,6 @@ func TestCheckWorkloadHostAccess(t *testing.T) {
 		c := checkWorkloadHostAccess(w, eff)
 		require.Equal(t, Warn, c.Status)
 		require.Contains(t, c.Detail, "/home/user/docs")
-	})
-}
-
-func TestCheckWorkloadDevices(t *testing.T) {
-	t.Parallel()
-
-	t.Run("missing device fails", func(t *testing.T) {
-		t.Parallel()
-
-		eff := types.EffectiveWorkload{
-			Workload: types.Workload{
-				HostAccess: types.HostAccess{
-					Devices: []string{"/dev/video0"},
-				},
-			},
-		}
-		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkWorkloadDevices(env, eff)
-		require.Equal(t, "workload devices", c.Name)
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "/dev/video0")
-	})
-
-	t.Run("present device is ok", func(t *testing.T) {
-		t.Parallel()
-
-		eff := types.EffectiveWorkload{
-			Workload: types.Workload{
-				HostAccess: types.HostAccess{
-					Devices: []string{"/dev/video0"},
-				},
-			},
-		}
-		env := &fakeEnv{stats: map[string]os.FileInfo{
-			"/dev/video0": fileInfo("video0"),
-		}}
-		c := checkWorkloadDevices(env, eff)
-		require.Equal(t, OK, c.Status)
-		require.Empty(t, c.Fix)
-	})
-
-	t.Run("no devices is ok", func(t *testing.T) {
-		t.Parallel()
-
-		eff := types.EffectiveWorkload{}
-		env := &fakeEnv{}
-		c := checkWorkloadDevices(env, eff)
-		require.Equal(t, OK, c.Status)
 	})
 }
 
@@ -404,5 +355,5 @@ func mustMkdirAll(t *testing.T, path string) {
 
 func mustWriteFile(t *testing.T, path, content string) {
 	t.Helper()
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 }

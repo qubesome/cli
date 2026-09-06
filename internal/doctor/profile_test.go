@@ -409,7 +409,7 @@ func TestProfile(t *testing.T) {
 		}
 		cfg := &types.Config{Profiles: map[string]types.Profile{"work": validProfile("work")}}
 		checks := Profile(env, cfg, "docker", "work")
-		require.Len(t, checks, 8)
+		require.Len(t, checks, 9)
 
 		names := []string{
 			"profile config",
@@ -418,6 +418,7 @@ func TestProfile(t *testing.T) {
 			"profile socket",
 			"profile cookies",
 			"profile paths",
+			"profile devices",
 			"external drives",
 			"display",
 		}
