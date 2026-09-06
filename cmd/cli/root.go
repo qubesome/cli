@@ -37,6 +37,7 @@ func RootCommand() *cli.Command {
 			clipboardCommand(),
 			xdgCommand(),
 			depsCommand(),
+			doctorCommand(),
 			versionCommand(),
 			completionCommand(),
 			hostRunCommand(),
