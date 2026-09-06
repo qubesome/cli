@@ -704,8 +704,11 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		Args:        initArgs,
 	}
 
+	// os/exec numbers ExtraFiles from descriptor 3 upwards in the child.
+	const firstExtraFD = 3
+
 	var extra []*os.File
-	fd := -1
+	seccompFD := -1
 
 	if spec.Seccomp {
 		filter, err := seccomp.MemFD()
@@ -714,19 +717,29 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		}
 		defer filter.Close()
 
-		// ExtraFiles[0] is descriptor 3 in the child.
+		seccompFD = firstExtraFD + len(extra)
 		extra = append(extra, filter)
-		fd = 3
 	}
 
-	args, err := sandbox.Args(spec, fd)
+	args, err := sandbox.Args(spec, seccompFD)
 	if err != nil {
 		return nil, err
 	}
 
 	slog.Debug("exec", "binary", files.BwrapBinary, "args", container.RedactEnvArgs(args))
 
-	cmd := execabs.Command(files.BwrapBinary, args...) //nolint:gosec // the arguments are built from the profile config.
+	// The options carry the mTLS private key through --setenv, and a
+	// command line is world readable through /proc. Only the reference to
+	// the descriptor holding them, and the command, stay on it.
+	outer, packed, err := sandbox.PackArgs(spec, args, firstExtraFD+len(extra))
+	if err != nil {
+		return nil, err
+	}
+	defer packed.Close()
+
+	extra = append(extra, packed)
+
+	cmd := execabs.Command(files.BwrapBinary, outer...) //nolint:gosec // the arguments are built from the profile config.
 	cmd.ExtraFiles = extra
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

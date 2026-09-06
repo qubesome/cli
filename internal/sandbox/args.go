@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// separator ends bwrap's own options and begins the command.
+const separator = "--"
+
 // Args renders a Spec into bwrap arguments.
 //
 // seccompFD is the descriptor number the filter will occupy in the child,
@@ -99,7 +102,7 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		args = append(args, "--seccomp", strconv.Itoa(seccompFD))
 	}
 
-	args = append(args, "--")
+	args = append(args, separator)
 
 	return append(args, s.Args...), nil
 }
