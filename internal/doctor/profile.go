@@ -33,18 +33,24 @@ func Profile(env Env, cfg *types.Config, runner, name string) []Check {
 	}
 
 	profile := cfg.Profiles[name]
-	bin := files.ContainerRunnerBinary(runner)
+	src := resolveSource(env, cfg, name)
+	bin := files.ContainerRunnerBinary(runnerFor(runner, profile))
+
+	// The path checks below read paths as a start would, which means
+	// after the variables they are written against have been registered.
+	primeExpansion(src, profile)
 
 	containerCheck, state := checkProfileContainer(env, bin, name)
 
 	return []Check{
 		configCheck,
+		checkProfileSource(src),
 		checkProfileImage(env, bin, profile.Image),
 		containerCheck,
 		checkProfileSocket(env, name, state),
 		checkProfileCookies(env, name, state),
-		checkProfilePaths(env, profile.Paths),
-		checkDevices(env, "profile devices", profile.HostAccess),
+		checkMappedPaths(env, "profile paths", profile.Paths),
+		checkProfileDevices(env, profile.HostAccess),
 		checkExternalDrives(env, profile.ExternalDrives),
 		checkProfileDisplay(env, profile.Display, state),
 	}
@@ -262,46 +268,14 @@ func checkProfileCookies(env Env, name string, state containerState) Check {
 	}
 }
 
-// checkProfilePaths reports on the host source side of the profile's
-// mapped paths.
-func checkProfilePaths(env Env, paths []string) Check {
-	if len(paths) == 0 {
-		return Check{
-			Name:   "profile paths",
-			Status: OK,
-			Detail: "no paths are configured",
-		}
-	}
-
-	var missing []string
-	for _, p := range paths {
-		src := p
-		if i := strings.Index(p, ":"); i >= 0 {
-			src = p[:i]
-		}
-
-		if _, err := env.Stat(src); err != nil {
-			missing = append(missing, src)
-		}
-	}
-
-	if len(missing) > 0 {
-		return Check{
-			Name:   "profile paths",
-			Status: Warn,
-			Detail: fmt.Sprintf("missing on the host: %s", strings.Join(missing, ", ")),
-			Fix:    "These are skipped with a warning at start. Create them, or remove them from the config.",
-		}
-	}
-
-	return Check{
-		Name:   "profile paths",
-		Status: OK,
-		Detail: fmt.Sprintf("all %d mapped paths are present", len(paths)),
-	}
-}
-
-// checkExternalDrives reports on the mountpoints the profile requires.
+// checkExternalDrives reports on the drives the profile requires.
+//
+// It reads the kernel's mount table, the way the start does, rather than
+// statting the mountpoint. A mountpoint is a directory that exists
+// whether or not the drive is mounted over it, so statting it answers
+// neither question: it passes for an unmounted drive whose directory was
+// left behind, and fails for a mounted one whose directory the checking
+// user cannot stat.
 func checkExternalDrives(env Env, drives []string) Check {
 	if len(drives) == 0 {
 		return Check{
@@ -311,23 +285,30 @@ func checkExternalDrives(env Env, drives []string) Check {
 		}
 	}
 
-	var missing []string
+	var problems []string
 	for _, d := range drives {
-		mount := d
-		if i := strings.Index(d, ":"); i >= 0 {
-			mount = d[i+1:]
+		label, device, mount, err := parseExternalDrive(d)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%q is not a valid entry: %s", d, err))
+			continue
 		}
 
-		if _, err := env.Stat(mount); err != nil {
-			missing = append(missing, mount)
+		mounted, err := env.Mounted(device, mount)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s could not be checked: %s", label, err))
+			continue
+		}
+
+		if !mounted {
+			problems = append(problems, fmt.Sprintf("%s: %s is not mounted at %s", label, device, mount))
 		}
 	}
 
-	if len(missing) > 0 {
+	if len(problems) > 0 {
 		return Check{
 			Name:   "external drives",
 			Status: Fail,
-			Detail: fmt.Sprintf("not mounted: %s", strings.Join(missing, ", ")),
+			Detail: strings.Join(problems, ", "),
 			Fix:    "The profile refuses to start without them. Mount them, or remove them from the config.",
 		}
 	}
@@ -335,7 +316,7 @@ func checkExternalDrives(env Env, drives []string) Check {
 	return Check{
 		Name:   "external drives",
 		Status: OK,
-		Detail: fmt.Sprintf("all %d external drives are mounted", len(drives)),
+		Detail: fmt.Sprintf("all %d external drive(s) are mounted", len(drives)),
 	}
 }
 

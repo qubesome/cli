@@ -263,73 +263,84 @@ func TestCheckProfileCookies(t *testing.T) {
 	})
 }
 
-func TestCheckProfilePaths(t *testing.T) {
-	t.Parallel()
-
-	t.Run("none configured is ok", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkProfilePaths(env, nil)
-		require.Equal(t, "profile paths", c.Name)
-		require.Equal(t, OK, c.Status)
-		require.Empty(t, c.Fix)
-	})
-
-	t.Run("all present is ok", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{stats: map[string]os.FileInfo{
-			"/home/user/docs": dirInfo("docs"),
-		}}
-		c := checkProfilePaths(env, []string{"/home/user/docs:/docs"})
-		require.Equal(t, OK, c.Status)
-		require.Empty(t, c.Fix)
-	})
-
-	t.Run("missing warns and lists it", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkProfilePaths(env, []string{"/home/user/missing:/missing"})
-		require.Equal(t, Warn, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "/home/user/missing")
-	})
-}
-
 func TestCheckExternalDrives(t *testing.T) {
 	t.Parallel()
 
 	t.Run("none configured is ok", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkExternalDrives(env, nil)
+		c := checkExternalDrives(&fakeEnv{}, nil)
 		require.Equal(t, "external drives", c.Name)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
 	})
 
-	t.Run("missing mountpoint fails and lists it", func(t *testing.T) {
+	t.Run("mounted drive is ok", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkExternalDrives(env, []string{"usb:/media/usb"})
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "/media/usb")
-	})
-
-	t.Run("present is ok", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{stats: map[string]os.FileInfo{
-			"/media/usb": dirInfo("usb"),
+		env := &fakeEnv{mounts: map[string]string{
+			"/dev/mapper/luks-data": "/run/media/user/data",
 		}}
-		c := checkExternalDrives(env, []string{"usb:/media/usb"})
+		c := checkExternalDrives(env, []string{"data:/dev/mapper/luks-data:/run/media/user/data"})
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
+	})
+
+	t.Run("mountpoint present but nothing mounted on it fails", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			stats:  map[string]os.FileInfo{"/run/media/user/data": dirInfo("data")},
+			mounts: map[string]string{},
+		}
+		c := checkExternalDrives(env, []string{"data:/dev/mapper/luks-data:/run/media/user/data"})
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "/dev/mapper/luks-data")
+		require.Contains(t, c.Detail, "/run/media/user/data")
+	})
+
+	t.Run("mounted drive whose mountpoint cannot be statted is still ok", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			stats:  map[string]os.FileInfo{},
+			mounts: map[string]string{"/dev/mapper/luks-data": "/run/media/user/data"},
+		}
+		c := checkExternalDrives(env, []string{"data:/dev/mapper/luks-data:/run/media/user/data"})
+		require.Equal(t, OK, c.Status)
+	})
+
+	t.Run("drive mounted somewhere else fails", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{mounts: map[string]string{
+			"/dev/mapper/luks-data": "/mnt/elsewhere",
+		}}
+		c := checkExternalDrives(env, []string{"data:/dev/mapper/luks-data:/run/media/user/data"})
+		require.Equal(t, Fail, c.Status)
+	})
+
+	t.Run("entry that is not label:device:mountpoint fails and names the entry", func(t *testing.T) {
+		t.Parallel()
+
+		c := checkExternalDrives(&fakeEnv{}, []string{"data:/run/media/user/data"})
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "data:/run/media/user/data")
+	})
+
+	t.Run("every unmounted drive is named, not just the first", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{mounts: map[string]string{}}
+		c := checkExternalDrives(env, []string{
+			"data:/dev/mapper/luks-data:/run/media/user/data",
+			"backup:/dev/mapper/luks-backup:/run/media/user/backup",
+		})
+		require.Equal(t, Fail, c.Status)
+		require.Contains(t, c.Detail, "data")
+		require.Contains(t, c.Detail, "backup")
 	})
 }
 
@@ -409,10 +420,11 @@ func TestProfile(t *testing.T) {
 		}
 		cfg := &types.Config{Profiles: map[string]types.Profile{"work": validProfile("work")}}
 		checks := Profile(env, cfg, "docker", "work")
-		require.Len(t, checks, 9)
+		require.Len(t, checks, 10)
 
 		names := []string{
 			"profile config",
+			"profile source",
 			"profile image",
 			"profile container",
 			"profile socket",

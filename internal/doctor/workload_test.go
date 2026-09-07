@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/qubesome/cli/internal/files"
@@ -12,7 +13,9 @@ import (
 func validWorkloadConfig(profileNames ...string) *types.Config {
 	profiles := map[string]types.Profile{}
 	for _, n := range profileNames {
-		profiles[n] = validProfile(n)
+		p := validProfile(n)
+		p.Path = n
+		profiles[n] = p
 	}
 
 	return &types.Config{
@@ -27,7 +30,7 @@ func TestCheckWorkloadConfig(t *testing.T) {
 	t.Run("nil config fails", func(t *testing.T) {
 		t.Parallel()
 
-		c := checkWorkloadConfig(nil, "work", "term")
+		c := checkWorkloadConfig(nil, rootSource(nil), "work", "term")
 		require.Equal(t, "workload config", c.Name)
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
@@ -38,7 +41,7 @@ func TestCheckWorkloadConfig(t *testing.T) {
 		t.Parallel()
 
 		cfg := validWorkloadConfig("work", "personal")
-		c := checkWorkloadConfig(cfg, "bogus", "term")
+		c := checkWorkloadConfig(cfg, rootSource(cfg), "bogus", "term")
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Detail, "work")
@@ -54,7 +57,7 @@ func TestCheckWorkloadConfig(t *testing.T) {
 		mustWriteFile(t, cfg.RootDir+"/work/workloads/term.yaml", "name: term\n")
 		mustWriteFile(t, cfg.RootDir+"/work/workloads/editor.yaml", "name: editor\n")
 
-		c := checkWorkloadConfig(cfg, "work", "bogus")
+		c := checkWorkloadConfig(cfg, rootSource(cfg), "work", "bogus")
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Detail, "term")
@@ -69,9 +72,56 @@ func TestCheckWorkloadConfig(t *testing.T) {
 		mustMkdirAll(t, cfg.RootDir+"/work/workloads")
 		mustWriteFile(t, cfg.RootDir+"/work/workloads/term.yaml", "name: term\n")
 
-		c := checkWorkloadConfig(cfg, "work", "term")
+		c := checkWorkloadConfig(cfg, rootSource(cfg), "work", "term")
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
+	})
+
+	t.Run("workloads are found under the profile path, not the profile name", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := validWorkloadConfig("personal")
+		cfg.RootDir = t.TempDir()
+
+		p := cfg.Profiles["personal"]
+		p.Path = "qubesome/personal"
+		cfg.Profiles["personal"] = p
+
+		mustMkdirAll(t, cfg.RootDir+"/qubesome/personal/workloads")
+		mustWriteFile(t, cfg.RootDir+"/qubesome/personal/workloads/chrome.yaml", "name: chrome\n")
+
+		c := checkWorkloadConfig(cfg, rootSource(cfg), "personal", "chrome")
+		require.Equal(t, OK, c.Status)
+		require.Empty(t, c.Fix)
+	})
+
+	t.Run("an absolute profile path resolves against the config root dir", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := validWorkloadConfig("work")
+		cfg.RootDir = t.TempDir()
+
+		p := cfg.Profiles["work"]
+		p.Path = filepath.Join(cfg.RootDir, "work")
+		cfg.Profiles["work"] = p
+
+		mustMkdirAll(t, cfg.RootDir+"/work/workloads")
+		mustWriteFile(t, cfg.RootDir+"/work/workloads/term.yaml", "name: term\n")
+
+		c := checkWorkloadConfig(cfg, rootSource(cfg), "work", "term")
+		require.Equal(t, OK, c.Status)
+	})
+
+	t.Run("a workloads dir that is not there names the dir it looked in", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := validWorkloadConfig("work")
+		cfg.RootDir = t.TempDir()
+
+		c := checkWorkloadConfig(cfg, rootSource(cfg), "work", "term")
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, cfg.RootDir+"/work/workloads")
 	})
 }
 
@@ -206,55 +256,6 @@ func TestCheckWorkloadHostAccess(t *testing.T) {
 		c := checkWorkloadHostAccess(w, eff)
 		require.Equal(t, Warn, c.Status)
 		require.Contains(t, c.Detail, "/home/user/docs")
-	})
-}
-
-func TestCheckWorkloadPaths(t *testing.T) {
-	t.Parallel()
-
-	t.Run("missing path warns", func(t *testing.T) {
-		t.Parallel()
-
-		eff := types.EffectiveWorkload{
-			Workload: types.Workload{
-				HostAccess: types.HostAccess{
-					Paths: []string{"/home/user/docs:/docs"},
-				},
-			},
-		}
-		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkWorkloadPaths(env, eff)
-		require.Equal(t, "workload paths", c.Name)
-		require.Equal(t, Warn, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "/home/user/docs")
-	})
-
-	t.Run("present path is ok", func(t *testing.T) {
-		t.Parallel()
-
-		eff := types.EffectiveWorkload{
-			Workload: types.Workload{
-				HostAccess: types.HostAccess{
-					Paths: []string{"/home/user/docs:/docs"},
-				},
-			},
-		}
-		env := &fakeEnv{stats: map[string]os.FileInfo{
-			"/home/user/docs": dirInfo("docs"),
-		}}
-		c := checkWorkloadPaths(env, eff)
-		require.Equal(t, OK, c.Status)
-		require.Empty(t, c.Fix)
-	})
-
-	t.Run("no paths is ok", func(t *testing.T) {
-		t.Parallel()
-
-		eff := types.EffectiveWorkload{}
-		env := &fakeEnv{}
-		c := checkWorkloadPaths(env, eff)
-		require.Equal(t, OK, c.Status)
 	})
 }
 

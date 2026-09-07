@@ -20,7 +20,15 @@ type Options struct {
 func Run(env Env, o Options) *Report {
 	report := &Report{}
 
-	report.Add("Environment", Environment(env, o.Runner))
+	// The environment section reports on the container runner, so it has
+	// to be told which one. A profile names its own, and a host with both
+	// installed otherwise gets asked about the runner it is not using.
+	runner := o.Runner
+	if profile, ok := o.Config.Profile(o.Profile); ok {
+		runner = runnerFor(runner, *profile)
+	}
+
+	report.Add("Environment", Environment(env, runner))
 
 	if o.Profile == "" {
 		return report

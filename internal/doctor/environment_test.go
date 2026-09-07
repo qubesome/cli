@@ -19,6 +19,8 @@ type fakeEnv struct {
 	globs  map[string][]string
 	usb    map[string][]string
 	usbErr map[string]error
+	mounts map[string]string
+	links  map[string]string
 }
 
 type fakeOutput struct {
@@ -40,6 +42,20 @@ func (f *fakeEnv) Stat(path string) (os.FileInfo, error) {
 	}
 
 	return nil, os.ErrNotExist
+}
+
+// Lstat answers from the same table as Stat, since no test needs a
+// symlink to be judged differently from its target.
+func (f *fakeEnv) Lstat(path string) (os.FileInfo, error) {
+	return f.Stat(path)
+}
+
+func (f *fakeEnv) Readlink(path string) (string, error) {
+	if target, ok := f.links[path]; ok {
+		return target, nil
+	}
+
+	return "", os.ErrNotExist
 }
 
 func (f *fakeEnv) Getenv(key string) string {
@@ -78,6 +94,12 @@ func (f *fakeEnv) USBNamed(names []string) ([]string, error) {
 	}
 
 	return matches, nil
+}
+
+// Mounted answers from a device to mountpoint table, the way
+// /proc/mounts does.
+func (f *fakeEnv) Mounted(device, mount string) (bool, error) {
+	return f.mounts[device] == mount, nil
 }
 
 type fakeFileInfo struct {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/qubesome/cli/internal/runners/util/usb"
+	"github.com/qubesome/cli/internal/util/drive"
 	"golang.org/x/sys/execabs"
 )
 
@@ -21,6 +22,15 @@ type Env interface {
 
 	// Stat reports on a path.
 	Stat(path string) (os.FileInfo, error)
+
+	// Lstat reports on a path without following a final symlink, so that
+	// a link is judged as itself rather than as whatever it points at.
+	Lstat(path string) (os.FileInfo, error)
+
+	// Readlink returns the target of a symlink. A running profile is
+	// reached through one, so this is how doctor gets back to the
+	// directory a config was really sourced from.
+	Readlink(path string) (string, error)
 
 	// Getenv reads an environment variable.
 	Getenv(key string) string
@@ -39,6 +49,12 @@ type Env interface {
 	// device nodes they refer to, returning nothing for a name that
 	// matches no attached device.
 	USBNamed(names []string) ([]string, error)
+
+	// Mounted reports whether device is mounted at mount, by reading the
+	// kernel's mount table. Statting the mountpoint answers a different
+	// question, since the directory a drive mounts over is there whether
+	// or not anything is mounted on it.
+	Mounted(device, mount string) (bool, error)
 }
 
 // OSEnv is the real host.
@@ -62,6 +78,14 @@ func (e *OSEnv) Stat(path string) (os.FileInfo, error) {
 	return os.Stat(path)
 }
 
+func (e *OSEnv) Lstat(path string) (os.FileInfo, error) {
+	return os.Lstat(path)
+}
+
+func (e *OSEnv) Readlink(path string) (string, error) {
+	return os.Readlink(path)
+}
+
 func (e *OSEnv) Getenv(key string) string {
 	return os.Getenv(key)
 }
@@ -81,6 +105,10 @@ func (e *OSEnv) Glob(pattern string) ([]string, error) {
 
 func (e *OSEnv) USBNamed(names []string) ([]string, error) {
 	return usb.NamedDevices(names)
+}
+
+func (e *OSEnv) Mounted(device, mount string) (bool, error) {
+	return drive.Mounts(device, mount)
 }
 
 func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {

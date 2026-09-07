@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
 	"go.yaml.in/yaml/v3"
@@ -14,7 +15,9 @@ import (
 
 // Workload diagnoses one workload of a profile.
 func Workload(env Env, cfg *types.Config, runner, profileName, workloadName string) []Check {
-	configCheck := checkWorkloadConfig(cfg, profileName, workloadName)
+	src := resolveSource(env, cfg, profileName)
+
+	configCheck := checkWorkloadConfig(cfg, src, profileName, workloadName)
 	if configCheck.Status != OK {
 		// Every later check depends on a valid, locatable workload.
 		// Returning here stops them from failing for the same reason
@@ -23,9 +26,15 @@ func Workload(env Env, cfg *types.Config, runner, profileName, workloadName stri
 	}
 
 	profile := cfg.Profiles[profileName]
-	bin := files.ContainerRunnerBinary(runner)
+	bin := files.ContainerRunnerBinary(runnerFor(runner, profile))
 
-	w, err := loadWorkload(cfg, profileName, workloadName)
+	// ApplyProfile matches a workload's paths against the profile's
+	// allowlist with both sides expanded, and the path check below reads
+	// them as a start would, so the variables they are written against
+	// have to be registered before either runs.
+	primeExpansion(src, profile)
+
+	w, err := loadWorkload(src, profile, workloadName)
 	if err != nil {
 		return []Check{
 			configCheck,
@@ -44,8 +53,8 @@ func Workload(env Env, cfg *types.Config, runner, profileName, workloadName stri
 		checkWorkloadImage(env, bin, w.Image),
 		checkWorkloadProfileRunning(env, bin, profileName),
 		checkWorkloadHostAccess(w, effective),
-		checkDevices(env, "workload devices", effective.Workload.HostAccess),
-		checkWorkloadPaths(env, effective),
+		checkWorkloadDevices(env, effective.Workload.HostAccess),
+		checkMappedPaths(env, "workload paths", effective.Workload.HostAccess.Paths),
 		checkWorkloadValidation(effective),
 	}
 }
@@ -53,7 +62,7 @@ func Workload(env Env, cfg *types.Config, runner, profileName, workloadName stri
 // checkWorkloadConfig confirms that a config was loaded, that the
 // requested profile exists, and that the requested workload can be found
 // among the profile's workload files.
-func checkWorkloadConfig(cfg *types.Config, profileName, workloadName string) Check {
+func checkWorkloadConfig(cfg *types.Config, src source, profileName, workloadName string) Check {
 	if cfg == nil {
 		return Check{
 			Name:   "workload config",
@@ -78,16 +87,25 @@ func checkWorkloadConfig(cfg *types.Config, profileName, workloadName string) Ch
 		}
 	}
 
-	workloadFiles, err := cfg.WorkloadFiles()
+	dir, err := workloadsDir(src, cfg.Profiles[profileName])
 	if err != nil {
 		return Check{
 			Name:   "workload config",
 			Status: Fail,
-			Detail: fmt.Sprintf("could not list workload files: %s", err),
+			Detail: fmt.Sprintf("could not resolve the profile's workloads dir: %s", err),
 		}
 	}
 
-	names := workloadNames(workloadFiles, profileName)
+	names, err := workloadNames(dir)
+	if err != nil {
+		return Check{
+			Name:   "workload config",
+			Status: Fail,
+			Detail: fmt.Sprintf("could not read %s: %s", dir, err),
+			Fix:    "A profile's workloads live under its path. Create the directory, or fix the profile's path.",
+		}
+	}
+
 	for _, n := range names {
 		if n == workloadName {
 			return Check{
@@ -100,73 +118,85 @@ func checkWorkloadConfig(cfg *types.Config, profileName, workloadName string) Ch
 
 	sort.Strings(names)
 
+	known := strings.Join(names, ", ")
+	if known == "" {
+		known = fmt.Sprintf("none found under %s", dir)
+	}
+
 	return Check{
 		Name:   "workload config",
 		Status: Fail,
 		Detail: fmt.Sprintf("workload %q is not defined for profile %q, known workloads: %s",
-			workloadName, profileName, strings.Join(names, ", ")),
+			workloadName, profileName, known),
 		Fix: "Check the workload name for typos, or add a file for it under the profile's workloads directory.",
 	}
 }
 
-// workloadNames extracts the workload names defined for profileName out
-// of the paths WorkloadFiles returned. A workload's name is its file's
-// base name without its extension, matching how internal/profiles reads
-// them, and a path belongs to profileName when its parent directory is
-// that profile's "workloads" directory.
-func workloadNames(workloadFiles []string, profileName string) []string {
-	var names []string
-
-	for _, f := range workloadFiles {
-		dir := filepath.Dir(f)
-		if filepath.Base(dir) != "workloads" {
-			continue
-		}
-		if filepath.Base(filepath.Dir(dir)) != profileName {
-			continue
-		}
-
-		names = append(names, strings.TrimSuffix(filepath.Base(f), filepath.Ext(f)))
+// workloadsDir resolves the directory a profile's workload files live in,
+// the way qubesome run resolves it.
+//
+// A profile's workloads descend from its path, which is not necessarily
+// its name, so deriving the directory from the profile name finds nothing
+// for any profile whose path differs from it.
+func workloadsDir(src source, profile types.Profile) (string, error) {
+	rel, err := filepath.Rel(src.root, profile.Path)
+	if err != nil {
+		// Rel fails when exactly one side is absolute, which is the case
+		// for the relative profile path a config normally carries.
+		return files.WorkloadsDir(src.root, profile.Path)
 	}
 
-	return names
+	return files.WorkloadsDir(src.root, rel)
+}
+
+// workloadNames lists the workloads defined in dir. A workload's name is
+// its file's base name without its extension, matching how
+// internal/profiles reads them.
+func workloadNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
+			continue
+		}
+
+		names = append(names, strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())))
+	}
+
+	return names, nil
 }
 
 // loadWorkload reads and parses the workload's file, mirroring how
-// internal/profiles hydrates it, since that logic is not reachable here
+// qubesome run hydrates it, since that logic is not reachable here
 // without an import cycle.
-func loadWorkload(cfg *types.Config, profileName, workloadName string) (types.Workload, error) {
-	workloadFiles, err := cfg.WorkloadFiles()
+func loadWorkload(src source, profile types.Profile, workloadName string) (types.Workload, error) {
+	dir, err := workloadsDir(src, profile)
 	if err != nil {
 		return types.Workload{}, err
 	}
 
-	for _, f := range workloadFiles {
-		dir := filepath.Dir(f)
-		if filepath.Base(dir) != "workloads" || filepath.Base(filepath.Dir(dir)) != profileName {
-			continue
-		}
-
-		if strings.TrimSuffix(filepath.Base(f), filepath.Ext(f)) != workloadName {
-			continue
-		}
-
-		data, err := os.ReadFile(f)
-		if err != nil {
-			return types.Workload{}, err
-		}
-
-		var w types.Workload
-		if err := yaml.Unmarshal(data, &w); err != nil {
-			return types.Workload{}, err
-		}
-
-		w.Name = workloadName
-
-		return w, nil
+	path, err := securejoin.SecureJoin(dir, workloadName+".yaml")
+	if err != nil {
+		return types.Workload{}, err
 	}
 
-	return types.Workload{}, fmt.Errorf("workload %q not found for profile %q", workloadName, profileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return types.Workload{}, err
+	}
+
+	var w types.Workload
+	if err := yaml.Unmarshal(data, &w); err != nil {
+		return types.Workload{}, err
+	}
+
+	w.Name = workloadName
+
+	return w, nil
 }
 
 // checkWorkloadImage reports whether the workload's image is present
@@ -318,46 +348,6 @@ func listDrops(label string, requested, got []string) []string {
 	}
 
 	return dropped
-}
-
-// checkWorkloadPaths reports on the host source side of the effective
-// workload's mapped paths.
-func checkWorkloadPaths(env Env, effective types.EffectiveWorkload) Check {
-	paths := effective.Workload.HostAccess.Paths
-	if len(paths) == 0 {
-		return Check{
-			Name:   "workload paths",
-			Status: OK,
-			Detail: "no paths are configured",
-		}
-	}
-
-	var missing []string
-	for _, p := range paths {
-		src := p
-		if i := strings.Index(p, ":"); i >= 0 {
-			src = p[:i]
-		}
-
-		if _, err := env.Stat(src); err != nil {
-			missing = append(missing, src)
-		}
-	}
-
-	if len(missing) > 0 {
-		return Check{
-			Name:   "workload paths",
-			Status: Warn,
-			Detail: fmt.Sprintf("missing on the host: %s", strings.Join(missing, ", ")),
-			Fix:    "These are skipped with a warning at start. Create them, or remove them from the config.",
-		}
-	}
-
-	return Check{
-		Name:   "workload paths",
-		Status: OK,
-		Detail: fmt.Sprintf("all %d mapped path(s) are present", len(paths)),
-	}
 }
 
 // checkWorkloadValidation reports on the effective workload's overall
