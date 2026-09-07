@@ -32,7 +32,7 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		return nil, errors.New("sandbox: seccomp is enabled but no filter descriptor was given")
 	}
 
-	args := make([]string, 0, 36+3*len(s.Devices)+3*len(s.Mounts)+3*len(s.Env)+len(s.Args))
+	args := make([]string, 0, 37+3*len(s.Devices)+3*len(s.Mounts)+3*len(s.Env)+len(s.Args))
 	args = append(args,
 		// The image is shared read-only and every write lands in a tmpfs
 		// that goes away with the sandbox.
@@ -73,9 +73,29 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		// remove.
 		"--ro-bind", "/sys", "/sys",
 
+		// /tmp holds nothing from the image that the sandbox needs, and a
+		// tmpfs bwrap mounts is owned by the sandbox user whatever mode
+		// the image gave /tmp, so the compositor can always create its
+		// runtime directory there.
+		//
+		// There is deliberately no equivalent on /run. The root is
+		// already an overlay whose writes go to a tmpfs and are
+		// discarded with the sandbox, so a second tmpfs would add
+		// nothing and would hide whatever the image ships under /run,
+		// /run/user/1000 included.
 		"--tmpfs", "/tmp",
-		"--tmpfs", "/run",
 	)
+
+	// The XDG runtime directory has to exist before anything inside looks
+	// for it, and an image is not obliged to ship one. bwrap creates it
+	// while it still holds the privileges of the sandbox setup, so the
+	// mode of the image's /run does not matter, and 0700 owned by the
+	// sandbox user is what the specification requires of it. A --bind on
+	// the same path is emitted later and still wins, so a caller with a
+	// host directory to put there is unaffected.
+	if s.RuntimeDir != "" {
+		args = append(args, "--perms", "0700", "--dir", s.RuntimeDir)
+	}
 
 	if s.Net == NetNone {
 		args = append(args, "--unshare-net")

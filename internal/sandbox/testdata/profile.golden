@@ -24,8 +24,10 @@ ALL
 /sys
 --tmpfs
 /tmp
---tmpfs
-/run
+--perms
+0700
+--dir
+/run/user/1000
 --unshare-net
 --disable-userns
 --hostname

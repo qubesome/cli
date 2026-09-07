@@ -46,12 +46,13 @@ func TestArgsProfile(t *testing.T) {
 	t.Parallel()
 
 	args, err := Args(Spec{
-		Rootfs:   "/store/unpacked/sha256-abc/rootfs",
-		Hostname: "qubesome-work",
-		UID:      1000,
-		GID:      1000,
-		Net:      NetNone,
-		Seccomp:  true,
+		Rootfs:     "/store/unpacked/sha256-abc/rootfs",
+		Hostname:   "qubesome-work",
+		UID:        1000,
+		GID:        1000,
+		Net:        NetNone,
+		Seccomp:    true,
+		RuntimeDir: "/run/user/1000",
 
 		DisableUserns: true,
 		Env: []string{
@@ -142,6 +143,63 @@ func TestArgsTmpfsPrecedesItsBinds(t *testing.T) {
 
 	assert.Less(t, indexOfArg(args, "--tmpfs", "/tmp"),
 		indexOfArg(args, "--bind", "/tmp/.X11-unix"))
+}
+
+// The root is already an overlay whose writes are discarded with the
+// sandbox, so a tmpfs on /run would only hide what the image ships there,
+// /run/user/1000 included.
+func TestArgsLeavesRunToTheImage(t *testing.T) {
+	t.Parallel()
+
+	args, err := Args(Spec{Rootfs: "/rootfs", Args: []string{"/bin/sh"}}, -1)
+	require.NoError(t, err)
+
+	assert.Equal(t, -1, indexOfArg(args, "--tmpfs", "/run"))
+}
+
+// XDG_RUNTIME_DIR has to exist whatever the image ships, and the
+// specification requires it to be private to its owner.
+func TestArgsCreatesTheRuntimeDir(t *testing.T) {
+	t.Parallel()
+
+	args, err := Args(Spec{
+		Rootfs:     "/rootfs",
+		RuntimeDir: "/run/user/1000",
+		Args:       []string{"/bin/sh"},
+	}, -1)
+	require.NoError(t, err)
+
+	i := indexOfArg(args, "--dir", "/run/user/1000")
+	require.NotEqual(t, -1, i)
+	require.Greater(t, i, 1)
+	assert.Equal(t, []string{"--perms", "0700"}, args[i-2:i])
+}
+
+// A caller with a host directory for the runtime dir binds it as a mount,
+// and that bind is emitted later so it lands on top of the created one.
+func TestArgsRuntimeDirPrecedesABindOnTheSamePath(t *testing.T) {
+	t.Parallel()
+
+	args, err := Args(Spec{
+		Rootfs:     "/rootfs",
+		RuntimeDir: "/run/user/1000",
+		Mounts:     []Mount{{Src: "/host/user", Dst: "/run/user/1000"}},
+		Args:       []string{"/bin/sh"},
+	}, -1)
+	require.NoError(t, err)
+
+	assert.Less(t, indexOfArg(args, "--dir", "/run/user/1000"),
+		indexOfArg(args, "--bind", "/host/user"))
+}
+
+func TestArgsOmitsAnEmptyRuntimeDir(t *testing.T) {
+	t.Parallel()
+
+	args, err := Args(Spec{Rootfs: "/rootfs", Args: []string{"/bin/sh"}}, -1)
+	require.NoError(t, err)
+
+	assert.NotContains(t, args, "--dir")
+	assert.NotContains(t, args, "--perms")
 }
 
 // Mesa reads sysfs to enumerate DRM devices, so a sandbox without /sys has

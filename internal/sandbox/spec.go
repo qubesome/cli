@@ -36,6 +36,14 @@ type Spec struct {
 	// Devices are host device nodes shared with the sandbox.
 	Devices []string
 
+	// RuntimeDir is an XDG runtime directory created inside the sandbox,
+	// or empty for none. It is created 0700 and owned by the sandbox
+	// user, which is what the specification requires of XDG_RUNTIME_DIR,
+	// and it exists whether or not the image ships one. Relying on the
+	// image to ship it is what left dbus with no runtime directory to
+	// work in.
+	RuntimeDir string
+
 	// Env is the complete environment of the sandboxed process. Container
 	// runners applied the image environment implicitly and bwrap does not,
 	// so the image environment belongs here too.

@@ -716,6 +716,11 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 
 	mounts = append(mounts, sandbox.Mount{Src: filepath.Join(userDir, "shm"), Dst: "/dev/shm"})
 
+	// The window manager and everything it starts run with
+	// XDG_RUNTIME_DIR set to appRuntimeDir, so it has to exist either way.
+	// Only the branch below puts a host directory there, and a profile on
+	// the host dbus was left with nothing at all, which is what stopped
+	// dbus setting up its transient service directory.
 	if profile.Dbus {
 		mounts = append(mounts,
 			sandbox.Mount{Src: "/run/dbus/system_bus_socket", Dst: "/run/dbus/system_bus_socket"},
@@ -723,7 +728,7 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		)
 	} else {
 		mounts = append(mounts,
-			sandbox.Mount{Src: userDir, Dst: "/run/user/1000"},
+			sandbox.Mount{Src: userDir, Dst: appRuntimeDir},
 			sandbox.Mount{Src: machineIDPath, Dst: "/etc/machine-id", ReadOnly: true},
 		)
 	}
@@ -794,6 +799,7 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		Net:         sandbox.NetNone,
 		Seccomp:     !profile.SeccompUnconfined,
 		Interactive: interactive,
+		RuntimeDir:  appRuntimeDir,
 		// The profile sandbox runs a compositor, an X server and a
 		// window manager, none of which nest a sandbox of their own.
 		DisableUserns: true,
