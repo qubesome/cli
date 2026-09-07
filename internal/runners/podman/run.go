@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/keyring"
 	"github.com/qubesome/cli/internal/keyring/backend"
 	"github.com/qubesome/cli/internal/runners/util/container"
@@ -168,7 +169,24 @@ func Run(ew types.EffectiveWorkload) error {
 	//nolint
 	if wl.HostAccess.Mime {
 		pdir := files.ProfileDir(ew.Profile.Name)
-		homedir, err := container.HomeDir(runnerBinary, wl.Image)
+
+		// This runner is deleted in SP2 once workloads move to bwrap, so
+		// resolving the bundle through the image store here rather than
+		// restructuring this runner around it is throwaway: the store
+		// pull/unpack duplicates what the container runtime already does
+		// for wl.Image below.
+		store := images.NewStore()
+		bundle, err := store.Resolve(wl.Image)
+		if err != nil {
+			if err := store.Pull(wl.Image); err != nil {
+				return err
+			}
+			if bundle, err = store.Unpack(wl.Image); err != nil {
+				return err
+			}
+		}
+
+		homedir, err := container.HomeDir(bundle)
 		if err != nil {
 			return err
 		}
