@@ -141,3 +141,163 @@ func TestWorkloadShmPathIsPerWorkload(t *testing.T) {
 
 	require.NotEqual(t, a, b)
 }
+
+func TestValidateName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		ok    bool
+	}{
+		{name: "plain", input: "work", ok: true},
+		{name: "hyphenated", input: "work-2", ok: true},
+		{name: "empty", input: "", ok: false},
+		{name: "traversal", input: "..", ok: false},
+		{name: "traversal with a separator", input: "../other", ok: false},
+		{name: "absolute", input: "/etc", ok: false},
+		{name: "nested", input: "work/sub", ok: false},
+		{name: "dot", input: ".", ok: false},
+		{name: "hidden", input: ".ssh", ok: false},
+		{name: "too long", input: strings.Repeat("a", nameMax+1), ok: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := ValidateName("profile name", tc.input)
+			if tc.ok {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, ErrUnsafePath)
+		})
+	}
+}
+
+func TestJoinRel(t *testing.T) {
+	t.Parallel()
+
+	const base = "/base"
+
+	tests := []struct {
+		name string
+		rel  string
+		want string
+	}{
+		{name: "descends", rel: "a/b", want: "/base/a/b"},
+		{name: "empty is the base itself", rel: "", want: "/base"},
+		{name: "dot is the base itself", rel: ".", want: "/base"},
+		{name: "traversal", rel: "../escape"},
+		{name: "traversal in the middle", rel: "a/../../escape"},
+		{name: "traversal on its own", rel: ".."},
+		{name: "absolute", rel: "/etc/passwd"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := JoinRel(base, tc.rel)
+			if tc.want == "" {
+				require.ErrorIs(t, err, ErrUnsafePath)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// Every profile path under the run dir is built from a name that reaches
+// qubesome from a command line, a config or an RPC.
+//
+// HOME is what the run dir resolves from, so this test cannot run in
+// parallel.
+func TestProfileRunPathsRefuseAnUnsafeName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	unsafe := []string{"", "..", "../other", "/etc", "work/sub"}
+
+	builders := map[string]func(string) (string, error){
+		"ClientCookiePath":    ClientCookiePath,
+		"IsolatedRunUserPath": IsolatedRunUserPath,
+		"ServerCookiePath":    ServerCookiePath,
+		"SocketPath":          SocketPath,
+		"WorkloadShmPath":     func(p string) (string, error) { return WorkloadShmPath(p, "term") },
+		"WorkloadShmWorkload": func(w string) (string, error) { return WorkloadShmPath("work", w) },
+	}
+
+	for name, build := range builders {
+		t.Run(name, func(t *testing.T) {
+			for _, in := range unsafe {
+				_, err := build(in)
+				require.ErrorIs(t, err, ErrUnsafePath, "%s(%q)", name, in)
+			}
+
+			got, err := build("work")
+			require.NoError(t, err)
+			require.True(t, strings.HasPrefix(got, RunUserQubesome()+string(filepath.Separator)),
+				"%s returned %q, which is outside %q", name, got, RunUserQubesome())
+		})
+	}
+}
+
+func TestWorkloadsDir(t *testing.T) {
+	t.Parallel()
+
+	const root = "/root"
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "under the profile path", path: "work", want: "/root/work/workloads"},
+		{name: "profile at the config root", path: "", want: "/root/workloads"},
+		{name: "traversal", path: "../escape"},
+		{name: "absolute", path: "/etc"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := WorkloadsDir(root, tc.path)
+			if tc.want == "" {
+				require.ErrorIs(t, err, ErrUnsafePath)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// HOME is what the git root resolves from, so this test cannot run in
+// parallel.
+func TestGitDirPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	t.Run("keeps a clone under the git root", func(t *testing.T) {
+		got, err := GitDirPath("git@github.com:qubesome/dotfiles")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(GitRoot(), "github.com/qubesome/dotfiles"), got)
+	})
+
+	t.Run("refuses a url that leaves the git root", func(t *testing.T) {
+		for _, url := range []string{"../escape", "a/../../escape", ""} {
+			_, err := GitDirPath(url)
+			require.ErrorIs(t, err, ErrUnsafePath, "url %q", url)
+		}
+	})
+
+	t.Run("passes an absolute path through untouched", func(t *testing.T) {
+		got, err := GitDirPath("/srv/dotfiles")
+		require.NoError(t, err)
+		require.Equal(t, "/srv/dotfiles", got)
+	})
+}

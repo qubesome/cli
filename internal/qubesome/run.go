@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
@@ -172,7 +171,7 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 		}
 	}
 
-	pp, err := securejoin.SecureJoin(in.Config.RootDir, profile.Path)
+	pp, err := files.JoinRel(in.Config.RootDir, profile.Path)
 	if err != nil {
 		return err
 	}

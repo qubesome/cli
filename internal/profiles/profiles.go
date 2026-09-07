@@ -15,7 +15,6 @@ import (
 	"text/template"
 	"time"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/transport/ssh"
@@ -247,7 +246,7 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 	}
 
 	// When sourcing from git, ensure profile path is relative to the git repository.
-	pp, err := securejoin.SecureJoin(filepath.Dir(cfgPath), p.Path)
+	pp, err := files.JoinRel(filepath.Dir(cfgPath), p.Path)
 	if err != nil {
 		return err
 	}

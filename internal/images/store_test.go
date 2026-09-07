@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -134,10 +135,35 @@ func TestStoreBundleDirHostileDigest(t *testing.T) {
 	root := t.TempDir()
 	s := &Store{Root: root}
 
-	dir, err := s.bundleDir("sha256:../../../../../../etc/passwd")
-	require.NoError(t, err)
+	tests := []struct {
+		name   string
+		digest string
+	}{
+		{name: "traversal", digest: "sha256:../../../../../../etc/passwd"},
+		{name: "absolute", digest: "sha256:/etc/passwd"},
+		{name: "empty", digest: ""},
+	}
 
-	rel, err := filepath.Rel(root, dir)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// The digest is read out of a layout index on disk, so refusing
+			// it outright says more than a path that was quietly rewritten
+			// to sit inside the store.
+			_, err := s.bundleDir(tc.digest)
+			require.ErrorIs(t, err, files.ErrUnsafePath)
+		})
+	}
+}
+
+func TestStoreBundleDirIsUnderTheStoreRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s := &Store{Root: root}
+
+	dir, err := s.bundleDir("sha256:" + strings.Repeat("a", 64))
 	require.NoError(t, err)
-	assert.False(t, strings.HasPrefix(rel, ".."), "bundleDir escaped the store root: %s", dir)
+	assert.Equal(t, filepath.Join(root, "unpacked", "sha256-"+strings.Repeat("a", 64)), dir)
 }

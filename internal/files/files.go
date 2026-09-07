@@ -13,14 +13,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
-
-	securejoin "github.com/cyphar/filepath-securejoin"
 )
 
 const (
 	FileMode = 0o600
 	DirMode  = 0o700
+
+	// nameMax bounds a single path component at what a filesystem takes
+	// for one, so a name cannot fail a syscall for its length alone.
+	nameMax = 255
 )
 
 var (
@@ -30,7 +33,63 @@ var (
 	// ErrMissingMappedPath is an error returned when the source of a mapped
 	// path does not exist, and cannot be created by qubesome.
 	ErrMissingMappedPath = errors.New("mapped path does not exist")
+
+	// ErrUnsafePath is an error returned when a name or a relative path
+	// would reach outside the directory it is joined to.
+	ErrUnsafePath = errors.New("unsafe path")
+
+	// nameRegex bounds the path components built from a profile or a
+	// workload name. It repeats what internal/types validates a name
+	// against, because types imports this package and cannot be imported
+	// back.
+	nameRegex = regexp.MustCompile(`^[a-zA-Z0-9\-]+$`)
 )
+
+// ValidateName reports whether name can stand as a single path component.
+//
+// The alphabet leaves out the separator and the dot, so a name can neither
+// descend nor climb, and a name that is checked once here holds for as
+// long as it is a name. kind names the field in the error.
+func ValidateName(kind, name string) error {
+	if name == "" {
+		return fmt.Errorf("%w: %s is empty", ErrUnsafePath, kind)
+	}
+	if len(name) > nameMax {
+		return fmt.Errorf("%w: %s is longer than %d bytes", ErrUnsafePath, kind, nameMax)
+	}
+	if !nameRegex.MatchString(name) {
+		return fmt.Errorf("%w: %s %q does not match %s", ErrUnsafePath, kind, name, nameRegex)
+	}
+	return nil
+}
+
+// JoinRel joins rel below base.
+//
+// rel has to be relative and no component of it may be "..", so the result
+// always descends from base. An empty rel, or ".", is base itself, which is
+// how a profile whose files sit at the root of its config is spelled.
+//
+// An escaping rel is refused rather than clamped into base. A join that
+// clamps returns a path the caller did not ask for, with nothing to say it
+// was rewritten, and these results go on to be read, created and bind
+// mounted.
+//
+// Symlinks already under base are not resolved, so the result can still
+// point through one. Every base here is either the qubesome run directory
+// or the directory a config was sourced from, and whoever can plant a
+// symlink in one of those also writes the config that says which images
+// run and which host paths they are given.
+func JoinRel(base, rel string) (string, error) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("%w: %q is absolute", ErrUnsafePath, rel)
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == ".." {
+			return "", fmt.Errorf("%w: %q leaves %q", ErrUnsafePath, rel, base)
+		}
+	}
+	return filepath.Join(base, rel), nil
+}
 
 // EnsureMappedDir prepares the host side of a bind mount source.
 //
@@ -99,15 +158,30 @@ func RunUserQubesome() string {
 	return filepath.Join(QubesomeDir(), "run")
 }
 
+// profileRunDir returns a profile's directory under the qubesome run
+// directory, refusing a profile name that is not a single path component.
+func profileRunDir(profile string) (string, error) {
+	if err := ValidateName("profile name", profile); err != nil {
+		return "", err
+	}
+	return filepath.Join(RunUserQubesome(), profile), nil
+}
+
 // ClientCookiePath returns the path to the client cookie file for the given profile.
 func ClientCookiePath(profile string) (string, error) {
-	base := RunUserQubesome()
-	return securejoin.SecureJoin(base, fmt.Sprintf("%s/.Xclient-cookie", profile))
+	dir, err := profileRunDir(profile)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, ".Xclient-cookie"), nil
 }
 
 func IsolatedRunUserPath(profile string) (string, error) {
-	base := RunUserQubesome()
-	return securejoin.SecureJoin(base, fmt.Sprintf("%s/user", profile))
+	dir, err := profileRunDir(profile)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "user"), nil
 }
 
 // WorkloadShmPath returns the /dev/shm directory for one workload of a
@@ -120,20 +194,32 @@ func IsolatedRunUserPath(profile string) (string, error) {
 // its siblings, and every container runs as the same uid, so permissions
 // would not help.
 func WorkloadShmPath(profile, workload string) (string, error) {
-	base := RunUserQubesome()
-	return securejoin.SecureJoin(base, fmt.Sprintf("%s/shm/%s", profile, workload))
+	dir, err := profileRunDir(profile)
+	if err != nil {
+		return "", err
+	}
+	if err := ValidateName("workload name", workload); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "shm", workload), nil
 }
 
 // ServerCookiePath returns the path to the server cookie file for the given profile.
 func ServerCookiePath(profile string) (string, error) {
-	base := RunUserQubesome()
-	return securejoin.SecureJoin(base, fmt.Sprintf("%s/.Xserver-cookie", profile))
+	dir, err := profileRunDir(profile)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, ".Xserver-cookie"), nil
 }
 
 // SocketPath returns the path to the socket file for the given profile.
 func SocketPath(profile string) (string, error) {
-	base := RunUserQubesome()
-	return securejoin.SecureJoin(base, fmt.Sprintf("%s/qube.sock", profile))
+	dir, err := profileRunDir(profile)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "qube.sock"), nil
 }
 
 func ProfileDir(profile string) string {
@@ -168,17 +254,29 @@ func GitDirPath(url string) (string, error) {
 	url = strings.ReplaceAll(url, ":", "/")
 	url = strings.ReplaceAll(url, "git@", "")
 
-	p, err := securejoin.SecureJoin(base, url)
+	p, err := JoinRel(base, url)
 	if err != nil {
 		return "", fmt.Errorf("cannot get git dir path for %q: %w", url, err)
+	}
+
+	// JoinRel reads an empty or dot path as the base itself. A URL that
+	// names no directory of its own would make the whole git root one
+	// repository's clone.
+	if p == base {
+		return "", fmt.Errorf("cannot get git dir path for %q: %w: it names no repository", url, ErrUnsafePath)
 	}
 
 	return p, nil
 }
 
-// WorkloadsDir returns the workloads directory path for a given Qubesome profile.
+// WorkloadsDir returns the workloads directory path for a given Qubesome
+// profile. An empty path is a profile whose files sit at root itself.
 func WorkloadsDir(root, path string) (string, error) {
-	return securejoin.SecureJoin(root, filepath.Join(path, "workloads"))
+	dir, err := JoinRel(root, path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "workloads"), nil
 }
 
 func FlatpakApps() string {
