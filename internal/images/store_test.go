@@ -80,8 +80,9 @@ func TestStoreKey(t *testing.T) {
 	}
 }
 
-// The key names a directory and an OCI ref, so it must be a single path
-// component and must carry no colon for oci:path:ref to stay unambiguous.
+// The key names a directory and an OCI tag, so it must be a single path
+// component and must carry no colon. umoci cuts its --image at the first
+// colon, so one in the key would move the split into the middle of it.
 func TestStoreKeyIsASafeSinglePathComponent(t *testing.T) {
 	t.Parallel()
 

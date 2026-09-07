@@ -72,12 +72,58 @@ func TestUnpackArgs(t *testing.T) {
 
 	layout := "/store/oci/" + xorgKey
 
+	// No oci: prefix. umoci takes a bare path[:tag], unlike skopeo above.
 	assert.Equal(t, []string{
 		"unpack",
 		"--rootless",
-		"--image", "oci:/store/oci/" + xorgKey + ":" + xorgKey,
+		"--image", "/store/oci/" + xorgKey + ":" + xorgKey,
 		"/store/unpacked/tmp-123",
 	}, unpackArgs(layout, xorgRef, "/store/unpacked/tmp-123"))
+}
+
+// The two tools spell the same layout and key differently, and passing
+// skopeo's form to umoci is what a real start failed on. Pinning the
+// difference here so it cannot be folded back into one form unnoticed.
+func TestSkopeoAndUmociImagesDiffer(t *testing.T) {
+	t.Parallel()
+
+	layout := "/store/oci/" + xorgKey
+
+	assert.Equal(t, "oci:"+layout+":"+xorgKey, skopeoImage(layout, xorgRef))
+	assert.Equal(t, layout+":"+xorgKey, umociImage(layout, xorgRef))
+	assert.NotEqual(t, skopeoImage(layout, xorgRef), umociImage(layout, xorgRef))
+	assert.NotContains(t, umociImage(layout, xorgRef), "oci:")
+
+	// umoci parses --image with strings.Cut on the first colon, so the
+	// form it is handed has to split into the layout and the key.
+	dir, tag, ok := strings.Cut(umociImage(layout, xorgRef), ":")
+	require.True(t, ok)
+	assert.Equal(t, layout, dir)
+	assert.Equal(t, xorgKey, tag)
+}
+
+// Cutting at the first colon means the layout path must not carry one.
+// storeKey never emits a colon, but the store root comes from the home
+// directory, so a colon there would have either tool work on the wrong
+// directory under a nonsense tag.
+func TestLayoutRejectsAColonInTheStorePath(t *testing.T) {
+	t.Parallel()
+
+	s := &Store{Root: "/home/awkward:name/.qubesome/images"}
+	s.cmdRunner = func(bin string, args []string) error {
+		t.Fatalf("unexpected exec of %s %v: the store path is unusable", bin, args)
+		return nil
+	}
+
+	_, err := s.layout(xorgRef)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "contains a colon")
+
+	// Neither tool can be reached without a layout, so both report it.
+	require.ErrorContains(t, s.Pull(xorgRef), "contains a colon")
+
+	_, err = s.Unpack(xorgRef)
+	require.ErrorContains(t, err, "contains a colon")
 }
 
 // Unpack must never leave a partially extracted bundle under its final

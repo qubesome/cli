@@ -33,15 +33,28 @@ func pullArgs(layout, ref string) []string {
 	return []string{
 		"copy",
 		"docker://" + ref,
-		ociRef(layout, ref),
+		skopeoImage(layout, ref),
 	}
 }
 
-// ociRef is the oci:path:ref both skopeo and umoci take. The ref part
-// carries no colon of its own, so the one separating it from the path is
-// the only one either tool has to find.
-func ociRef(layout, ref string) string {
-	return "oci:" + layout + ":" + storeKey(ref)
+// skopeoImage and umociImage build the same layout and key for the two
+// tools, which do not share a syntax for it.
+//
+// skopeo names a destination by transport, so it wants the oci: prefix.
+// umoci takes a bare path[:tag] and cuts it at the FIRST colon, so the
+// same prefix makes it read "oci" as the directory and everything after it
+// as the tag, which it then rejects as an invalid reference name. Keep the
+// two forms apart. Folding them back into one breaks whichever tool loses.
+//
+// The prefix is the whole of the difference. Once it is off, both tools cut
+// the layout from the key at the first colon, which is why a layout path
+// carrying one is refused when the layout is resolved.
+func skopeoImage(layout, ref string) string {
+	return "oci:" + umociImage(layout, ref)
+}
+
+func umociImage(layout, ref string) string {
+	return layout + ":" + storeKey(ref)
 }
 
 // Unpack extracts an image and returns its bundle.
@@ -116,7 +129,7 @@ func unpackArgs(layout, ref, dest string) []string {
 	return []string{
 		"unpack",
 		"--rootless",
-		"--image", ociRef(layout, ref),
+		"--image", umociImage(layout, ref),
 		dest,
 	}
 }

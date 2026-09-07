@@ -70,7 +70,27 @@ type Bundle struct {
 // The key is a generated single path component, but it is still joined
 // securely, as bundleDir is.
 func (s *Store) layout(ref string) (string, error) {
-	return securejoin.SecureJoin(filepath.Join(s.Root, "oci"), storeKey(ref))
+	dir, err := securejoin.SecureJoin(filepath.Join(s.Root, "oci"), storeKey(ref))
+	if err != nil {
+		return "", err
+	}
+
+	// Both tools cut the layout from the key at the FIRST colon. umoci
+	// does it on the whole --image, and skopeo on what is left once the
+	// oci: transport prefix has been taken off the front the same way. So
+	// a colon anywhere in this path would be read as the separator, and
+	// the tool would work on some other directory under some other tag.
+	// storeKey never emits one, but the root is derived from the home
+	// directory, which is not qubesome's to constrain. Refuse it here,
+	// where both tools get their path, rather than let one of them fail on
+	// a path it has already misread.
+	if strings.ContainsRune(dir, ':') {
+		return "", fmt.Errorf("image store path %q contains a colon, and skopeo and umoci both "+
+			"read the first colon as the end of the path: move the qubesome directory to a path "+
+			"without one", dir)
+	}
+
+	return dir, nil
 }
 
 // Digest resolves a reference to the manifest digest recorded in the
@@ -156,13 +176,17 @@ const (
 // entry in one layout, so whichever was pulled last owned it and a profile
 // could silently run the other image's root filesystem.
 //
-// The alphabet is what both tools accept as the ref of oci:path:ref.
+// The alphabet is what both tools accept as the tag trailing the layout
+// path, the one part of their image arguments that is spelled alike.
 // skopeo matches a ref against [A-Za-z0-9._-]+, and umoci applies the OCI
 // ref name grammar, which wants alphanumerics at both ends and single
 // separators between them. So only alphanumerics survive from the
 // reference, a run of anything else becomes a single hyphen, and a digest
 // of the whole reference is appended to keep distinct references distinct.
-// A colon never survives, which also keeps oci:path:ref unambiguous.
+// A colon never survives, which is half of what keeps the key
+// unambiguous. The other half is the layout path, which layout checks,
+// because umoci cuts at the first colon and the path comes ahead of the
+// key.
 func storeKey(ref string) string {
 	sum := sha256.Sum256([]byte(ref))
 	digest := hex.EncodeToString(sum[:keyDigestBytes])
