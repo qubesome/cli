@@ -223,7 +223,15 @@ func checkWorkloadImage(env Env, bin, image string) Check {
 // needs is up, since a workload connects to its profile's display and
 // has nowhere to attach to otherwise.
 func checkWorkloadProfileRunning(env Env, bin, profileName string) Check {
-	out, _ := env.Output(bin, "ps", "--filter", "name=qubesome-"+profileName, "--format", "{{.Names}}")
+	out, err := env.Output(bin, "ps", "--filter", "name=qubesome-"+profileName, "--format", "{{.Names}}")
+	if err != nil {
+		return Check{
+			Name:   "profile running",
+			Status: Fail,
+			Detail: fmt.Sprintf("could not check whether the profile is running: %s", firstLine(string(out))),
+			Fix:    fmt.Sprintf("Run `%s ps` directly to see the full error and act on it.", bin),
+		}
+	}
 
 	if strings.TrimSpace(string(out)) == "" {
 		return Check{

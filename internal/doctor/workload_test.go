@@ -158,12 +158,38 @@ func TestCheckWorkloadProfileRunning(t *testing.T) {
 	t.Run("empty fails", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{output: map[string]fakeOutput{}}
+		env := &fakeEnv{
+			output: map[string]fakeOutput{
+				files.DockerBinary + " ps --filter name=qubesome-work --format {{.Names}}": {
+					out: []byte(""),
+				},
+			},
+		}
 		c := checkWorkloadProfileRunning(env, files.DockerBinary, "work")
 		require.Equal(t, "profile running", c.Name)
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Fix, "qubesome start work")
+	})
+
+	t.Run("runner error fails and reports that the check could not run, not that the profile is down", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			output: map[string]fakeOutput{
+				files.DockerBinary + " ps --filter name=qubesome-work --format {{.Names}}": {
+					out: []byte("Cannot connect to the Docker daemon"),
+					err: exitError{1},
+				},
+			},
+		}
+		c := checkWorkloadProfileRunning(env, files.DockerBinary, "work")
+		require.Equal(t, "profile running", c.Name)
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "could not check")
+		require.Contains(t, c.Detail, "Cannot connect to the Docker daemon")
+		require.NotContains(t, c.Detail, "is not running")
 	})
 
 	t.Run("non-empty is ok", func(t *testing.T) {
