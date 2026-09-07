@@ -321,8 +321,26 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 	// behind, and listening on a path that already exists fails. That
 	// left the profile running with nothing serving it, and every
 	// workload it launched failing to reach the host.
-	if err := os.Remove(sockPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("failed to remove stale socket %q: %w", sockPath, err)
+	//
+	// Only a socket is removed, and Lstat rather than Stat so that a
+	// symlink is judged as itself rather than as whatever it points at.
+	// Anything else at that path is corruption or a mistake, and this
+	// runs precisely when the profile directory is already in a state
+	// nobody intended, so deleting whatever happened to be there would
+	// be worse than refusing to start.
+	fi, serr := os.Lstat(sockPath)
+	switch {
+	case serr != nil && !errors.Is(serr, fs.ErrNotExist):
+		return fmt.Errorf("failed to stat profile socket %q: %w", sockPath, serr)
+
+	case serr == nil && fi.Mode().Type()&os.ModeSocket == 0:
+		return fmt.Errorf("%q exists and is not a socket, so it was left alone: "+
+			"check what it is and remove it to start this profile", sockPath)
+
+	case serr == nil:
+		if err := os.Remove(sockPath); err != nil {
+			return fmt.Errorf("failed to remove stale socket %q: %w", sockPath, err)
+		}
 	}
 
 	go func() {
