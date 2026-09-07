@@ -17,6 +17,19 @@ const (
 	DbusBinary        = "/usr/bin/dbus-send"
 	PodmanBinary      = "/usr/bin/podman"
 	DockerBinary      = "/usr/bin/docker"
+
+	// WestonBinary is the Wayland compositor that hosts the profile's
+	// Xwayland. It runs inside the profile container, not on the host.
+	WestonBinary = "/usr/bin/weston"
+
+	// XwaylandRunBinary starts a rootful Xwayland inside an existing
+	// Wayland session and runs one X client in it. It runs inside the
+	// profile container, not on the host.
+	XwaylandRunBinary = "/usr/bin/xwayland-run"
+
+	// InProfileBinary is where the qubesome binary is bind-mounted inside
+	// the profile container.
+	InProfileBinary = "/usr/local/bin/qubesome"
 )
 
 // runnerDirs holds the directories searched for a container runner, in

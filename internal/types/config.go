@@ -109,6 +109,14 @@ type MimeHandler struct {
 	Profile  string `yaml:"profile"`
 }
 
+// Profile is the isolation boundary.
+//
+// Its workloads share one X display, so any of them can read another's
+// window contents, observe its keystrokes and read its selections. The
+// per-workload hostAccess grants govern what each workload reaches on the
+// host, which stays meaningful, but they do not make workloads private
+// from each other. Anything that needs to be unobservable by another
+// application belongs in its own profile.
 type Profile struct {
 	Name string
 	// Path defines the root path for the given profile. All other
@@ -140,7 +148,12 @@ type Profile struct {
 	ExternalDrives []string `yaml:"externalDrives"`
 
 	// Image is the container image name used for running the profile.
-	// It should contain Xephyr and any additional window managers required.
+	//
+	// It must provide weston at /usr/bin/weston and xwayland-run at
+	// /usr/bin/xwayland-run, which the profile's entrypoint runs by
+	// absolute path, along with any window managers the profile uses. An
+	// image missing either starts and exits immediately, reported as the
+	// profile exiting before it was ready.
 	Image string `yaml:"image"`
 
 	Timezone string `yaml:"timezone"`
@@ -148,12 +161,28 @@ type Profile struct {
 	DNS string `yaml:"dns"`
 
 	// WindowManager holds the command to run the Window Manager once
-	// the X server is running.
+	// the X server is running. It runs as the X server's only client, and
+	// is split into arguments without a shell, so shell syntax in it is
+	// not interpreted.
 	//
 	// Example: exec awesome
 	WindowManager string `yaml:"windowManager"`
 
-	// XephyrArgs defines additional args to be passed on to Xephyr.
+	// Fullscreen makes the profile fill a host screen instead of being a
+	// window the host window manager places.
+	//
+	// It does not grab input. Host window manager shortcuts still take
+	// precedence over the profile, whether it is fullscreen or not.
+	Fullscreen bool `yaml:"fullscreen"`
+
+	// XephyrArgs defines additional args to be passed on to the profile's
+	// X server.
+	//
+	// The name is kept for compatibility. Profiles used to run Xephyr, and
+	// renaming the field would break every existing dotfiles repository.
+	// The arguments now reach Xwayland, which accepts the same X server
+	// options, so a Xephyr specific flag configured here will no longer
+	// have an effect.
 	XephyrArgs string `yaml:"xephyrArgs"`
 }
 

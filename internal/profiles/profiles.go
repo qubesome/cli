@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -43,6 +42,20 @@ import (
 var (
 	ContainerNameFormat = "qubesome-%s"
 	defaultProfileImage = "ghcr.io/qubesome/xorg:latest"
+
+	// profileStartGrace is how long the profile container is watched for
+	// an early exit before it is considered started. It does not have to
+	// outlast a slow compositor, because the compositor is waited for
+	// inside the container, only an entrypoint that fails outright.
+	profileStartGrace = 500 * time.Millisecond
+
+	// profileStartCheck is how often the container is checked during that
+	// grace period.
+	profileStartCheck = 50 * time.Millisecond
+
+	// profileWatchInterval is how often a started profile is checked for
+	// having gone away.
+	profileWatchInterval = time.Second
 
 	appTemplate = `[Desktop Entry]
 Version=1.0
@@ -294,9 +307,6 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-
 	sockPath, err := files.SocketPath(profile.Name)
 	if err != nil {
 		return err
@@ -306,16 +316,24 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 	if err != nil {
 		return err
 	}
-	go func() {
-		defer wg.Done()
 
+	// A profile that was killed rather than stopped leaves its socket
+	// behind, and listening on a path that already exists fails. That
+	// left the profile running with nothing serving it, and every
+	// workload it launched failing to reach the host.
+	if err := os.Remove(sockPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to remove stale socket %q: %w", sockPath, err)
+	}
+
+	go func() {
 		server := inception.NewServer(profile, cfg)
-		err1 := server.Listen(creds.ServerCert, creds.CA, sockPath)
-		if err1 != nil {
-			slog.Debug("error listening to socket", "error", err1)
-			if err == nil {
-				err = err1
-			}
+		if err := server.Listen(creds.ServerCert, creds.CA, sockPath); err != nil {
+			// Reported rather than recorded, because the profile is
+			// already starting and this is the only sign that nothing
+			// will answer it.
+			slog.Error("profile socket is not being served", "error", err)
+			dbus.NotifyOrLog("qubesome start error",
+				fmt.Sprintf("profile %s cannot serve workloads: %v", profile.Name, err))
 		}
 	}()
 
@@ -343,27 +361,17 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
-	// In Wayland, Xephyr is replaced by xwayland-run, which can
-	// run the Window Manager directly, without the need of a exec
-	// into the container to trigger it.
-	if !strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		name := fmt.Sprintf(ContainerNameFormat, profile.Name)
-
-		// If xhost access control is enabled, it may block qubesome
-		// execution. A tail sign is the profile container dying early.
-		if !container.Running(binary, name) {
-			msg := os.ExpandEnv("run xhost +SI:localhost:${USER} and try again")
-			dbus.NotifyOrLog("qubesome start error", msg)
-			return fmt.Errorf("failed to start profile: %s", msg)
-		}
-
-		err = startWindowManager(binary, name, strconv.Itoa(int(profile.Display)), profile.WindowManager)
-		if err != nil {
-			return err
-		}
+	// The host process serves this profile's socket for as long as the
+	// profile runs, so it waits here rather than returning. Nothing used
+	// to tell it the profile had gone, so it outlived the container it
+	// was serving and had to be interrupted by hand.
+	watched := fmt.Sprintf(ContainerNameFormat, profile.Name)
+	for container.Running(binary, watched) {
+		time.Sleep(profileWatchInterval)
 	}
 
-	wg.Wait()
+	slog.Debug("profile has gone, stopping", "profile", profile.Name)
+
 	return nil
 }
 
@@ -430,55 +438,43 @@ func createMagicCookie(profile *types.Profile) error {
 	return xauth.AuthPair(profile.Display, parent, server, client)
 }
 
-func startWindowManager(bin, name, display, wm string) error {
-	args := []string{"exec", name, files.ShBinary, "-c", fmt.Sprintf("DISPLAY=:%s %s", display, wm)}
-
-	slog.Debug(bin+" exec", "container-name", name, "args", args)
-	cmd := execabs.Command(bin, args...)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %w", output, err)
+// shellQuote renders args as a single line that a shell will split back
+// into exactly these arguments.
+//
+// The profile's window manager is one argument that usually contains
+// spaces, so joining on a space would print a line that runs a different
+// command from the one qubesome runs.
+func shellQuote(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, a := range args {
+		quoted = append(quoted, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
 	}
-	return nil
+
+	return strings.Join(quoted, " ")
 }
 
 func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, display string, interactive bool, cfg *types.Config) error {
-	command := "Xephyr"
 	res, err := resolution.Primary()
 	if err != nil {
 		return err
 	}
+
+	// The display stack runs from the qubesome binary already mounted in
+	// the profile, so the window manager reaches Xwayland as separate
+	// arguments rather than through a shell.
+	command := files.InProfileBinary
 	cArgs := []string{
-		":" + display,
-		"-title", fmt.Sprintf("qubesome-%s :%s", profile.Name, display),
-		"-auth", "/home/xorg-user/.Xserver",
-		"-extension", "MIT-SHM",
-		"-extension", "XTEST",
-		"-nopn",
-		"-nolisten", "tcp",
-		"-screen", res,
-		"-resizeable",
+		"profile-display",
+		"--display", display,
+		"--geometry", res,
+		"--auth", "/home/xorg-user/.Xserver",
+		"--wm", profile.WindowManager,
 	}
 	if profile.XephyrArgs != "" {
-		cArgs = append(cArgs, strings.Split(profile.XephyrArgs, " ")...)
+		cArgs = append(cArgs, "--extra", profile.XephyrArgs)
 	}
-
-	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		command = "xwayland-run"
-		cArgs = []string{
-			"-host-grab",
-			"-geometry", res,
-			"-extension", "MIT-SHM",
-			"-extension", "XTEST",
-			"-nopn",
-			"-tst",
-			"-nolisten", "tcp",
-			"-auth", "/home/xorg-user/.Xserver",
-			"-verbose", "9",
-			"--",
-			strings.TrimPrefix(profile.WindowManager, "exec "),
-		}
+	if profile.Fullscreen {
+		cArgs = append(cArgs, "--fullscreen")
 	}
 
 	server, err := files.ServerCookiePath(profile.Name)
@@ -492,7 +488,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	// If no server cookie is found or it is empty, fail safe.
 	if fi, err := os.Stat(server); err != nil || fi.Size() == 0 {
-		return fmt.Errorf("server cookie was found")
+		return fmt.Errorf("server cookie %q is missing or empty", server)
 	}
 
 	binPath, err := os.Executable()
@@ -552,7 +548,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	paths = append(paths, fmt.Sprintf("-v=%s:/tmp/qube.sock:ro", socket))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xserver", server))
 	paths = append(paths, fmt.Sprintf("-v=%s:/home/xorg-user/.Xauthority", workload))
-	paths = append(paths, fmt.Sprintf("-v=%s:/usr/local/bin/qubesome:ro", binPath))
+	paths = append(paths, fmt.Sprintf("-v=%s:%s:ro", binPath, files.InProfileBinary))
 
 	for _, p := range profile.Paths {
 		p = env.Expand(p)
@@ -590,30 +586,11 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	if strings.HasSuffix(bin, "podman") {
 		dockerArgs = append(dockerArgs, "--userns=keep-id")
 	}
-	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR")
-		if xdgRuntimeDir == "" {
-			uid := os.Getuid()
-			if uid < 1000 {
-				return fmt.Errorf("qubesome does not support running under privileged users")
-			}
-			xdgRuntimeDir = "/run/user/" + strconv.Itoa(uid)
-		}
-
-		// TODO: Investigate ways to avoid sharing /run/user/1000 on Wayland.
-		dockerArgs = append(dockerArgs, "-e", "XDG_RUNTIME_DIR")
-		dockerArgs = append(dockerArgs, "-e", "XDG_BACKEND")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SEAT")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_ID")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_CLASS")
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_DESKTOP")
-		dockerArgs = append(dockerArgs, "-e", "WAYLAND_DISPLAY")
-		dockerArgs = append(dockerArgs, "-e", "HYPRLAND_INSTANCE_SIGNATURE")
-		dockerArgs = append(dockerArgs, "-v="+xdgRuntimeDir+":/run/user/1000")
-	} else {
-		dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE=X11")
-	}
+	// The profile runs its own compositor, so it needs nothing from the
+	// host session beyond the display socket already mounted below. The
+	// session type is reported as X11 because the window manager runs on
+	// Xwayland regardless of what the host session is.
+	dockerArgs = append(dockerArgs, "-e", "XDG_SESSION_TYPE=X11")
 	if profile.Gpus != "" {
 		if gpus, ok := gpu.Params(profile.Runner); ok {
 			dockerArgs = append(dockerArgs, gpus...)
@@ -649,6 +626,14 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 		return err
 	}
 
+	// Workload shared memory lives beside the profile's runtime dir rather
+	// than inside it, because that dir is mounted into every workload.
+	// EnsureMappedDir creates one workload's directory, not this parent.
+	workloadShm := filepath.Join(files.ProfileDir(profile.Name), "shm")
+	if err := os.MkdirAll(workloadShm, files.DirMode); err != nil {
+		return fmt.Errorf("failed to create workload shm dir: %w", err)
+	}
+
 	err = setupAppsDir(profile, cfg)
 	if err != nil {
 		return err
@@ -678,15 +663,16 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	dockerArgs = append(dockerArgs, profile.Image)
 	if interactive {
 		dockerArgs = append(dockerArgs, "sh")
-		fmt.Println("To manually start the Window Manager:")
-		fmt.Printf("\t%s %s &\n\tDISPLAY=:%d %s &\n", command, strings.Join(cArgs, " "), profile.Display, profile.WindowManager)
+		fmt.Println("To manually start the display:")
+		fmt.Printf("\t%s %s\n", command, shellQuote(cArgs))
 	} else {
 		dockerArgs = append(dockerArgs, command)
 		dockerArgs = append(dockerArgs, cArgs...)
 
-		fmt.Println(
-			"INFO: For best experience use input grabber shortcuts:",
-			grabberShortcut())
+		fmt.Printf("INFO: profile %s is on display :%d. On an X11 host its "+
+			"window manager sees these keys first, so bind a passthrough mode "+
+			"there for a better experience.\n",
+			profile.Name, profile.Display)
 	}
 
 	slog.Debug("exec", "binary", bin, "args", container.RedactEnvArgs(dockerArgs))
@@ -714,6 +700,39 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 	if err != nil {
 		return fmt.Errorf("%s: %w", output, err)
 	}
+
+	// docker run -d reports success once the container is created, which
+	// says nothing about whether its entrypoint survived. A profile whose
+	// image is missing the compositor would otherwise start cleanly and
+	// simply never show a window.
+	// Watching for the whole grace period rather than sleeping through it
+	// and looking once. A compositor that dies just after a fixed check
+	// would otherwise pass it and leave the user with no window and no
+	// error, which is the failure this exists to catch.
+	name := fmt.Sprintf(ContainerNameFormat, profile.Name)
+	deadline := time.Now().Add(profileStartGrace)
+	running := true
+
+	for time.Now().Before(deadline) {
+		if running = container.Running(bin, name); !running {
+			break
+		}
+
+		time.Sleep(profileStartCheck)
+	}
+
+	if !running {
+		// The container runs with --rm, so it is already gone and its
+		// logs with it. Re-running interactively keeps a shell alive and
+		// prints the display command to run by hand, which is where the
+		// real error appears.
+		msg := fmt.Sprintf("profile %s exited immediately, run it with -i and start the display by hand to see why",
+			profile.Name)
+		dbus.NotifyOrLog("qubesome start error", msg)
+
+		return errors.New(msg)
+	}
+
 	return nil
 }
 
@@ -745,14 +764,6 @@ func deleteMtlsData(profile string) error {
 		return err
 	}
 	return nil
-}
-
-func grabberShortcut() string {
-	if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-		return "<Super> + <Esc>"
-	}
-
-	return "<Ctrl> + <Shift>"
 }
 
 func setupRunUserDir(dir string) error {

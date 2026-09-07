@@ -3,6 +3,7 @@ package files
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -110,4 +111,33 @@ func TestEnsureMappedDir(t *testing.T) {
 		require.ErrorIs(t, err, os.ErrPermission)
 		assert.NotErrorIs(t, err, ErrMissingMappedPath)
 	})
+}
+
+func TestWorkloadShmPathIsOutsideTheSharedRuntimeDir(t *testing.T) {
+	t.Parallel()
+
+	shared, err := IsolatedRunUserPath("prof")
+	require.NoError(t, err)
+
+	shm, err := WorkloadShmPath("prof", "work")
+	require.NoError(t, err)
+
+	// The shared runtime dir is mounted into every workload of a profile.
+	// A workload's shared memory inside it would be reachable by all of
+	// its siblings, which is what having one per workload is meant to
+	// prevent.
+	require.False(t, strings.HasPrefix(shm, shared+string(filepath.Separator)),
+		"workload shm %q must not be inside the shared runtime dir %q", shm, shared)
+}
+
+func TestWorkloadShmPathIsPerWorkload(t *testing.T) {
+	t.Parallel()
+
+	a, err := WorkloadShmPath("prof", "alpha")
+	require.NoError(t, err)
+
+	b, err := WorkloadShmPath("prof", "beta")
+	require.NoError(t, err)
+
+	require.NotEqual(t, a, b)
 }

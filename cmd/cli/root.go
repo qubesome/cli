@@ -40,6 +40,7 @@ func RootCommand() *cli.Command {
 			versionCommand(),
 			completionCommand(),
 			hostRunCommand(),
+			profileDisplayCommand(),
 			flatpakCommand(),
 			headlessCommand(),
 			usbCommand(),
