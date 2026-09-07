@@ -1,7 +1,10 @@
 package images
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"sync"
@@ -262,8 +265,12 @@ func UniqueImages(cfg *types.Config) ([]string, error) {
 		}
 
 		w := types.Workload{}
-		err = yaml.Unmarshal(data, &w)
-		if err != nil {
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
+		if err := decoder.Decode(&w); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil, fmt.Errorf("workload file %q is empty", fn)
+			}
 			return nil, fmt.Errorf("cannot unmarshal workload file %q: %w", fn, err)
 		}
 

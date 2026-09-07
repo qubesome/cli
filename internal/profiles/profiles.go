@@ -2,6 +2,7 @@ package profiles
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -1006,9 +1007,14 @@ func hydrateApps(cfg *types.Config, appsRoot, iconsRoot *os.Root) error {
 		}
 
 		w := types.Workload{}
-		err = yaml.Unmarshal(data, &w)
-		if err != nil {
-			slog.Error("cannot unmarshal workload file", "filename", fn, "error", err)
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
+		if err := decoder.Decode(&w); err != nil {
+			if errors.Is(err, io.EOF) {
+				slog.Error("workload file is empty", "filename", fn)
+			} else {
+				slog.Error("cannot unmarshal workload file", "filename", fn, "error", err)
+			}
 			continue
 		}
 

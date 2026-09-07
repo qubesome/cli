@@ -1,8 +1,11 @@
 package qubesome
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -145,8 +148,12 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	}
 
 	w := types.Workload{}
-	err = yaml.Unmarshal(data, &w)
-	if err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
+	if err := decoder.Decode(&w); err != nil {
+		if errors.Is(err, io.EOF) {
+			return fmt.Errorf("workload config %q is empty", cfg)
+		}
 		return fmt.Errorf("cannot unmarshal workload config %q: %w", cfg, err)
 	}
 

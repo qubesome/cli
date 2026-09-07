@@ -1,7 +1,10 @@
 package doctor
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -190,7 +193,12 @@ func loadWorkload(src source, profile types.Profile, workloadName string) (types
 	}
 
 	var w types.Workload
-	if err := yaml.Unmarshal(data, &w); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
+	if err := decoder.Decode(&w); err != nil {
+		if errors.Is(err, io.EOF) {
+			return types.Workload{}, fmt.Errorf("workload file %q is empty", path)
+		}
 		return types.Workload{}, err
 	}
 
