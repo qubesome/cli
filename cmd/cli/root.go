@@ -80,6 +80,15 @@ func config(path string) *types.Config {
 	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
+
+	// A started profile's config is reached through a symlink in the run
+	// dir. The root dir has to be the directory the config was sourced
+	// from, since a profile's path and every path mapped into it descend
+	// from that, and the run dir holds none of them.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+
 	cfg, err := types.LoadConfig(path)
 	if err != nil {
 		return nil
