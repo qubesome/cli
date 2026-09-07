@@ -258,29 +258,19 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return errAlreadyStarted(profile.Name)
 	}
 
-	// If runner is not being overwritten (via -runner), use the runner
-	// set at profile level in the config.
-	if runner == "" && profile.Runner != "" {
-		runner = profile.Runner
-	}
-
 	bundle, err := images.PullProfileImage(profile.Image)
 	if err != nil {
 		return fmt.Errorf("cannot prepare profile image: %w", err)
 	}
 
-	// Workloads still run under the container runner, so their images are
-	// still its to pull.
-	binary := files.ContainerRunnerBinary(runner)
-
-	imgs, err := images.MissingImages(binary, cfg)
+	imgs, err := images.MissingImages(cfg)
 	if err != nil {
 		return err
 	}
 
 	if len(imgs) > 0 && term.IsTerminal(int(os.Stdout.Fd())) {
 		if proceed("Not all workload images are present. Start loading them on the background?") {
-			go images.PreemptWorkloadImages(binary, cfg)
+			go images.PreemptWorkloadImages(cfg)
 		}
 	}
 

@@ -68,8 +68,7 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	wg := sync.WaitGroup{}
-	bin := files.ContainerRunnerBinary(o.Runner)
-	if err := images.Pull(bin, o.Config, &wg); err != nil {
+	if err := images.Pull(o.Config, &wg); err != nil {
 		return err
 	}
 	in := WorkloadInfo{

@@ -451,9 +451,9 @@ func TestStoreResolveNotInTheStore(t *testing.T) {
 	require.Error(t, err)
 }
 
-// A profile whose image is already unpacked starts without reaching the
+// An image that is already unpacked is used without reaching the
 // registry, so a start works offline.
-func TestPullProfileImageSkipsAWarmStore(t *testing.T) {
+func TestPullImageSkipsAWarmStore(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -465,14 +465,14 @@ func TestPullProfileImageSkipsAWarmStore(t *testing.T) {
 		return nil
 	}
 
-	b, err := pullProfileImage(s, xorgRef)
+	b, err := pullImage(s, xorgRef)
 	require.NoError(t, err)
 
 	assert.Equal(t, filepath.Join(dir, "rootfs"), b.Rootfs)
 	assert.Empty(t, ran, "a warm store must not shell out to skopeo or umoci")
 }
 
-func TestPullProfileImagePullsAColdStore(t *testing.T) {
+func TestPullImagePullsAColdStore(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -484,7 +484,7 @@ func TestPullProfileImagePullsAColdStore(t *testing.T) {
 		return nil
 	}
 
-	_, err := pullProfileImage(s, xorgRef)
+	_, err := pullImage(s, xorgRef)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{filepath.Base(files.SkopeoBinary)}, ran)
@@ -492,7 +492,7 @@ func TestPullProfileImagePullsAColdStore(t *testing.T) {
 
 // PullAll backs qubesome images, whose whole purpose is to refresh, so it
 // pulls even when the store is warm.
-func TestRefreshProfileImagePullsAWarmStore(t *testing.T) {
+func TestRefreshImagePullsAWarmStore(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -504,7 +504,7 @@ func TestRefreshProfileImagePullsAWarmStore(t *testing.T) {
 		return nil
 	}
 
-	_, err := refreshProfileImage(s, xorgRef)
+	_, err := refreshImage(s, xorgRef)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{filepath.Base(files.SkopeoBinary)}, ran)

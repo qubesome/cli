@@ -22,10 +22,6 @@ func imagesCommand() *cli.Command {
 						Name:        "profile",
 						Destination: &targetProfile,
 					},
-					&cli.StringFlag{
-						Name:        "runner",
-						Destination: &runner,
-					},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					cfg := profileConfigOrDefault(targetProfile)
@@ -41,7 +37,6 @@ func imagesCommand() *cli.Command {
 
 					return images.Run(
 						images.WithConfig(cfg),
-						images.WithRunner(runner),
 					)
 				},
 			},

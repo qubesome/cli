@@ -111,19 +111,18 @@ func Run(opts ...command.Option[Options]) error {
 		return nil
 	}
 
-	bin := files.ContainerRunnerBinary(o.Runner)
-	imgs, err := images.MissingImages(bin, o.Config)
+	imgs, err := images.MissingImages(o.Config)
 	if err != nil {
 		return err
 	}
 
 	writer = tabwriter.NewWriter(os.Stdout, 0, 0, 5, ' ', 0)
-	fmt.Fprintln(writer, "Image\tRunner\tStatus")
-	fmt.Fprintln(writer, "-------\t----------\t------")
+	fmt.Fprintln(writer, "Image\tStatus")
+	fmt.Fprintln(writer, "-------\t------")
 	for _, img := range imgs {
 		status := amber + "Missing" + reset
 
-		fmt.Fprintf(writer, "%s\t%s\t%s\n", img, bin, status)
+		fmt.Fprintf(writer, "%s\t%s\n", img, status)
 	}
 
 	writer.Flush()
