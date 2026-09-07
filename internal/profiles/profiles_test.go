@@ -2,6 +2,7 @@ package profiles
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/execabs"
 )
 
 // Start is reached directly by the local path, which never went through
@@ -94,4 +96,32 @@ func TestStartWithoutAConfig(t *testing.T) {
 	err := Start("", &types.Profile{Name: "work", WindowManager: "i3"}, nil, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "config is nil")
+}
+
+// A sandbox that exits non-zero is a profile that failed. Reporting it
+// through a log alone had the start return nil, so a profile whose
+// compositor died on startup looked like success to its caller and left
+// the shell with a zero status.
+func TestAwaitSandboxReportsANonZeroExit(t *testing.T) {
+	t.Parallel()
+
+	cmd := execabs.Command(files.ShBinary, "-c", "exit 3") //nolint:gosec // G204: a fixed binary and a fixed argument, both written here.
+	require.NoError(t, cmd.Start())
+
+	err := awaitSandbox("work", cmd)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `profile "work"`)
+
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit)
+	assert.Equal(t, 3, exit.ExitCode())
+}
+
+func TestAwaitSandboxAcceptsACleanExit(t *testing.T) {
+	t.Parallel()
+
+	cmd := execabs.Command(files.ShBinary, "-c", "exit 0") //nolint:gosec // G204: a fixed binary and a fixed argument, both written here.
+	require.NoError(t, cmd.Start())
+
+	require.NoError(t, awaitSandbox("work", cmd))
 }

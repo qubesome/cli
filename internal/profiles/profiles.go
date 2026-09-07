@@ -420,11 +420,38 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 	// polling the container runner, and --die-with-parent closes the same
 	// loop from the other direction: a qubesome that dies no longer leaves
 	// a profile running with nothing attached to it.
-	if werr := cmd.Wait(); werr != nil {
-		slog.Warn("profile sandbox exited", "error", werr)
+	if werr := awaitSandbox(profile.Name, cmd); werr != nil {
+		// Notified as well as returned. A profile is usually started from
+		// a key binding or an autostart entry rather than from a
+		// terminal, and there nothing shows the returned error. Whoever
+		// does have a terminal already has the reason on it, because the
+		// sandbox inherits this process's stdout and stderr.
+		dbus.NotifyOrLog("qubesome profile error", werr.Error())
+
+		return werr
 	}
 
 	slog.Debug("profile has gone, stopping", "profile", profile.Name)
+
+	return nil
+}
+
+// awaitSandbox blocks until the profile's sandbox exits, and reports a
+// non-zero exit as an error.
+//
+// The sandbox is the profile, so its exit status is the profile's own. A
+// compositor that dies during startup was logged here and the start still
+// returned nil, so a profile that never came up looked like a clean run to
+// the caller and to the shell.
+//
+// Waiting is also what keeps the start alive exactly as long as the
+// profile. The host serves the profile's inception socket from here, so
+// returning any earlier would take the socket down under a running
+// profile.
+func awaitSandbox(name string, cmd *execabs.Cmd) error {
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("profile %q sandbox exited: %w", name, err)
+	}
 
 	return nil
 }
