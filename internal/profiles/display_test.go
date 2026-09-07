@@ -278,3 +278,39 @@ func TestCompositorFailureIsSilentWhileTheCompositorRuns(t *testing.T) {
 
 	require.NoError(t, compositorFailure(make(chan error, 1)))
 }
+
+func TestCompositorStatusDistinguishesACleanExitFromStillRunning(t *testing.T) {
+	t.Parallel()
+
+	t.Run("still running", func(t *testing.T) {
+		t.Parallel()
+
+		exited, err := compositorStatus(make(chan error, 1))
+		require.False(t, exited)
+		require.NoError(t, err)
+	})
+
+	t.Run("exited cleanly", func(t *testing.T) {
+		t.Parallel()
+
+		exit := make(chan error, 1)
+		exit <- nil
+
+		exited, err := compositorStatus(exit)
+		require.True(t, exited)
+		require.NoError(t, err)
+		require.Len(t, exit, 1, "the deferred reap still has to find a status")
+	})
+
+	t.Run("exited with a status", func(t *testing.T) {
+		t.Parallel()
+
+		exit := make(chan error, 1)
+		exit <- errors.New("exit status 1")
+
+		exited, err := compositorStatus(exit)
+		require.True(t, exited)
+		require.ErrorContains(t, err, "exit status 1")
+		require.Len(t, exit, 1)
+	})
+}
