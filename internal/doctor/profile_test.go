@@ -108,13 +108,40 @@ func TestCheckProfileContainer(t *testing.T) {
 	t.Run("not running warns", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{output: map[string]fakeOutput{}}
+		env := &fakeEnv{
+			output: map[string]fakeOutput{
+				files.DockerBinary + " ps -a --filter name=qubesome-work --format {{.Names}} {{.Status}}": {
+					out: []byte(""),
+				},
+			},
+		}
 		c, status := checkProfileContainer(env, files.DockerBinary, "work")
 		require.Equal(t, "profile container", c.Name)
 		require.Equal(t, Warn, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Fix, "qubesome start")
 		require.Equal(t, containerNotRunning, status)
+	})
+
+	t.Run("runner error fails and reports that the check could not run, not that the profile is down", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			output: map[string]fakeOutput{
+				files.DockerBinary + " ps -a --filter name=qubesome-work --format {{.Names}} {{.Status}}": {
+					out: []byte("Cannot connect to the Docker daemon"),
+					err: exitError{1},
+				},
+			},
+		}
+		c, status := checkProfileContainer(env, files.DockerBinary, "work")
+		require.Equal(t, "profile container", c.Name)
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "could not check")
+		require.Contains(t, c.Detail, "Cannot connect to the Docker daemon")
+		require.NotContains(t, c.Detail, "is not running")
+		require.Equal(t, containerUnknown, status)
 	})
 
 	t.Run("up is ok", func(t *testing.T) {
@@ -205,6 +232,16 @@ func TestCheckProfileSocket(t *testing.T) {
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
 	})
+
+	t.Run("unknown container state warns instead of asserting the profile is down", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{stats: map[string]os.FileInfo{}}
+		c := checkProfileSocket(env, "work", containerUnknown)
+		require.Equal(t, Warn, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "could not be determined")
+	})
 }
 
 func TestCheckProfileCookies(t *testing.T) {
@@ -260,6 +297,16 @@ func TestCheckProfileCookies(t *testing.T) {
 		c := checkProfileCookies(env, "work", containerUp)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
+	})
+
+	t.Run("unknown container state warns instead of asserting the profile is down", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{stats: map[string]os.FileInfo{}}
+		c := checkProfileCookies(env, "work", containerUnknown)
+		require.Equal(t, Warn, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "could not be determined")
 	})
 }
 
@@ -386,6 +433,18 @@ func TestCheckProfileDisplay(t *testing.T) {
 		c := checkProfileDisplay(env, 5, containerNotRunning)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
+	})
+
+	t.Run("unknown container state warns instead of asserting the profile is down", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{stats: map[string]os.FileInfo{
+			"/tmp/.X11-unix/X5": fileInfo("X5"),
+		}}
+		c := checkProfileDisplay(env, 5, containerUnknown)
+		require.Equal(t, Warn, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "could not be determined")
 	})
 }
 

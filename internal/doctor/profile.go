@@ -19,6 +19,12 @@ const (
 	containerNotRunning containerState = iota
 	containerUp
 	containerExited
+
+	// containerUnknown means the runner command itself failed, so
+	// whether the container is running was never established. It is
+	// distinct from containerNotRunning, which means the command
+	// succeeded and reported nothing.
+	containerUnknown
 )
 
 // Profile diagnoses one profile. cfg may be nil, which is itself a
@@ -131,8 +137,16 @@ func containerName(name string) string {
 // checkProfileContainer reports on the profile's container, and returns
 // the state the later checks need so they do not run ps again.
 func checkProfileContainer(env Env, bin, name string) (Check, containerState) {
-	out, _ := env.Output(bin, "ps", "-a", "--filter", "name="+containerName(name),
+	out, err := env.Output(bin, "ps", "-a", "--filter", "name="+containerName(name),
 		"--format", "{{.Names}} {{.Status}}")
+	if err != nil {
+		return Check{
+			Name:   "profile container",
+			Status: Fail,
+			Detail: fmt.Sprintf("could not check the container: %s", firstLine(string(out))),
+			Fix:    fmt.Sprintf("Run `%s ps -a` directly to see the full error and act on it.", bin),
+		}, containerUnknown
+	}
 
 	status := strings.TrimSpace(string(out))
 	if status == "" {
@@ -163,6 +177,15 @@ func checkProfileContainer(env Env, bin, name string) (Check, containerState) {
 // checkProfileSocket reports on the gRPC socket workloads use to reach
 // the host.
 func checkProfileSocket(env Env, name string, state containerState) Check {
+	if state == containerUnknown {
+		return Check{
+			Name:   "profile socket",
+			Status: Warn,
+			Detail: "the profile container's state could not be determined, so whether the socket is expected is unknown",
+			Fix:    "Fix the profile container check above, then run doctor again.",
+		}
+	}
+
 	path, err := files.SocketPath(name)
 	if err != nil {
 		return Check{
@@ -218,6 +241,15 @@ func checkProfileSocket(env Env, name string, state containerState) Check {
 // checkProfileCookies reports on the Xauthority cookies workloads use to
 // authenticate to the profile's X server.
 func checkProfileCookies(env Env, name string, state containerState) Check {
+	if state == containerUnknown {
+		return Check{
+			Name:   "profile cookies",
+			Status: Warn,
+			Detail: "the profile container's state could not be determined, so whether cookies are expected is unknown",
+			Fix:    "Fix the profile container check above, then run doctor again.",
+		}
+	}
+
 	if state != containerUp {
 		return Check{
 			Name:   "profile cookies",
@@ -322,6 +354,15 @@ func checkExternalDrives(env Env, drives []string) Check {
 
 // checkProfileDisplay reports on the profile's X server socket.
 func checkProfileDisplay(env Env, display uint8, state containerState) Check {
+	if state == containerUnknown {
+		return Check{
+			Name:   "display",
+			Status: Warn,
+			Detail: "the profile container's state could not be determined, so whether the display is expected is unknown",
+			Fix:    "Fix the profile container check above, then run doctor again.",
+		}
+	}
+
 	path := fmt.Sprintf("/tmp/.X11-unix/X%d", display)
 
 	_, err := env.Stat(path)
