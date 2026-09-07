@@ -74,6 +74,29 @@ printf '== 4. nsenter --mount alone, expected to fail, shown for contrast\n'
 nsenter --mount="/proc/$HOLDER/ns/mnt" true 2>&1
 res $? "nsenter mount alone"
 
+printf '== 5. veth inside a user namespace we own\n'
+if command -v ip >/dev/null 2>&1; then
+    unshare --user --map-root-user --net \
+        sh -c 'ip link add v0 type veth peer name v1 && ip link show v0 >/dev/null && echo "   veth pair created"' 2>&1
+    res $? "unprivileged veth in an owned netns"
+else
+    printf '   SKIP  ip is not installed\n\n'
+fi
+
+printf '== 6. moving a veth end into a sibling namespace\n'
+printf '   This is what a per-workload link to the gateway needs. It wants\n'
+printf '   CAP_NET_ADMIN in both namespaces, which only holds if they share\n'
+printf '   a user namespace. Answering it properly needs the real sandbox\n'
+printf '   layout, so this only reports whether the pieces are present.\n'
+if command -v ip >/dev/null 2>&1; then
+    unshare --user --map-root-user --net \
+        sh -c 'ip link add v0 type veth peer name v1 && ip link set v1 netns 1 2>&1 | head -1; true' 2>&1 |
+        sed 's/^/   /'
+    printf '   (moving to netns 1 is expected to fail, it is the host namespace)\n\n'
+else
+    printf '   SKIP  ip is not installed\n\n'
+fi
+
 printf '== cleaning up\n'
 pkill -f "$MARK" 2>/dev/null
 printf '   done\n'
