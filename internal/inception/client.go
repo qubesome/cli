@@ -25,6 +25,20 @@ type Client struct {
 	socket string
 }
 
+// launchTimeout bounds a call that starts something on the host.
+//
+// Every one of them runs the launch inside the request: the image is
+// pulled if it is missing, unpacked, and only then started. That is
+// minutes on a cold image, so a deadline sized for a round trip expires
+// while the host is still working. The client gave up after a second and
+// reported DeadlineExceeded, while the host went on to start the workload
+// anyway, leaving the two disagreeing about whether anything happened.
+//
+// It is a ceiling rather than an estimate. Nothing here should take ten
+// minutes, but a caller that waits a little too long is recoverable and
+// one that gives up too early is not.
+const launchTimeout = 10 * time.Minute
+
 func getCreds() (credentials.TransportCredentials, error) {
 	caPEM := []byte(os.Getenv("Q_MTLS_CA"))
 	certPEM := []byte(os.Getenv("Q_MTLS_CERT"))
@@ -68,7 +82,7 @@ func (c *Client) XdgOpen(ctx context.Context, url string) error {
 
 	cl := pb.NewQubesomeHostClient(conn)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	ctx, cancel := context.WithTimeout(ctx, launchTimeout)
 	defer cancel()
 
 	slog.Debug("[client] calling XdgOpen", "url", url)
@@ -94,7 +108,7 @@ func (c *Client) Run(ctx context.Context, workload string, args []string) error 
 
 	cl := pb.NewQubesomeHostClient(conn)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	ctx, cancel := context.WithTimeout(ctx, launchTimeout)
 	defer cancel()
 
 	slog.Debug("[client] calling RunWorkload", "workload", workload, "args", args)
@@ -123,7 +137,7 @@ func (c *Client) FlatpakRun(ctx context.Context, workload string, args []string)
 
 	cl := pb.NewQubesomeHostClient(conn)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	ctx, cancel := context.WithTimeout(ctx, launchTimeout)
 	defer cancel()
 
 	slog.Debug("[client] calling FlatpakRunWorkload", "workload", workload, "args", args)
