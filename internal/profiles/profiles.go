@@ -123,6 +123,31 @@ func validGitDir(path string) bool {
 	return err == nil
 }
 
+// loadConfigUnder reads the qubesome config at rel, which must resolve
+// inside dir.
+//
+// rel is built from the -path flag, and dir is a repository qubesome
+// cloned. A repository is free to point one of its own directories
+// somewhere else with a symlink, so the config is opened through a root on
+// dir: the kernel refuses a rel that leaves it, and refuses it without a
+// window between the check and the read. The file is then decoded from the
+// handle that check produced, rather than re-opened by path.
+func loadConfigUnder(dir, rel string) (*types.Config, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+
+	f, err := root.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	return types.DecodeConfig(f, filepath.Join(dir, rel))
+}
+
 // sandboxStatePath returns where a running profile sandbox is recorded.
 func sandboxStatePath(profile string) string {
 	return filepath.Join(files.ProfileDir(profile), "sandbox.json")
@@ -195,12 +220,10 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 	}
 
 	// Get the qubesome config from the Git repository.
-	cfgPath, err := securejoin.SecureJoin(dir, filepath.Join(path, "qubesome.config"))
-	if err != nil {
-		return err
-	}
+	rel := filepath.Join(path, "qubesome.config")
+	cfgPath := filepath.Join(dir, rel)
 
-	cfg, err := types.LoadConfig(cfgPath)
+	cfg, err := loadConfigUnder(dir, rel)
 	if err != nil {
 		return err
 	}

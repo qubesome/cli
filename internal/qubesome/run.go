@@ -132,16 +132,25 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 		return err
 	}
 
-	cfg, err := securejoin.SecureJoin(workloadsDir, fmt.Sprintf("%s.%s", in.Name, configExtension))
+	// The workload name reaches here straight from the command line or from
+	// the profile's RPC, and nothing has checked it yet: the workload is
+	// validated once it has been read, which is too late to decide which
+	// file to read. Opening the workloads dir as a root leaves that decision
+	// to the kernel, which refuses a name that walks out of it.
+	root, err := os.OpenRoot(workloadsDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrWorkloadConfigNotFound, err)
 	}
+	defer root.Close()
 
-	if fi, err := os.Stat(cfg); err != nil || fi.IsDir() {
+	name := fmt.Sprintf("%s.%s", in.Name, configExtension)
+	cfg := filepath.Join(workloadsDir, name)
+
+	if fi, err := root.Stat(name); err != nil || fi.IsDir() {
 		return fmt.Errorf("%w: %w", ErrWorkloadConfigNotFound, err)
 	}
 
-	data, err := os.ReadFile(cfg)
+	data, err := root.ReadFile(name)
 	if err != nil {
 		return fmt.Errorf("cannot read file %q: %w", cfg, err)
 	}

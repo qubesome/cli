@@ -265,15 +265,27 @@ func ValidateFlatpakName(name string) error {
 }
 
 func LoadConfig(path string) (*Config, error) {
-	cfg := &Config{}
-
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	decoder := yaml.NewDecoder(f)
+	return DecodeConfig(f, path)
+}
+
+// DecodeConfig reads a config from r.
+//
+// path is where r was opened from. It roots the relative paths the config
+// declares and names the config in errors, so a caller that had to open
+// the file some other way still gets both. Callers that must prove the
+// file is inside a directory open it through an os.Root and hand the
+// result here, rather than passing a path back to LoadConfig and having
+// it resolved a second time.
+func DecodeConfig(r io.Reader, path string) (*Config, error) {
+	cfg := &Config{}
+
+	decoder := yaml.NewDecoder(r)
 	decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
 	// A partially decoded config must never be used. Every hostAccess
 	// restriction is deny-by-default, so returning what was decoded before

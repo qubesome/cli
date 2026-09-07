@@ -438,3 +438,47 @@ func mustWriteFile(t *testing.T, path, content string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 }
+
+func TestLoadWorkloadStaysInTheWorkloadsDir(t *testing.T) {
+	t.Parallel()
+
+	cfg := validWorkloadConfig("work")
+	cfg.RootDir = t.TempDir()
+	dir := filepath.Join(cfg.RootDir, "work", "workloads")
+	mustMkdirAll(t, dir)
+	mustWriteFile(t, filepath.Join(cfg.RootDir, "outside.yaml"), "name: outside\n")
+	require.NoError(t, os.Symlink(cfg.RootDir, filepath.Join(dir, "up")))
+
+	tests := []struct {
+		name     string
+		workload string
+	}{
+		{name: "traversal", workload: "../outside"},
+		{name: "absolute", workload: "/etc/passwd"},
+		{name: "empty", workload: ""},
+		{name: "through a symlink out of the dir", workload: "up/outside"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := loadWorkload(rootSource(cfg), cfg.Profiles["work"], tc.workload)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestLoadWorkloadReadsTheProfilesWorkload(t *testing.T) {
+	t.Parallel()
+
+	cfg := validWorkloadConfig("work")
+	cfg.RootDir = t.TempDir()
+	mustMkdirAll(t, filepath.Join(cfg.RootDir, "work", "workloads"))
+	mustWriteFile(t, filepath.Join(cfg.RootDir, "work", "workloads", "term.yaml"), "image: example.com/term\n")
+
+	w, err := loadWorkload(rootSource(cfg), cfg.Profiles["work"], "term")
+	require.NoError(t, err)
+	require.Equal(t, "term", w.Name)
+	require.Equal(t, "example.com/term", w.Image)
+}

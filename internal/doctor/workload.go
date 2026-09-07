@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
 	"go.yaml.in/yaml/v3"
@@ -182,12 +181,16 @@ func loadWorkload(src source, profile types.Profile, workloadName string) (types
 		return types.Workload{}, err
 	}
 
-	path, err := securejoin.SecureJoin(dir, workloadName+".yaml")
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return types.Workload{}, err
 	}
+	defer root.Close()
 
-	data, err := os.ReadFile(path)
+	name := workloadName + ".yaml"
+	path := filepath.Join(dir, name)
+
+	data, err := root.ReadFile(name)
 	if err != nil {
 		return types.Workload{}, err
 	}
