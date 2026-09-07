@@ -289,11 +289,15 @@ func checkWorkloadHostAccess(w types.Workload, effective types.EffectiveWorkload
 		}
 	}
 
-	if w.HostAccess.Network != "" && w.HostAccess.Network != "none" &&
-		w.HostAccess.Network != effective.Workload.HostAccess.Network {
+	switch {
+	case w.HostAccess.Network == "" || w.HostAccess.Network == "none":
+		// Nothing requested, or the workload explicitly asked to have no
+		// network, which ApplyProfile always honours. Neither is a grant
+		// to report.
+	case w.HostAccess.Network != effective.Workload.HostAccess.Network:
 		dropped = append(dropped, fmt.Sprintf("network (requested %q, got %q)",
 			w.HostAccess.Network, effective.Workload.HostAccess.Network))
-	} else if w.HostAccess.Network != "" {
+	default:
 		granted = append(granted, "network")
 	}
 

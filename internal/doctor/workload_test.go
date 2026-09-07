@@ -264,6 +264,60 @@ func TestCheckWorkloadHostAccess(t *testing.T) {
 		require.Contains(t, c.Fix, "hostAccess")
 	})
 
+	t.Run("network none is neither dropped nor granted", func(t *testing.T) {
+		t.Parallel()
+
+		w := types.Workload{
+			Name: "term",
+			HostAccess: types.HostAccess{
+				Network: "none",
+			},
+		}
+		p := validProfile("work")
+		eff := w.ApplyProfile(&p)
+
+		c := checkWorkloadHostAccess(w, eff)
+		require.Equal(t, OK, c.Status)
+		require.NotContains(t, c.Detail, "granted")
+		require.NotContains(t, c.Detail, "network")
+	})
+
+	t.Run("network narrowed away is still reported as dropped", func(t *testing.T) {
+		t.Parallel()
+
+		w := types.Workload{
+			Name: "term",
+			HostAccess: types.HostAccess{
+				Network: "host",
+			},
+		}
+		p := validProfile("work")
+		p.Network = "bridge"
+		eff := w.ApplyProfile(&p)
+
+		c := checkWorkloadHostAccess(w, eff)
+		require.Equal(t, Warn, c.Status)
+		require.Contains(t, c.Detail, "network")
+	})
+
+	t.Run("network matching the profile is granted", func(t *testing.T) {
+		t.Parallel()
+
+		w := types.Workload{
+			Name: "term",
+			HostAccess: types.HostAccess{
+				Network: "host",
+			},
+		}
+		p := validProfile("work")
+		p.Network = "host"
+		eff := w.ApplyProfile(&p)
+
+		c := checkWorkloadHostAccess(w, eff)
+		require.Equal(t, OK, c.Status)
+		require.Contains(t, c.Detail, "network")
+	})
+
 	t.Run("path narrowed away is named", func(t *testing.T) {
 		t.Parallel()
 
