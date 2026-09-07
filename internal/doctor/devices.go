@@ -160,7 +160,7 @@ func checkWorkloadDevices(env Env, access types.HostAccess) Check {
 				Name:   name,
 				Status: Fail,
 				Detail: describe(missing),
-				Fix:    "The container will not start without them. Attach the device, or remove the grant from the config.",
+				Fix:    "The container will not start without them. Attach the device, or remove the request from the workload's hostAccess.",
 			}
 		}
 	}
@@ -179,7 +179,7 @@ func checkWorkloadDevices(env Env, access types.HostAccess) Check {
 		Status: Warn,
 		Detail: describe(missing),
 		Fix: "These are left out of the container's arguments, so the workload starts without them. " +
-			"Attach the device, or remove the grant from the config.",
+			"Attach the device, or remove the request from the workload's hostAccess.",
 	}
 }
 
