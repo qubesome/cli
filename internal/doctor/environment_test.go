@@ -21,6 +21,7 @@ type fakeEnv struct {
 	usbErr map[string]error
 	mounts map[string]string
 	links  map[string]string
+	uid    string
 }
 
 type fakeOutput struct {
@@ -60,6 +61,10 @@ func (f *fakeEnv) Readlink(path string) (string, error) {
 
 func (f *fakeEnv) Getenv(key string) string {
 	return f.env[key]
+}
+
+func (f *fakeEnv) UID() string {
+	return f.uid
 }
 
 func (f *fakeEnv) Output(name string, args ...string) ([]byte, error) {
@@ -411,24 +416,73 @@ func TestCheckRenderNode(t *testing.T) {
 func TestCheckDbus(t *testing.T) {
 	t.Parallel()
 
-	t.Run("present is ok", func(t *testing.T) {
+	t.Run("address in the environment is ok", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{paths: map[string]string{files.DbusBinary: files.DbusBinary}}
+		env := &fakeEnv{env: map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"}}
 		c := checkDbus(env)
 		require.Equal(t, "desktop notifications", c.Name)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
 	})
 
-	t.Run("absent warns", func(t *testing.T) {
+	t.Run("autolaunch address is not an address", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{paths: map[string]string{}}
+		env := &fakeEnv{
+			env:   map[string]string{"DBUS_SESSION_BUS_ADDRESS": "autolaunch:"},
+			uid:   "1000",
+			paths: map[string]string{},
+		}
 		c := checkDbus(env)
 		require.Equal(t, Warn, c.Status)
+	})
+
+	t.Run("socket under the runtime dir is ok", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			uid:   "1000",
+			stats: map[string]os.FileInfo{"/run/user/1000/bus": &fakeFileInfo{name: "bus", isSock: true}},
+		}
+		c := checkDbus(env)
+		require.Equal(t, OK, c.Status)
+		require.Contains(t, c.Detail, "/run/user/1000/bus")
+	})
+
+	t.Run("dbus-session file under the runtime dir is ok", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			uid:   "1000",
+			stats: map[string]os.FileInfo{"/run/user/1000/dbus-session": &fakeFileInfo{name: "dbus-session"}},
+		}
+		c := checkDbus(env)
+		require.Equal(t, OK, c.Status)
+		require.Contains(t, c.Detail, "/run/user/1000/dbus-session")
+	})
+
+	t.Run("no bus but dbus-launch present warns about an autolaunched bus", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			uid:   "1000",
+			paths: map[string]string{dbusLaunchBinary: "/usr/bin/" + dbusLaunchBinary},
+		}
+		c := checkDbus(env)
+		require.Equal(t, Warn, c.Status)
+		require.Contains(t, c.Detail, "started on demand")
 		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Fix, files.DbusBinary)
+	})
+
+	t.Run("no bus and no dbus-launch warns", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{uid: "1000", paths: map[string]string{}}
+		c := checkDbus(env)
+		require.Equal(t, Warn, c.Status)
+		require.Contains(t, c.Detail, "none can be started")
+		require.NotEmpty(t, c.Fix)
 	})
 }
 
@@ -480,10 +534,11 @@ func TestEnvironment(t *testing.T) {
 		paths: map[string]string{
 			files.DockerBinary: files.DockerBinary,
 			files.XrandrBinary: files.XrandrBinary,
-			files.DbusBinary:   files.DbusBinary,
 		},
+		uid: "1000",
 		env: map[string]string{"DISPLAY": ":0"},
 		stats: map[string]os.FileInfo{
+			"/run/user/1000/bus":  fileInfo("bus"),
 			"/tmp/.X11-unix/X0":   fileInfo("X0"),
 			"/dev/dri":            dirInfo("dri"),
 			"/dev/dri/renderD128": fileInfo("renderD128"),

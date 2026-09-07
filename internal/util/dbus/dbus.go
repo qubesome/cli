@@ -6,52 +6,64 @@ import (
 	"os"
 	"strings"
 
-	"github.com/qubesome/cli/internal/files"
-	"golang.org/x/sys/execabs"
+	"github.com/godbus/dbus/v5"
 )
 
 // Upstream documentation:
 // https://specifications.freedesktop.org/notification-spec/latest/index.html
-// https://linux.die.net/man/1/dbus-send
 
-func dbusArgs(title, body string) []string {
-	return []string{
-		"--session",
-		"--dest=org.freedesktop.Notifications",
-		"--type=method_call",
-		"--print-reply",
-		"/org/freedesktop/Notifications",
-		"org.freedesktop.Notifications.Notify",
-		"string:qubesome",
-		"uint32:0",
-		"string:",
-		"string:" + title,
-		"string:" + body,
-		"array:string:",
-		"dict:string:string:",
-		"int32:10000",
-	}
-}
+const (
+	notificationsName = "org.freedesktop.Notifications"
+	notificationsPath = "/org/freedesktop/Notifications"
+	notifyMethod      = notificationsName + ".Notify"
 
+	// appName is reported to the daemon as the sending application.
+	appName = "qubesome"
+
+	// expireTimeout is how long the daemon shows a notification for, in
+	// milliseconds.
+	expireTimeout = 10000
+)
+
+// Notify posts a desktop notification on the session bus.
+//
+// It speaks to the bus directly rather than through dbus-send, which
+// cannot express the hints argument at all. dbus-send's container types
+// are array, dict and variant, but variant is not among the types a dict
+// value may have, so the closest it can render an empty a{sv} as is
+// a{ss}. Every notification qubesome sent was rejected for it, with
+// "Type of message, (susssasa{ss}i), does not match expected type
+// (susssasa{sv}i)".
 func Notify(title, body string) error {
-	args := dbusArgs(title, body)
-	slog.Debug(files.DbusBinary, "args", args)
-
-	//nolint
-	cmd := execabs.Command(files.DbusBinary, args...)
-
-	envVars := []string{
-		"XDG_CONFIG_DIRS",
-		"XDG_RUNTIME_DIR",
-		"XDG_SEAT",
-	}
-	for _, v := range envVars {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", v, os.Getenv(v)))
-	}
-
-	output, err := cmd.CombinedOutput()
+	// A private connection rather than the shared one, because a single
+	// notification has no use for a connection that outlives it.
+	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
-		return fmt.Errorf("cannot run dbus-send: %w: %s", err, output)
+		return fmt.Errorf("cannot connect to the session bus: %w", err)
+	}
+	// The reply has already been read by the time this runs, so there
+	// is nothing a close error could change.
+	defer func() { _ = conn.Close() }()
+
+	slog.Debug(notifyMethod, "title", title, "body", body)
+
+	// Notify's arguments, in order: the sending application, the
+	// notification to replace, an icon, the summary, the body, the
+	// actions offered, the hints and how long to show it for. The
+	// profile has no actions and no hints, but the signature has no room
+	// to leave either out.
+	call := conn.Object(notificationsName, notificationsPath).Call(notifyMethod, 0,
+		appName,
+		uint32(0),
+		"",
+		title,
+		body,
+		[]string{},
+		map[string]dbus.Variant{},
+		int32(expireTimeout),
+	)
+	if call.Err != nil {
+		return fmt.Errorf("cannot send notification: %w", call.Err)
 	}
 
 	return nil

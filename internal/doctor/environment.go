@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -208,21 +209,63 @@ func checkRenderNode(env Env) Check {
 	}
 }
 
-// checkDbus reports whether qubesome can send desktop notifications.
+// dbusLaunchBinary is the last resort the dbus client falls back to when
+// no session bus is already running. It is looked up on PATH rather than
+// by absolute path, because that is how the client invokes it.
+const dbusLaunchBinary = "dbus-launch"
+
+// checkDbus reports whether qubesome can reach a session bus, which is
+// where it posts desktop notifications.
+//
+// qubesome speaks to the bus directly rather than through a helper
+// binary, so the question is not whether something is installed but
+// whether an address can be found. The order below is the one the client
+// itself searches in. Reporting on anything else would say the bus is
+// reachable when it is not.
 func checkDbus(env Env) Check {
-	if _, err := env.LookPath(files.DbusBinary); err != nil {
+	const name = "desktop notifications"
+
+	// An address of exactly "autolaunch:" names no bus. The client
+	// treats it as unset and carries on searching, so this does too.
+	if addr := env.Getenv("DBUS_SESSION_BUS_ADDRESS"); addr != "" && addr != "autolaunch:" {
 		return Check{
-			Name:   "desktop notifications",
+			Name:   name,
+			Status: OK,
+			Detail: "DBUS_SESSION_BUS_ADDRESS names a session bus",
+		}
+	}
+
+	// /run/user/<uid>/bus is the socket itself. Its neighbour
+	// dbus-session is a file naming one, and older desktops write that
+	// instead. Either answers the question.
+	runtimeDir := "/run/user/" + env.UID()
+	for _, base := range []string{"bus", "dbus-session"} {
+		path := filepath.Join(runtimeDir, base)
+		if _, err := env.Stat(path); err == nil {
+			return Check{
+				Name:   name,
+				Status: OK,
+				Detail: fmt.Sprintf("%s is present", path),
+			}
+		}
+	}
+
+	if _, err := env.LookPath(dbusLaunchBinary); err == nil {
+		return Check{
+			Name:   name,
 			Status: Warn,
-			Detail: "qubesome cannot send desktop notifications",
-			Fix:    fmt.Sprintf("Install %s to enable desktop notifications.", files.DbusBinary),
+			Detail: "no session bus is running, one would be started on demand",
+			Fix: "A bus started this way is not the desktop's own, so the notifications sent to it " +
+				"may never be shown. Run qubesome from within a desktop session that provides a bus.",
 		}
 	}
 
 	return Check{
-		Name:   "desktop notifications",
-		Status: OK,
-		Detail: fmt.Sprintf("%s is available", files.DbusBinary),
+		Name:   name,
+		Status: Warn,
+		Detail: "no session bus was found and none can be started",
+		Fix: "qubesome will log notifications instead of showing them. Run it from within a desktop " +
+			"session, or install dbus so a bus can be started on demand.",
 	}
 }
 
