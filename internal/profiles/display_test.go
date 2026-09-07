@@ -2,6 +2,7 @@ package profiles
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -242,4 +243,38 @@ func TestChildEnvNeverUsesTheSharedRuntimeDir(t *testing.T) {
 		require.NotContains(t, got, "XDG_RUNTIME_DIR="+appRuntimeDir,
 			"the compositor socket would be reachable by every workload")
 	}
+}
+
+// Xwayland reports that its Wayland connection was reset and the window
+// manager reports that the X server connection broke, neither of which
+// says why. The compositor's own exit status does, so a failure names it.
+func TestCompositorFailureReportsAnExitThatCameFirst(t *testing.T) {
+	t.Parallel()
+
+	exit := make(chan error, 1)
+	exit <- errors.New("signal: segmentation fault")
+
+	err := compositorFailure(exit)
+	require.ErrorContains(t, err, "compositor exited first")
+	require.ErrorContains(t, err, "signal: segmentation fault")
+
+	require.Len(t, exit, 1, "the deferred reap still has to find a status")
+}
+
+// A compositor that exits cleanly before the window manager is still the
+// cause of whatever the window manager then reported.
+func TestCompositorFailureReportsACleanExitThatCameFirst(t *testing.T) {
+	t.Parallel()
+
+	exit := make(chan error, 1)
+	exit <- nil
+
+	require.ErrorContains(t, compositorFailure(exit), "compositor exited first")
+	require.Len(t, exit, 1)
+}
+
+func TestCompositorFailureIsSilentWhileTheCompositorRuns(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, compositorFailure(make(chan error, 1)))
 }
