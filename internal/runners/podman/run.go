@@ -65,12 +65,8 @@ func Run(ew types.EffectiveWorkload) error {
 	}
 
 	// Workloads start with no capabilities and ask for the ones they need
-	// through capsAdd. A privileged workload is the deliberate opt out of
-	// all of this, and combining the two leaves what the container ends up
-	// with down to the runtime and its version.
-	if !wl.HostAccess.Privileged {
-		args = append(args, "--cap-drop=ALL")
-	}
+	// through capsAdd.
+	args = append(args, "--cap-drop=ALL")
 
 	// Workloads run untrusted code, so they keep the runtime's seccomp
 	// profile unless the workload asks for it to be lifted and the profile
@@ -237,10 +233,6 @@ func Run(ew types.EffectiveWorkload) error {
 
 	if wl.HostAccess.Network != "" {
 		args = append(args, fmt.Sprintf("--network=%s", wl.HostAccess.Network))
-	}
-
-	if wl.HostAccess.Privileged {
-		args = append(args, "--privileged")
 	}
 
 	// Some USB devices, such as YubiKeys, require both their own node under

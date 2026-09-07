@@ -269,7 +269,6 @@ func checkWorkloadHostAccess(w types.Workload, effective types.EffectiveWorkload
 		{"varRunUser", w.HostAccess.VarRunUser, effective.Workload.HostAccess.VarRunUser},
 		{"bluetooth", w.HostAccess.Bluetooth, effective.Workload.HostAccess.Bluetooth},
 		{"mime", w.HostAccess.Mime, effective.Workload.HostAccess.Mime},
-		{"privileged", w.HostAccess.Privileged, effective.Workload.HostAccess.Privileged},
 		{"seccompUnconfined", w.HostAccess.SeccompUnconfined, effective.Workload.HostAccess.SeccompUnconfined},
 	}
 
