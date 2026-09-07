@@ -19,7 +19,8 @@ const separator = "--"
 // underneath it earlier, so both are emitted before the binds that land
 // inside them. Verified against bubblewrap 0.11.2: a --bind that precedes
 // the --tmpfs it lands in is silently discarded, and the same holds for a
-// --dev-bind preceding --dev.
+// --dev-bind preceding --dev. The overlay on / comes first for the same
+// reason, and every other mount lands on top of it.
 func Args(s Spec, seccompFD int) ([]string, error) {
 	if s.Rootfs == "" {
 		return nil, errors.New("sandbox: rootfs is required")
@@ -31,7 +32,7 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		return nil, errors.New("sandbox: seccomp is enabled but no filter descriptor was given")
 	}
 
-	args := make([]string, 0, 33+3*len(s.Devices)+3*len(s.Mounts)+3*len(s.Env)+len(s.Args))
+	args := make([]string, 0, 36+3*len(s.Devices)+3*len(s.Mounts)+3*len(s.Env)+len(s.Args))
 	args = append(args,
 		// The image is shared read-only and every write lands in a tmpfs
 		// that goes away with the sandbox.
@@ -56,6 +57,22 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 
 		"--proc", "/proc",
 		"--dev", "/dev",
+
+		// libdrm identifies a DRM device by reading sysfs, so with no
+		// /sys Mesa enumerates no device at all, EGL finds no rendering
+		// device and the compositor drops to llvmpipe. Verified against
+		// bubblewrap 0.11.2 on an amdgpu host: with /sys absent
+		// drmGetDevices2 reports zero devices and drmGetDevice2 fails
+		// with EINVAL, and with this bind both succeed.
+		//
+		// The whole tree is shared because /sys/dev/char/226:128 and its
+		// neighbours are symlinks into /sys/devices, so a subtree would
+		// not resolve. Read-only is what container runners mount by
+		// default, and a missing /sys is fatal rather than a silent drop
+		// to software rendering, which is the failure this exists to
+		// remove.
+		"--ro-bind", "/sys", "/sys",
+
 		"--tmpfs", "/tmp",
 		"--tmpfs", "/run",
 	)

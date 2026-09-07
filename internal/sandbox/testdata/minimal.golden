@@ -19,6 +19,9 @@ ALL
 /proc
 --dev
 /dev
+--ro-bind
+/sys
+/sys
 --tmpfs
 /tmp
 --tmpfs

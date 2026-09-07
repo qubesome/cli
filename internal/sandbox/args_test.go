@@ -144,6 +144,40 @@ func TestArgsTmpfsPrecedesItsBinds(t *testing.T) {
 		indexOfArg(args, "--bind", "/tmp/.X11-unix"))
 }
 
+// Mesa reads sysfs to enumerate DRM devices, so a sandbox without /sys has
+// no GPU and falls back to software rendering. It is shared read-only, the
+// way container runners share it.
+func TestArgsBindsSysReadOnly(t *testing.T) {
+	t.Parallel()
+
+	args, err := Args(Spec{Rootfs: "/rootfs", Args: []string{"/bin/sh"}}, -1)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, -1, indexOfArg(args, "--ro-bind", "/sys"))
+	assert.Equal(t, -1, indexOfArg(args, "--bind", "/sys"))
+	assert.Equal(t, -1, indexOfArg(args, "--dev-bind", "/sys"))
+}
+
+// The overlay on / hides anything mounted under it earlier, and a bind
+// landing inside /sys would be hidden by a later bind of /sys itself. The
+// whole tree is shared in one go because /sys/dev/char entries are
+// symlinks into /sys/devices, which a subtree bind would not resolve.
+func TestArgsSysSitsBetweenTheRootAndItsMounts(t *testing.T) {
+	t.Parallel()
+
+	args, err := Args(Spec{
+		Rootfs: "/rootfs",
+		Mounts: []Mount{{Src: "/sys/class/backlight", Dst: "/sys/class/backlight"}},
+		Args:   []string{"/bin/sh"},
+	}, -1)
+	require.NoError(t, err)
+
+	assert.Less(t, indexOfArg(args, "--tmp-overlay", "/"),
+		indexOfArg(args, "--ro-bind", "/sys"))
+	assert.Less(t, indexOfArg(args, "--ro-bind", "/sys"),
+		indexOfArg(args, "--bind", "/sys/class/backlight"))
+}
+
 // --dev mounts a fresh devtmpfs, which would hide any device bound before
 // it.
 func TestArgsDevPrecedesDeviceBinds(t *testing.T) {
