@@ -39,7 +39,7 @@ type runUserInput struct {
 func runUserParams(in runUserInput) ([]string, []string) {
 	var args, paths []string
 
-	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm", in.ShmDir))
+	paths = append(paths, fmt.Sprintf("-v=%s:/dev/shm:z", in.ShmDir))
 
 	if in.Dbus || in.Bluetooth || in.VarRunUser {
 		args = append(args, "-v=/run/user/1000:/run/user/1000:z")
@@ -47,7 +47,7 @@ func runUserParams(in runUserInput) ([]string, []string) {
 	}
 
 	paths = append(paths, fmt.Sprintf("-v=%s:/run/user/1000:z", in.UserDir))
-	paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro",
+	paths = append(paths, fmt.Sprintf("-v=%s:/etc/machine-id:ro,z",
 		filepath.Join(in.ProfileDir, "machine-id")))
 
 	return args, paths

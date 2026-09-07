@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -168,7 +169,8 @@ func TestWaitForSocket(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 
-		l, err := net.Listen("unix", path)
+		lc := net.ListenConfig{}
+		l, err := lc.Listen(context.Background(), "unix", path)
 		if err != nil {
 			// t.Logf is safe from a non-test goroutine, unlike
 			// t.Fatal. Without this the test fails as a timeout and

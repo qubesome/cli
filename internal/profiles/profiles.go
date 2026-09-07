@@ -488,7 +488,7 @@ func createNewDisplay(bin string, ca, cert, key []byte, profile *types.Profile, 
 
 	// If no server cookie is found or it is empty, fail safe.
 	if fi, err := os.Stat(server); err != nil || fi.Size() == 0 {
-		return fmt.Errorf("server cookie was found")
+		return fmt.Errorf("server cookie %q is missing or empty", server)
 	}
 
 	binPath, err := os.Executable()

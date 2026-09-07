@@ -223,7 +223,9 @@ func RunDisplay(p DisplayParams) error {
 	}
 
 	slog.Debug("starting compositor", "binary", files.WestonBinary, "args", cArgs)
-	compositor := execabs.Command(files.WestonBinary, cArgs...)
+	// The binary is a fixed absolute path and every argument is built by
+	// compositorArgs from validated profile config, never from a caller.
+	compositor := execabs.Command(files.WestonBinary, cArgs...) //nolint:gosec // G204: fixed binary, arguments built here
 	compositor.Env = compositorEnv(os.Environ())
 	compositor.Stdout = os.Stdout
 	compositor.Stderr = os.Stderr
@@ -256,7 +258,9 @@ func RunDisplay(p DisplayParams) error {
 	}
 
 	slog.Debug("starting Xwayland", "binary", files.XwaylandRunBinary, "args", xArgs)
-	x := execabs.Command(files.XwaylandRunBinary, xArgs...)
+	// As above. xwaylandArgs builds these, and the window manager reaches
+	// it as separate arguments rather than through a shell.
+	x := execabs.Command(files.XwaylandRunBinary, xArgs...) //nolint:gosec // G204: fixed binary, arguments built here
 	x.Env = xwaylandEnv(os.Environ())
 	x.Stdin = os.Stdin
 	x.Stdout = os.Stdout

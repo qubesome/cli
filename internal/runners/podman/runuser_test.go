@@ -20,9 +20,9 @@ func TestRunUserParams(t *testing.T) {
 			name:   "isolated by default",
 			access: types.HostAccess{},
 			wantPaths: []string{
-				"-v=/base/p/user/shm/work:/dev/shm",
+				"-v=/base/p/user/shm/work:/dev/shm:z",
 				"-v=/base/p/user:/run/user/1000:z",
-				"-v=/profile/p/machine-id:/etc/machine-id:ro",
+				"-v=/profile/p/machine-id:/etc/machine-id:ro,z",
 			},
 		},
 		{
@@ -32,7 +32,7 @@ func TestRunUserParams(t *testing.T) {
 				"-v=/run/user/1000:/run/user/1000:z",
 			},
 			wantPaths: []string{
-				"-v=/base/p/user/shm/work:/dev/shm",
+				"-v=/base/p/user/shm/work:/dev/shm:z",
 			},
 		},
 	}
@@ -61,6 +61,6 @@ func TestRunUserParamsShmIsPerWorkload(t *testing.T) {
 	_, b := runUserParams(runUserInput{UserDir: "/u", ProfileDir: "/p", ShmDir: "/u/shm/beta"})
 
 	require.NotEqual(t, a[0], b[0])
-	require.Equal(t, "-v=/u/shm/alpha:/dev/shm", a[0])
-	require.Equal(t, "-v=/u/shm/beta:/dev/shm", b[0])
+	require.Equal(t, "-v=/u/shm/alpha:/dev/shm:z", a[0])
+	require.Equal(t, "-v=/u/shm/beta:/dev/shm:z", b[0])
 }
