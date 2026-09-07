@@ -26,14 +26,21 @@ func Environment(env Env, runner string) []Check {
 // but usable, since a runner that refuses every connection is no better
 // than one that is missing.
 func checkRunner(env Env, runner string) Check {
-	bin := files.ContainerRunnerBinary(runner)
+	return checkRunnerBin(env, files.ContainerRunnerBinary(runner))
+}
 
+// checkRunnerBin is checkRunner's logic, taking the resolved binary
+// directly. It exists separately from checkRunner so that tests can drive
+// it with an exact runner path without depending on what
+// files.ContainerRunnerBinary resolves to on the machine running the
+// tests.
+func checkRunnerBin(env Env, bin string) Check {
 	if _, err := env.LookPath(bin); err != nil {
 		return Check{
 			Name:   "container runner",
 			Status: Fail,
 			Detail: fmt.Sprintf("%s was not found", bin),
-			Fix:    "Install docker or podman, then run doctor again.",
+			Fix:    fmt.Sprintf("Install %s, then run doctor again.", runnerLabel(bin)),
 		}
 	}
 
@@ -51,13 +58,29 @@ func checkRunner(env Env, runner string) Check {
 
 	switch {
 	case strings.Contains(lower, "permission denied"):
+		if bin == files.PodmanBinary {
+			return Check{
+				Name:   "container runner",
+				Status: Fail,
+				Detail: fmt.Sprintf("%s refused the connection", bin),
+				Fix:    "podman is rootless and does not gate access through a group the way docker does, so this is usually a broken user namespace or storage configuration. Run `podman info` directly to see the full error.",
+			}
+		}
 		return Check{
 			Name:   "container runner",
 			Status: Fail,
 			Detail: fmt.Sprintf("%s refused the connection", bin),
-			Fix:    "Add your user to the docker group with `sudo usermod -aG docker $USER`, then log out and back in. Alternatively, switch to podman, which does not require group membership.",
+			Fix:    "Add your user to the docker group with `sudo usermod -aG docker $USER`, then log out and back in.",
 		}
 	case strings.Contains(lower, "cannot connect"), strings.Contains(lower, "daemon"), strings.Contains(lower, "refused"):
+		if bin == files.PodmanBinary {
+			return Check{
+				Name:   "container runner",
+				Status: Fail,
+				Detail: fmt.Sprintf("%s could not be reached", bin),
+				Fix:    "podman is daemonless, so there is no service to start. Run `podman info` directly to see the full error, it is usually a broken user namespace or storage configuration.",
+			}
+		}
 		return Check{
 			Name:   "container runner",
 			Status: Fail,
@@ -71,6 +94,19 @@ func checkRunner(env Env, runner string) Check {
 			Detail: firstLine(text),
 			Fix:    fmt.Sprintf("Run `%s info` directly to see the full error and act on it.", bin),
 		}
+	}
+}
+
+// runnerLabel names the runner bin refers to, so a message can say which
+// one it means instead of showing a raw path or naming both.
+func runnerLabel(bin string) string {
+	switch bin {
+	case files.DockerBinary:
+		return "docker"
+	case files.PodmanBinary:
+		return "podman"
+	default:
+		return bin
 	}
 }
 

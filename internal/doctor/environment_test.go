@@ -228,6 +228,65 @@ func TestCheckRunner(t *testing.T) {
 		require.NotContains(t, c.Detail, "extra detail")
 	})
 
+	// The three podman cases below call checkRunnerBin directly with
+	// files.PodmanBinary rather than going through checkRunner(env,
+	// "podman"), since the latter resolves the binary from the real
+	// filesystem via files.ContainerRunnerBinary and would pick up
+	// whatever podman happens to be installed as on the machine running
+	// the test, symlinked or not.
+
+	t.Run("podman missing binary fails and names podman, not both runners", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			paths: map[string]string{},
+		}
+		c := checkRunnerBin(env, files.PodmanBinary)
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Fix, "podman")
+		require.NotContains(t, c.Fix, "docker")
+	})
+
+	t.Run("podman permission denied does not blame the docker group or suggest switching to podman", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			paths: map[string]string{files.PodmanBinary: files.PodmanBinary},
+			output: map[string]fakeOutput{
+				files.PodmanBinary + " info": {
+					out: []byte("permission denied while trying to connect"),
+					err: exitError{1},
+				},
+			},
+		}
+		c := checkRunnerBin(env, files.PodmanBinary)
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.NotContains(t, strings.ToLower(c.Fix), "docker group")
+		require.NotContains(t, strings.ToLower(c.Fix), "usermod")
+		require.NotContains(t, strings.ToLower(c.Fix), "switch to podman")
+	})
+
+	t.Run("podman daemon-shaped error does not tell the user to start a daemon", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{
+			paths: map[string]string{files.PodmanBinary: files.PodmanBinary},
+			output: map[string]fakeOutput{
+				files.PodmanBinary + " info": {
+					out: []byte("cannot connect to the podman socket"),
+					err: exitError{1},
+				},
+			},
+		}
+		c := checkRunnerBin(env, files.PodmanBinary)
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.NotContains(t, strings.ToLower(c.Fix), "systemctl")
+		require.Contains(t, strings.ToLower(c.Fix), "podman info")
+	})
+
 	t.Run("working runner is ok", func(t *testing.T) {
 		t.Parallel()
 
