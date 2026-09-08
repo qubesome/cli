@@ -14,11 +14,18 @@
 #   3. nsenter --user --mount --pid     FAIL, stops at ns/pid
 #   4. nsenter --mount alone            FAIL, as expected
 #   5. veth in an owned netns           PASS
+#   6. veth across two netns, one userns PASS
 #
 # Check 3 stopping at ns/pid while check 4 stops at ns/mnt is the useful
 # part. nsenter joins the user namespace first, so that join succeeded and
 # carried its capabilities forward. The pid namespace is the wall, not the
 # route to it, and re-entry was designed around it rather than through it.
+#
+# Check 6 was run separately, after the first version of it was rewritten:
+# the original passed a pid where iproute2 wanted a namespace and so tested
+# nothing. It is what the gateway's per-workload link was waiting on, and
+# it is the reason a user namespace shared between namespaces is the
+# mechanism that stage builds on.
 set -u
 
 MARK=qubesome-reentry-probe
