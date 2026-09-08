@@ -53,10 +53,14 @@ func StatePath(ew types.EffectiveWorkload) (string, error) {
 	return filepath.Join(files.ProfileDir(ew.Profile.Name), "sandbox-"+ew.Name+".json"), nil
 }
 
-// Run starts a workload in its own sandbox and waits for it to exit.
+// Run starts a workload in its own sandbox and returns once it is up.
 //
-// It does not wait by choice. sandbox.Args passes --die-with-parent, so
-// the sandbox lives exactly as long as the process that started it.
+// It does not wait for the workload to close, which is what docker run -d
+// did and what the callers expect: qubesome run typed at a terminal gives
+// the prompt back, and a launch that arrives over the profile's socket
+// answers the caller rather than holding the request open for the life of
+// an application. The sandbox is left running behind it, which is why the
+// workload spec does not set Spec.DieWithParent.
 func Run(ew types.EffectiveWorkload) error {
 	if err := ew.Validate(); err != nil {
 		return err
@@ -112,7 +116,10 @@ func Run(ew types.EffectiveWorkload) error {
 
 	cmd := execabs.Command(files.BwrapBinary, outer...) //nolint:gosec // the arguments are built from the workload config.
 	cmd.ExtraFiles = extra
-	cmd.Stdin = os.Stdin
+	// The launch returns while the workload keeps running, so stdin stays
+	// closed rather than leaving a detached application reading the
+	// terminal the shell has taken back. Its output is still worth
+	// showing: a workload that fails to start says why there.
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -132,13 +139,30 @@ func Run(ew types.EffectiveWorkload) error {
 		return fmt.Errorf("failed to record sandbox state: %w", err)
 	}
 
-	defer func() {
-		if err := os.Remove(statePath); err != nil {
-			slog.Warn("failed to remove sandbox state", "path", statePath, "error", err)
-		}
-	}()
+	go reap(cmd, statePath)
 
-	return cmd.Wait()
+	return nil
+}
+
+// reap waits for a workload sandbox to exit and clears the state file it
+// was recorded in.
+//
+// It runs in a goroutine because Run has already returned. A launch that
+// arrived over the profile's socket is served by a process that stays up,
+// and there this is what keeps a closed workload from being left as a
+// zombie and its state file from naming a pid that is gone. A qubesome run
+// at a terminal exits long before any of that: the sandbox is reparented
+// to init, which reaps it, and the state file outlives the pid it names.
+// That is what sandbox.Alive is for, since it records the start time as
+// well and so reads a stale file as not running.
+func reap(cmd *execabs.Cmd, statePath string) {
+	if err := cmd.Wait(); err != nil {
+		slog.Debug("workload sandbox exited", "path", statePath, "error", err)
+	}
+
+	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("failed to remove sandbox state", "path", statePath, "error", err)
+	}
 }
 
 // resolve gathers everything the sandbox needs from the host.

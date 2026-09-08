@@ -85,7 +85,6 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		"--gid", strconv.Itoa(s.GID),
 
 		"--cap-drop", "ALL",
-		"--die-with-parent",
 
 		// The sandbox environment is built from the image and the profile,
 		// so the host environment must not leak into it.
@@ -121,6 +120,13 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		// /run/user/1000 included.
 		"--tmpfs", "/tmp",
 	)
+
+	// Whether the sandbox outlives the process that started it is the
+	// caller's to say, so this is not part of the prologue. See
+	// Spec.DieWithParent for which callers set it and why.
+	if s.DieWithParent {
+		args = append(args, "--die-with-parent")
+	}
 
 	// bwrap applies capability arguments in order, so these have to follow
 	// the --cap-drop ALL above. Emitted before it they would be dropped

@@ -97,6 +97,23 @@ type Spec struct {
 	// seccompUnconfined.
 	Seccomp bool
 
+	// DieWithParent kills the sandbox when the process that started it
+	// dies. bwrap asks the kernel for a parent death signal, so it holds
+	// however the parent goes, a kill included.
+	//
+	// A profile sets it. The qubesome process that starts a profile also
+	// serves its socket and stays up for as long as the profile runs, so
+	// the two lifetimes are meant to be the same one.
+	//
+	// A workload leaves it off. Its launch may be a qubesome run typed at
+	// a terminal, which returns as soon as the workload is up, and a
+	// workload tied to that process would not outlive the shell prompt
+	// coming back. The container runner detached a workload for the same
+	// reason. What still ties a workload to its profile is the display:
+	// the X server it draws on lives inside the profile's sandbox, so a
+	// profile that goes away takes the connection with it.
+	DieWithParent bool
+
 	// Interactive keeps the sandbox attached to the terminal. It skips
 	// --new-session, which calls setsid and would detach the controlling
 	// terminal an interactive shell needs.

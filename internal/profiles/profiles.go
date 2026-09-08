@@ -819,6 +819,10 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		Seccomp:     !profile.SeccompUnconfined,
 		Interactive: interactive,
 		RuntimeDir:  appRuntimeDir,
+		// This process serves the profile's socket for as long as the
+		// profile runs, so the sandbox and the process that started it
+		// are meant to end together.
+		DieWithParent: true,
 		// The profile sandbox runs a compositor, an X server and a
 		// window manager, none of which nest a sandbox of their own.
 		DisableUserns: true,

@@ -54,6 +54,7 @@ func TestArgsProfile(t *testing.T) {
 		Seccomp:    true,
 		RuntimeDir: "/run/user/1000",
 
+		DieWithParent: true,
 		DisableUserns: true,
 		Env: []string{
 			"PATH=/usr/local/bin:/usr/bin:/bin",
@@ -115,6 +116,26 @@ func TestArgsDisableUsernsIsIndependentOfSeccomp(t *testing.T) {
 
 	assert.Contains(t, args, "--disable-userns")
 	assert.NotContains(t, args, "--seccomp")
+}
+
+// A profile ties its sandbox to the process that serves it. A workload
+// does not, and it is the workload that would be lost: the launch returns
+// as soon as it is up, so a sandbox dying with its launcher would never
+// outlive a qubesome run at a terminal.
+func TestArgsDieWithParent(t *testing.T) {
+	t.Parallel()
+
+	on, err := Args(Spec{
+		Rootfs:        "/rootfs",
+		Args:          []string{"/bin/sh"},
+		DieWithParent: true,
+	}, -1)
+	require.NoError(t, err)
+	assert.Contains(t, on, "--die-with-parent")
+
+	off, err := Args(Spec{Rootfs: "/rootfs", Args: []string{"/bin/sh"}}, -1)
+	require.NoError(t, err)
+	assert.NotContains(t, off, "--die-with-parent")
 }
 
 // bwrap has no default of its own to fall back on here: with no --chdir

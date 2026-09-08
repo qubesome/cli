@@ -13,7 +13,6 @@
 1000
 --cap-drop
 ALL
---die-with-parent
 --clearenv
 --proc
 /proc
