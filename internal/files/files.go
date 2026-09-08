@@ -208,6 +208,53 @@ func profileRunDir(profile string) (string, error) {
 	return filepath.Join(RunUserQubesome(), profile), nil
 }
 
+// SessionDir returns the directory holding the files of one qubesome
+// session: the lock that keeps the session's namespace holder a singleton,
+// the state of the holder itself, and the gateway that serves the session.
+//
+// It sits directly under the run directory and outside every profile's
+// directory. That is placement as an isolation mechanism, in the sense
+// WorkloadShmPath describes, and not tidiness. A session spans profiles,
+// since one user namespace is held open for all of them and one gateway
+// answers for all of them, so no profile's directory is the right parent.
+// Nothing here is bound into a workload sandbox either, and IsolatedRunUserPath
+// is bound into every workload of a profile, so a session file placed under
+// a profile would be readable by that profile's workloads. Every workload
+// runs as the same uid, so permissions would not separate them.
+func SessionDir() string {
+	return filepath.Join(RunUserQubesome(), "session")
+}
+
+// SessionLockPath returns the lock file that makes the session's user
+// namespace holder a singleton.
+func SessionLockPath() string {
+	return filepath.Join(SessionDir(), "lock")
+}
+
+// SessionStatePath returns where the session's namespace holder is
+// recorded. The file is what sandbox.WriteState writes, so a holder that
+// crashed reads as not running rather than as running.
+func SessionStatePath() string {
+	return filepath.Join(SessionDir(), "holder.json")
+}
+
+// GatewayStatePath returns where the session's gateway sandbox is
+// recorded. It is named as the workload sandboxes under a profile are,
+// because it is the same file written by the same code.
+func GatewayStatePath() string {
+	return filepath.Join(SessionDir(), "sandbox-gateway.json")
+}
+
+// GatewaySocket returns the host path of the gateway's control socket.
+//
+// It is in a directory of its own below the session directory rather than
+// beside the lock and the state files. The directory holding it is bound
+// into the gateway's sandbox, so anything sharing it would be handed to
+// the gateway as well, and the session lock is not the gateway's to take.
+func GatewaySocket() string {
+	return filepath.Join(SessionDir(), "gateway", "control.sock")
+}
+
 // ClientCookiePath returns the path to the client cookie file for the given profile.
 func ClientCookiePath(profile string) (string, error) {
 	dir, err := profileRunDir(profile)

@@ -47,6 +47,7 @@ func RootCommand() *cli.Command {
 			usbCommand(),
 			gpuCommand(),
 			superviseCommand(),
+			sessionHoldCommand(),
 			vmInitCommand(),
 			consoleCommand(),
 		},
