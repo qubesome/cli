@@ -21,6 +21,8 @@ type fakeEnv struct {
 	usbErr map[string]error
 	mounts map[string]string
 	links  map[string]string
+	images map[string]bool
+	alive  map[string]bool
 	uid    string
 }
 
@@ -107,6 +109,16 @@ func (f *fakeEnv) Mounted(device, mount string) (bool, error) {
 	return f.mounts[device] == mount, nil
 }
 
+func (f *fakeEnv) ImageInStore(ref string) bool {
+	return f.images[ref]
+}
+
+// SandboxAlive answers from a table keyed by state file path, so a test
+// that wants a profile up records the path that profile writes.
+func (f *fakeEnv) SandboxAlive(path string) bool {
+	return f.alive[path]
+}
+
 type fakeFileInfo struct {
 	name   string
 	isDir  bool
@@ -156,153 +168,42 @@ type exitError struct {
 
 func (e exitError) Error() string { return "exit status" }
 
-func TestCheckRunner(t *testing.T) {
+func TestCheckSandboxTools(t *testing.T) {
 	t.Parallel()
 
-	t.Run("missing binary fails", func(t *testing.T) {
+	t.Run("all present is ok", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{
-			paths: map[string]string{},
-		}
-		c := checkRunner(env, "docker")
-		require.Equal(t, "container runner", c.Name)
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, files.DockerBinary)
-	})
-
-	t.Run("permission denied fails with group guidance", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{
-			paths: map[string]string{files.DockerBinary: files.DockerBinary},
-			output: map[string]fakeOutput{
-				files.DockerBinary + " info": {
-					out: []byte("Got permission denied while trying to connect to the Docker daemon socket"),
-					err: exitError{1},
-				},
-			},
-		}
-		c := checkRunner(env, "docker")
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, strings.ToLower(c.Fix), "docker")
-		require.Contains(t, strings.ToLower(c.Fix), "group")
-	})
-
-	t.Run("daemon unreachable fails", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{
-			paths: map[string]string{files.DockerBinary: files.DockerBinary},
-			output: map[string]fakeOutput{
-				files.DockerBinary + " info": {
-					out: []byte("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"),
-					err: exitError{1},
-				},
-			},
-		}
-		c := checkRunner(env, "docker")
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, strings.ToLower(c.Fix), "systemctl")
-	})
-
-	t.Run("other exit error fails with first output line", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{
-			paths: map[string]string{files.DockerBinary: files.DockerBinary},
-			output: map[string]fakeOutput{
-				files.DockerBinary + " info": {
-					out: []byte("something unexpected happened\nextra detail"),
-					err: exitError{1},
-				},
-			},
-		}
-		c := checkRunner(env, "docker")
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "something unexpected happened")
-		require.NotContains(t, c.Detail, "extra detail")
-	})
-
-	// The three podman cases below call checkRunnerBin directly with
-	// files.PodmanBinary rather than going through checkRunner(env,
-	// "podman"), since the latter resolves the binary from the real
-	// filesystem via files.ContainerRunnerBinary and would pick up
-	// whatever podman happens to be installed as on the machine running
-	// the test, symlinked or not.
-
-	t.Run("podman missing binary fails and names podman, not both runners", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{
-			paths: map[string]string{},
-		}
-		c := checkRunnerBin(env, files.PodmanBinary)
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Fix, "podman")
-		require.NotContains(t, c.Fix, "docker")
-	})
-
-	t.Run("podman permission denied does not blame the docker group or suggest switching to podman", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{
-			paths: map[string]string{files.PodmanBinary: files.PodmanBinary},
-			output: map[string]fakeOutput{
-				files.PodmanBinary + " info": {
-					out: []byte("permission denied while trying to connect"),
-					err: exitError{1},
-				},
-			},
-		}
-		c := checkRunnerBin(env, files.PodmanBinary)
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.NotContains(t, strings.ToLower(c.Fix), "docker group")
-		require.NotContains(t, strings.ToLower(c.Fix), "usermod")
-		require.NotContains(t, strings.ToLower(c.Fix), "switch to podman")
-	})
-
-	t.Run("podman daemon-shaped error does not tell the user to start a daemon", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{
-			paths: map[string]string{files.PodmanBinary: files.PodmanBinary},
-			output: map[string]fakeOutput{
-				files.PodmanBinary + " info": {
-					out: []byte("cannot connect to the podman socket"),
-					err: exitError{1},
-				},
-			},
-		}
-		c := checkRunnerBin(env, files.PodmanBinary)
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.NotContains(t, strings.ToLower(c.Fix), "systemctl")
-		require.Contains(t, strings.ToLower(c.Fix), "podman info")
-	})
-
-	t.Run("working runner is ok", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{
-			paths: map[string]string{files.DockerBinary: files.DockerBinary},
-			output: map[string]fakeOutput{
-				files.DockerBinary + " info": {
-					out: []byte("Server Version: 24.0.0"),
-					err: nil,
-				},
-			},
-		}
-		c := checkRunner(env, "docker")
+		env := &fakeEnv{paths: map[string]string{
+			files.BwrapBinary:  files.BwrapBinary,
+			files.SkopeoBinary: files.SkopeoBinary,
+			files.UmociBinary:  files.UmociBinary,
+		}}
+		c := checkSandboxTools(env)
+		require.Equal(t, "sandbox tools", c.Name)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
-		require.Contains(t, c.Detail, files.DockerBinary)
+		require.Contains(t, c.Detail, files.BwrapBinary)
+	})
+
+	t.Run("every missing tool is named, not just the first", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{paths: map[string]string{files.BwrapBinary: files.BwrapBinary}}
+		c := checkSandboxTools(env)
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, files.SkopeoBinary)
+		require.Contains(t, c.Detail, files.UmociBinary)
+		require.NotContains(t, c.Detail, files.BwrapBinary)
+	})
+
+	t.Run("nothing installed fails", func(t *testing.T) {
+		t.Parallel()
+
+		c := checkSandboxTools(&fakeEnv{paths: map[string]string{}})
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
 	})
 }
 
@@ -591,7 +492,9 @@ func TestEnvironment(t *testing.T) {
 
 	env := &fakeEnv{
 		paths: map[string]string{
-			files.DockerBinary: files.DockerBinary,
+			files.BwrapBinary:  files.BwrapBinary,
+			files.SkopeoBinary: files.SkopeoBinary,
+			files.UmociBinary:  files.UmociBinary,
 			files.XrandrBinary: files.XrandrBinary,
 		},
 		uid: "1000",
@@ -604,16 +507,15 @@ func TestEnvironment(t *testing.T) {
 			files.QubesomeDir():   dirInfo("qubesome"),
 		},
 		output: map[string]fakeOutput{
-			files.DockerBinary + " info": {out: []byte("Server Version: 24.0.0")},
-			files.XrandrBinary:           {out: []byte("Screen 0")},
+			files.XrandrBinary: {out: []byte("Screen 0")},
 		},
 	}
 
-	checks := Environment(env, "docker")
+	checks := Environment(env)
 	require.Len(t, checks, 6)
 
 	names := []string{
-		"container runner",
+		"sandbox tools",
 		"screen resolution",
 		"host display",
 		"gpu render node",

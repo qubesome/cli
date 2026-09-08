@@ -46,9 +46,9 @@ func parseExternalDrive(entry string) (label, device, mount string, err error) {
 
 // mappedSource returns the host side of a mapped path, expanded.
 //
-// The split comes before the expansion because that is the order the
-// runners use, and an expanded value containing a colon would otherwise
-// be cut in the middle.
+// The split comes before the expansion because that is the order a start
+// uses, and an expanded value containing a colon would otherwise be cut
+// in the middle.
 func mappedSource(entry string) string {
 	src := entry
 	if i := strings.Index(entry, ":"); i >= 0 {

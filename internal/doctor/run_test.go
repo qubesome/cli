@@ -47,7 +47,7 @@ func checkByName(t *testing.T, checks []Check, name string) Check {
 //
 // None of that stops it from starting, so none of it may be reported as
 // a failure. It does not run in parallel, since it primes the expansion
-// mapping, which is a package global shared with the runners.
+// mapping, which is a package global shared with the sandbox specs.
 func TestRunWorkingProfile(t *testing.T) {
 	root := t.TempDir()
 
@@ -115,7 +115,8 @@ func TestRunWorkingProfile(t *testing.T) {
 // A config read that way reports the run dir as its root, so everything
 // built from it lands under <qubesome>/run, where a profile's workloads
 // have never been. It does not run in parallel, since it primes the
-// expansion mapping, which is a package global shared with the runners.
+// expansion mapping, which is a package global shared with the sandbox
+// specs.
 func TestRunStartedProfile(t *testing.T) {
 	repo := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(repo, ".git"), 0o755))
@@ -138,7 +139,6 @@ func TestRunStartedProfile(t *testing.T) {
 			"personal": {
 				Name:          "personal",
 				Path:          "personal",
-				Runner:        "podman",
 				Image:         "example.com/xorg:latest",
 				WindowManager: "exec awesome",
 				Paths:         []string{"${GITDIR}/qubesome/shared/homedir:/home/xorg-user"},

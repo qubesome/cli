@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/profiles"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -125,84 +126,116 @@ func TestCheckWorkloadConfig(t *testing.T) {
 	})
 }
 
+func TestCheckWorkloadRunner(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no runner is ok and names bwrap", func(t *testing.T) {
+		t.Parallel()
+
+		c := checkWorkloadRunner(&fakeEnv{}, "")
+		require.Equal(t, "workload runner", c.Name)
+		require.Equal(t, OK, c.Status)
+		require.Empty(t, c.Fix)
+		require.Contains(t, c.Detail, "bwrap")
+	})
+
+	t.Run("firecracker with both binaries is ok", func(t *testing.T) {
+		t.Parallel()
+
+		docker := files.ContainerRunnerBinary("docker")
+		env := &fakeEnv{paths: map[string]string{
+			files.FireCrackerBinary: files.FireCrackerBinary,
+			docker:                  docker,
+		}}
+		c := checkWorkloadRunner(env, "firecracker")
+		require.Equal(t, OK, c.Status)
+		require.Empty(t, c.Fix)
+	})
+
+	t.Run("firecracker without docker fails, since it runs docker for the rootfs", func(t *testing.T) {
+		t.Parallel()
+
+		env := &fakeEnv{paths: map[string]string{
+			files.FireCrackerBinary: files.FireCrackerBinary,
+		}}
+		c := checkWorkloadRunner(env, "firecracker")
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "docker")
+		require.NotContains(t, c.Detail, files.FireCrackerBinary)
+	})
+
+	t.Run("firecracker without its own binary fails", func(t *testing.T) {
+		t.Parallel()
+
+		c := checkWorkloadRunner(&fakeEnv{}, "firecracker")
+		require.Equal(t, Fail, c.Status)
+		require.Contains(t, c.Detail, files.FireCrackerBinary)
+	})
+
+	t.Run("a removed runner fails and says so", func(t *testing.T) {
+		t.Parallel()
+
+		for _, runner := range []string{"docker", "podman"} {
+			c := checkWorkloadRunner(&fakeEnv{}, runner)
+			require.Equal(t, Fail, c.Status)
+			require.NotEmpty(t, c.Fix)
+			require.Contains(t, c.Detail, runner)
+			require.Contains(t, c.Detail, "removed")
+		}
+	})
+
+	t.Run("an unknown runner fails", func(t *testing.T) {
+		t.Parallel()
+
+		c := checkWorkloadRunner(&fakeEnv{}, "kvm")
+		require.Equal(t, Fail, c.Status)
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "kvm")
+	})
+}
+
 func TestCheckWorkloadImage(t *testing.T) {
 	t.Parallel()
 
-	t.Run("present is ok", func(t *testing.T) {
+	t.Run("in the store is ok", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " image inspect example.com/some/image:latest": {out: []byte("[]")},
-			},
-		}
-		c := checkWorkloadImage(env, files.DockerBinary, "example.com/some/image:latest")
+		env := &fakeEnv{images: map[string]bool{"example.com/some/image:latest": true}}
+		c := checkWorkloadImage(env, "example.com/some/image:latest")
 		require.Equal(t, "workload image", c.Name)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
 	})
 
-	t.Run("absent warns with a pull command", func(t *testing.T) {
+	t.Run("absent warns rather than failing, since a launch pulls it", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{output: map[string]fakeOutput{}}
-		c := checkWorkloadImage(env, files.DockerBinary, "example.com/some/image:latest")
+		c := checkWorkloadImage(&fakeEnv{}, "example.com/some/image:latest")
 		require.Equal(t, Warn, c.Status)
-		require.Contains(t, c.Fix, files.DockerBinary+" pull example.com/some/image:latest")
+		require.NotEmpty(t, c.Fix)
+		require.Contains(t, c.Detail, "example.com/some/image:latest")
 	})
 }
 
 func TestCheckWorkloadProfileRunning(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty fails", func(t *testing.T) {
+	t.Run("profile down fails, since a workload has no display to attach to", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " ps --filter name=qubesome-work --format {{.Names}}": {
-					out: []byte(""),
-				},
-			},
-		}
-		c := checkWorkloadProfileRunning(env, files.DockerBinary, "work")
+		c := checkWorkloadProfileRunning(&fakeEnv{}, "work")
 		require.Equal(t, "profile running", c.Name)
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Fix, "qubesome start work")
 	})
 
-	t.Run("runner error fails and reports that the check could not run, not that the profile is down", func(t *testing.T) {
+	t.Run("profile up is ok", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " ps --filter name=qubesome-work --format {{.Names}}": {
-					out: []byte("Cannot connect to the Docker daemon"),
-					err: exitError{1},
-				},
-			},
-		}
-		c := checkWorkloadProfileRunning(env, files.DockerBinary, "work")
-		require.Equal(t, "profile running", c.Name)
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "could not check")
-		require.Contains(t, c.Detail, "Cannot connect to the Docker daemon")
-		require.NotContains(t, c.Detail, "is not running")
-	})
-
-	t.Run("non-empty is ok", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " ps --filter name=qubesome-work --format {{.Names}}": {
-					out: []byte("qubesome-work\n"),
-				},
-			},
-		}
-		c := checkWorkloadProfileRunning(env, files.DockerBinary, "work")
+		env := &fakeEnv{alive: map[string]bool{profiles.SandboxStatePath("work"): true}}
+		c := checkWorkloadProfileRunning(env, "work")
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
 	})
@@ -376,7 +409,7 @@ func TestWorkload(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{}
-		checks := Workload(env, nil, "docker", "work", "term")
+		checks := Workload(env, nil, "work", "term")
 		require.Len(t, checks, 1)
 		require.Equal(t, "workload config", checks[0].Name)
 		require.Equal(t, Fail, checks[0].Status)
@@ -387,7 +420,7 @@ func TestWorkload(t *testing.T) {
 
 		env := &fakeEnv{}
 		cfg := validWorkloadConfig("work")
-		checks := Workload(env, cfg, "docker", "bogus", "term")
+		checks := Workload(env, cfg, "bogus", "term")
 		require.Len(t, checks, 1)
 		require.Equal(t, "workload config", checks[0].Name)
 		require.Equal(t, Fail, checks[0].Status)
@@ -403,19 +436,16 @@ func TestWorkload(t *testing.T) {
 			"name: term\nimage: example.com/some/image:latest\n")
 
 		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " image inspect example.com/some/image:latest": {out: []byte("[]")},
-				files.DockerBinary + " ps --filter name=qubesome-work --format {{.Names}}": {
-					out: []byte("qubesome-work\n"),
-				},
-			},
+			images: map[string]bool{"example.com/some/image:latest": true},
+			alive:  map[string]bool{profiles.SandboxStatePath("work"): true},
 		}
 
-		checks := Workload(env, cfg, "docker", "work", "term")
-		require.Len(t, checks, 7)
+		checks := Workload(env, cfg, "work", "term")
+		require.Len(t, checks, 8)
 
 		names := []string{
 			"workload config",
+			"workload runner",
 			"workload image",
 			"profile running",
 			"host access",

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/profiles"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -77,106 +78,63 @@ func TestCheckProfileConfig(t *testing.T) {
 func TestCheckProfileImage(t *testing.T) {
 	t.Parallel()
 
-	t.Run("present is ok", func(t *testing.T) {
+	t.Run("in the store is ok", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " image inspect example.com/some/image:latest": {out: []byte("[{}]")},
-			},
-		}
-		c := checkProfileImage(env, files.DockerBinary, "example.com/some/image:latest")
+		env := &fakeEnv{images: map[string]bool{"example.com/some/image:latest": true}}
+		c := checkProfileImage(env, "example.com/some/image:latest")
 		require.Equal(t, "profile image", c.Name)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
 	})
 
-	t.Run("absent warns with pull command", func(t *testing.T) {
+	t.Run("absent warns rather than failing, since a start pulls it", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{output: map[string]fakeOutput{}}
-		c := checkProfileImage(env, files.DockerBinary, "example.com/some/image:latest")
+		c := checkProfileImage(&fakeEnv{}, "example.com/some/image:latest")
 		require.Equal(t, Warn, c.Status)
 		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Fix, "example.com/some/image:latest")
+		require.Contains(t, c.Detail, "example.com/some/image:latest")
 	})
 }
 
-func TestCheckProfileContainer(t *testing.T) {
+func TestCheckProfileSandbox(t *testing.T) {
 	t.Parallel()
 
-	t.Run("not running warns", func(t *testing.T) {
+	statePath := profiles.SandboxStatePath("work")
+
+	t.Run("no live sandbox warns", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " ps -a --filter name=qubesome-work --format {{.Names}} {{.Status}}": {
-					out: []byte(""),
-				},
-			},
-		}
-		c, status := checkProfileContainer(env, files.DockerBinary, "work")
-		require.Equal(t, "profile container", c.Name)
+		c, running := checkProfileSandbox(&fakeEnv{}, "work")
+		require.Equal(t, "profile sandbox", c.Name)
 		require.Equal(t, Warn, c.Status)
 		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Fix, "qubesome start")
-		require.Equal(t, containerNotRunning, status)
+		require.Contains(t, c.Fix, "qubesome start work")
+		require.False(t, running)
 	})
 
-	t.Run("runner error fails and reports that the check could not run, not that the profile is down", func(t *testing.T) {
+	t.Run("live sandbox is ok", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " ps -a --filter name=qubesome-work --format {{.Names}} {{.Status}}": {
-					out: []byte("Cannot connect to the Docker daemon"),
-					err: exitError{1},
-				},
-			},
-		}
-		c, status := checkProfileContainer(env, files.DockerBinary, "work")
-		require.Equal(t, "profile container", c.Name)
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "could not check")
-		require.Contains(t, c.Detail, "Cannot connect to the Docker daemon")
-		require.NotContains(t, c.Detail, "is not running")
-		require.Equal(t, containerUnknown, status)
-	})
-
-	t.Run("up is ok", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " ps -a --filter name=qubesome-work --format {{.Names}} {{.Status}}": {
-					out: []byte("qubesome-work Up 5 minutes\n"),
-				},
-			},
-		}
-		c, status := checkProfileContainer(env, files.DockerBinary, "work")
+		env := &fakeEnv{alive: map[string]bool{statePath: true}}
+		c, running := checkProfileSandbox(env, "work")
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
-		require.Contains(t, c.Detail, "Up 5 minutes")
-		require.Equal(t, containerUp, status)
+		require.Contains(t, c.Detail, statePath)
+		require.True(t, running)
 	})
 
-	t.Run("exited fails and carries the status", func(t *testing.T) {
+	// A profile that is down and one that never started are the same
+	// finding, because the state file left behind by a sandbox that died
+	// names a pid that is no longer there.
+	t.Run("a state file naming a dead sandbox reads as not running", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{
-			output: map[string]fakeOutput{
-				files.DockerBinary + " ps -a --filter name=qubesome-work --format {{.Names}} {{.Status}}": {
-					out: []byte("qubesome-work Exited (1) 2 minutes ago\n"),
-				},
-			},
-		}
-		c, status := checkProfileContainer(env, files.DockerBinary, "work")
-		require.Equal(t, Fail, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "Exited (1) 2 minutes ago")
-		require.Contains(t, c.Fix, "-i")
-		require.Equal(t, containerExited, status)
+		env := &fakeEnv{alive: map[string]bool{statePath: false}}
+		c, running := checkProfileSandbox(env, "work")
+		require.Equal(t, Warn, c.Status)
+		require.False(t, running)
 	})
 }
 
@@ -190,7 +148,7 @@ func TestCheckProfileSocket(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkProfileSocket(env, "work", containerUp)
+		c := checkProfileSocket(env, "work", true)
 		require.Equal(t, "profile socket", c.Name)
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
@@ -200,7 +158,7 @@ func TestCheckProfileSocket(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkProfileSocket(env, "work", containerNotRunning)
+		c := checkProfileSocket(env, "work", false)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
 	})
@@ -209,7 +167,7 @@ func TestCheckProfileSocket(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{stats: map[string]os.FileInfo{sockPath: fileInfo("qube.sock")}}
-		c := checkProfileSocket(env, "work", containerUp)
+		c := checkProfileSocket(env, "work", true)
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 	})
@@ -218,7 +176,7 @@ func TestCheckProfileSocket(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{stats: map[string]os.FileInfo{sockPath: socketInfo("qube.sock")}}
-		c := checkProfileSocket(env, "work", containerNotRunning)
+		c := checkProfileSocket(env, "work", false)
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Detail, "gone")
@@ -228,19 +186,9 @@ func TestCheckProfileSocket(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{stats: map[string]os.FileInfo{sockPath: socketInfo("qube.sock")}}
-		c := checkProfileSocket(env, "work", containerUp)
+		c := checkProfileSocket(env, "work", true)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
-	})
-
-	t.Run("unknown container state warns instead of asserting the profile is down", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkProfileSocket(env, "work", containerUnknown)
-		require.Equal(t, Warn, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "could not be determined")
 	})
 }
 
@@ -256,7 +204,7 @@ func TestCheckProfileCookies(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkProfileCookies(env, "work", containerNotRunning)
+		c := checkProfileCookies(env, "work", false)
 		require.Equal(t, "profile cookies", c.Name)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
@@ -268,7 +216,7 @@ func TestCheckProfileCookies(t *testing.T) {
 		env := &fakeEnv{stats: map[string]os.FileInfo{
 			clientPath: sizedFileInfo("client", 100),
 		}}
-		c := checkProfileCookies(env, "work", containerUp)
+		c := checkProfileCookies(env, "work", true)
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Detail, serverPath)
@@ -281,7 +229,7 @@ func TestCheckProfileCookies(t *testing.T) {
 			serverPath: sizedFileInfo("server", 0),
 			clientPath: sizedFileInfo("client", 100),
 		}}
-		c := checkProfileCookies(env, "work", containerUp)
+		c := checkProfileCookies(env, "work", true)
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Detail, serverPath)
@@ -294,19 +242,9 @@ func TestCheckProfileCookies(t *testing.T) {
 			serverPath: sizedFileInfo("server", 100),
 			clientPath: sizedFileInfo("client", 100),
 		}}
-		c := checkProfileCookies(env, "work", containerUp)
+		c := checkProfileCookies(env, "work", true)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
-	})
-
-	t.Run("unknown container state warns instead of asserting the profile is down", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkProfileCookies(env, "work", containerUnknown)
-		require.Equal(t, Warn, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "could not be determined")
 	})
 }
 
@@ -400,7 +338,7 @@ func TestCheckProfileDisplay(t *testing.T) {
 		env := &fakeEnv{stats: map[string]os.FileInfo{
 			"/tmp/.X11-unix/X5": fileInfo("X5"),
 		}}
-		c := checkProfileDisplay(env, 5, containerUp)
+		c := checkProfileDisplay(env, 5, true)
 		require.Equal(t, "display", c.Name)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
@@ -412,7 +350,7 @@ func TestCheckProfileDisplay(t *testing.T) {
 		env := &fakeEnv{stats: map[string]os.FileInfo{
 			"/tmp/.X11-unix/X5": fileInfo("X5"),
 		}}
-		c := checkProfileDisplay(env, 5, containerNotRunning)
+		c := checkProfileDisplay(env, 5, false)
 		require.Equal(t, Warn, c.Status)
 		require.NotEmpty(t, c.Fix)
 	})
@@ -421,7 +359,7 @@ func TestCheckProfileDisplay(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkProfileDisplay(env, 5, containerUp)
+		c := checkProfileDisplay(env, 5, true)
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 	})
@@ -430,21 +368,9 @@ func TestCheckProfileDisplay(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{stats: map[string]os.FileInfo{}}
-		c := checkProfileDisplay(env, 5, containerNotRunning)
+		c := checkProfileDisplay(env, 5, false)
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
-	})
-
-	t.Run("unknown container state warns instead of asserting the profile is down", func(t *testing.T) {
-		t.Parallel()
-
-		env := &fakeEnv{stats: map[string]os.FileInfo{
-			"/tmp/.X11-unix/X5": fileInfo("X5"),
-		}}
-		c := checkProfileDisplay(env, 5, containerUnknown)
-		require.Equal(t, Warn, c.Status)
-		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "could not be determined")
 	})
 }
 
@@ -455,7 +381,7 @@ func TestProfile(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{}
-		checks := Profile(env, nil, "docker", "work")
+		checks := Profile(env, nil, "work")
 		require.Len(t, checks, 1)
 		require.Equal(t, "profile config", checks[0].Name)
 		require.Equal(t, Fail, checks[0].Status)
@@ -466,26 +392,23 @@ func TestProfile(t *testing.T) {
 
 		env := &fakeEnv{}
 		cfg := &types.Config{Profiles: map[string]types.Profile{"work": validProfile("work")}}
-		checks := Profile(env, cfg, "docker", "bogus")
+		checks := Profile(env, cfg, "bogus")
 		require.Len(t, checks, 1)
 	})
 
 	t.Run("valid profile runs every check", func(t *testing.T) {
 		t.Parallel()
 
-		env := &fakeEnv{
-			stats:  map[string]os.FileInfo{},
-			output: map[string]fakeOutput{},
-		}
+		env := &fakeEnv{stats: map[string]os.FileInfo{}}
 		cfg := &types.Config{Profiles: map[string]types.Profile{"work": validProfile("work")}}
-		checks := Profile(env, cfg, "docker", "work")
+		checks := Profile(env, cfg, "work")
 		require.Len(t, checks, 10)
 
 		names := []string{
 			"profile config",
 			"profile source",
 			"profile image",
-			"profile container",
+			"profile sandbox",
 			"profile socket",
 			"profile cookies",
 			"profile paths",

@@ -11,12 +11,13 @@ import (
 	"strings"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/profiles"
 	"github.com/qubesome/cli/internal/types"
 	"go.yaml.in/yaml/v3"
 )
 
 // Workload diagnoses one workload of a profile.
-func Workload(env Env, cfg *types.Config, runner, profileName, workloadName string) []Check {
+func Workload(env Env, cfg *types.Config, profileName, workloadName string) []Check {
 	src := resolveSource(env, cfg, profileName)
 
 	configCheck := checkWorkloadConfig(cfg, src, profileName, workloadName)
@@ -28,7 +29,6 @@ func Workload(env Env, cfg *types.Config, runner, profileName, workloadName stri
 	}
 
 	profile := cfg.Profiles[profileName]
-	bin := files.ContainerRunnerBinary(runnerFor(runner, profile))
 
 	// ApplyProfile matches a workload's paths against the profile's
 	// allowlist with both sides expanded, and the path check below reads
@@ -52,8 +52,9 @@ func Workload(env Env, cfg *types.Config, runner, profileName, workloadName stri
 
 	return []Check{
 		configCheck,
-		checkWorkloadImage(env, bin, w.Image),
-		checkWorkloadProfileRunning(env, bin, profileName),
+		checkWorkloadRunner(env, effective.Workload.Runner),
+		checkWorkloadImage(env, w.Image),
+		checkWorkloadProfileRunning(env, profileName),
 		checkWorkloadHostAccess(w, effective),
 		checkWorkloadDevices(env, effective.Workload.HostAccess),
 		checkMappedPaths(env, "workload paths", effective.Workload.HostAccess.Paths),
@@ -203,41 +204,96 @@ func loadWorkload(src source, profile types.Profile, workloadName string) (types
 	return w, nil
 }
 
-// checkWorkloadImage reports whether the workload's image is present
-// locally. Its absence is a Warn, not a Fail, since qubesome pulls a
-// missing image on start.
-func checkWorkloadImage(env Env, bin, image string) Check {
-	if _, err := env.Output(bin, "image", "inspect", image); err != nil {
+// checkWorkloadRunner reports on the runner the workload asks for.
+//
+// A workload runs under bwrap, which needs nothing beyond the tools the
+// environment section already reports on. Firecracker is the one other
+// runner qubesome still has, and it needs both its own binary and
+// docker, which it runs to build a root filesystem and to set up its
+// network taps. A runner qubesome no longer has is a workload that
+// cannot start at all, and a config naming one still validates, so this
+// is the only place it is visible before a launch refuses it.
+func checkWorkloadRunner(env Env, runner string) Check {
+	const name = "workload runner"
+
+	switch runner {
+	case "":
+		return Check{
+			Name:   name,
+			Status: OK,
+			Detail: "runs in a bwrap sandbox",
+		}
+	case "firecracker":
+		// The path docker is really invoked from, since firecracker
+		// resolves it rather than running whatever is on PATH.
+		docker := files.ContainerRunnerBinary("docker")
+
+		var missing []string
+		for _, bin := range []string{files.FireCrackerBinary, docker} {
+			if _, err := env.LookPath(bin); err != nil {
+				missing = append(missing, bin)
+			}
+		}
+
+		if len(missing) > 0 {
+			return Check{
+				Name:   name,
+				Status: Fail,
+				Detail: fmt.Sprintf("the firecracker runner is missing %s", strings.Join(missing, ", ")),
+				Fix: "firecracker builds its root filesystem and its network taps by running docker, so it " +
+					"needs both. Install the missing ones, or drop the runner from the workload so it runs " +
+					"under bwrap.",
+			}
+		}
+
+		return Check{
+			Name:   name,
+			Status: OK,
+			Detail: fmt.Sprintf("firecracker is installed, with %s for its root filesystem and taps", docker),
+		}
+	case "docker", "podman":
+		return Check{
+			Name:   name,
+			Status: Fail,
+			Detail: fmt.Sprintf("the %q runner has been removed", runner),
+			Fix:    "Drop the runner from the workload so it runs under bwrap.",
+		}
+	default:
+		return Check{
+			Name:   name,
+			Status: Fail,
+			Detail: fmt.Sprintf("%q is not a runner qubesome has", runner),
+			Fix:    "Drop the runner from the workload so it runs under bwrap, or set it to firecracker.",
+		}
+	}
+}
+
+// checkWorkloadImage reports whether the workload's image is in the OCI
+// store, which is where a sandbox takes its root filesystem from. Its
+// absence is a Warn, not a Fail, since qubesome pulls a missing image on
+// start.
+func checkWorkloadImage(env Env, image string) Check {
+	if !env.ImageInStore(image) {
 		return Check{
 			Name:   "workload image",
 			Status: Warn,
-			Detail: fmt.Sprintf("%s is not present locally", image),
-			Fix:    fmt.Sprintf("It will be pulled on start, or pull it now with `%s pull %s`.", bin, image),
+			Detail: fmt.Sprintf("%s is not in the image store", image),
+			Fix:    "It will be pulled on start, or pull it now with `qubesome images pull`.",
 		}
 	}
 
 	return Check{
 		Name:   "workload image",
 		Status: OK,
-		Detail: fmt.Sprintf("%s is present locally", image),
+		Detail: fmt.Sprintf("%s is in the image store", image),
 	}
 }
 
 // checkWorkloadProfileRunning reports whether the profile a workload
 // needs is up, since a workload connects to its profile's display and
 // has nowhere to attach to otherwise.
-func checkWorkloadProfileRunning(env Env, bin, profileName string) Check {
-	out, err := env.Output(bin, "ps", "--filter", "name=qubesome-"+profileName, "--format", "{{.Names}}")
-	if err != nil {
-		return Check{
-			Name:   "profile running",
-			Status: Fail,
-			Detail: fmt.Sprintf("could not check whether the profile is running: %s", firstLine(string(out))),
-			Fix:    fmt.Sprintf("Run `%s ps` directly to see the full error and act on it.", bin),
-		}
-	}
-
-	if strings.TrimSpace(string(out)) == "" {
+func checkWorkloadProfileRunning(env Env, profileName string) Check {
+	if !env.SandboxAlive(profiles.SandboxStatePath(profileName)) {
 		return Check{
 			Name:   "profile running",
 			Status: Fail,

@@ -84,25 +84,3 @@ func TestResolveSource(t *testing.T) {
 		require.Equal(t, "/etc/qubesome", src.gitDir)
 	})
 }
-
-func TestRunnerFor(t *testing.T) {
-	t.Parallel()
-
-	t.Run("the profile's runner is used when none was given", func(t *testing.T) {
-		t.Parallel()
-
-		require.Equal(t, "podman", runnerFor("", types.Profile{Runner: "podman"}))
-	})
-
-	t.Run("an explicit runner overrides the profile's", func(t *testing.T) {
-		t.Parallel()
-
-		require.Equal(t, "docker", runnerFor("docker", types.Profile{Runner: "podman"}))
-	})
-
-	t.Run("neither set leaves the runner to be auto detected", func(t *testing.T) {
-		t.Parallel()
-
-		require.Empty(t, runnerFor("", types.Profile{}))
-	})
-}

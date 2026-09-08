@@ -9,7 +9,6 @@ import (
 // Options are what the doctor command was asked to examine.
 type Options struct {
 	Config   *types.Config
-	Runner   string
 	Profile  string
 	Workload string
 	Colour   bool
@@ -20,28 +19,20 @@ type Options struct {
 func Run(env Env, o Options) *Report {
 	report := &Report{}
 
-	// The environment section reports on the container runner, so it has
-	// to be told which one. A profile names its own, and a host with both
-	// installed otherwise gets asked about the runner it is not using.
-	runner := o.Runner
-	if profile, ok := o.Config.Profile(o.Profile); ok {
-		runner = runnerFor(runner, *profile)
-	}
-
-	report.Add("Environment", Environment(env, runner))
+	report.Add("Environment", Environment(env))
 
 	if o.Profile == "" {
 		return report
 	}
 
-	report.Add(fmt.Sprintf("profile %s", o.Profile), Profile(env, o.Config, o.Runner, o.Profile))
+	report.Add(fmt.Sprintf("profile %s", o.Profile), Profile(env, o.Config, o.Profile))
 
 	if o.Workload == "" {
 		return report
 	}
 
 	report.Add(fmt.Sprintf("workload %s/%s", o.Profile, o.Workload),
-		Workload(env, o.Config, o.Runner, o.Profile, o.Workload))
+		Workload(env, o.Config, o.Profile, o.Workload))
 
 	return report
 }
