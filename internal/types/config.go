@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -48,7 +49,97 @@ type Config struct {
 	// WorkloadPullMode defines how workload images should be pulled.
 	WorkloadPullMode WorkloadPullMode `yaml:"workloadPullMode"`
 
+	// Gateway describes the qubesome gateway for this configuration.
+	//
+	// A nil block means there is no gateway, and therefore no egress for
+	// any workload. That is the behaviour of a sandbox without one and it
+	// has to stay reachable, so the absence of the block is a valid
+	// configuration rather than a missing one.
+	Gateway *GatewayConfig `yaml:"gateway"`
+
 	RootDir string
+}
+
+// GatewayConfig describes the gateway that gives workloads their egress.
+//
+// There is one gateway per session rather than one per profile, because
+// the policy file it applies is keyed by workload across every profile.
+type GatewayConfig struct {
+	// Image is the container image the gateway runs from.
+	Image string `yaml:"image"`
+
+	// Config is the gateway's own policy file, written as a path into
+	// the qubesome config tree so that it travels with the repository
+	// the configuration is kept in. Resolve it with ConfigPath.
+	Config string `yaml:"config"`
+
+	// Subnet is the address range workloads are given on the link to the
+	// gateway. It has to be IPv4: the gateway recovers the original
+	// destination of a redirected flow through an IPv4 only path, so a
+	// flow over IPv6 could never be matched against a policy.
+	Subnet string `yaml:"subnet"`
+}
+
+// ConfigPath returns the gateway's policy file resolved against root,
+// the directory the qubesome config was read from.
+//
+// files.JoinProfilePath and not filepath.Join, for the reason its doc
+// comment spells out: a path in a qubesome config is written rooted at
+// the config tree, so "/gateway.yml" names the tree's own file and not
+// one at the root of the disk. filepath.Join would hand back "/gateway.yml"
+// unchanged for the spelling every real configuration uses, and would let
+// a path built from ".." leave the tree for the other spelling.
+func (g GatewayConfig) ConfigPath(root string) (string, error) {
+	return files.JoinProfilePath(root, g.Config)
+}
+
+// SubnetPrefix parses the subnet the gateway hands addresses out of.
+//
+// A prefix longer than /30 is refused because it has no host addresses
+// left once the network and the broadcast address are taken, so there is
+// nothing to give a workload. A prefix carrying host bits, 10.111.0.5/24,
+// is refused too: it names a host where a network was meant, and the
+// only reason to write one is a mistake.
+func (g GatewayConfig) SubnetPrefix() (netip.Prefix, error) {
+	prefix, err := netip.ParsePrefix(g.Subnet)
+	if err != nil {
+		return netip.Prefix{}, fmt.Errorf("invalid gateway subnet: %w", err)
+	}
+	if !prefix.Addr().Is4() {
+		return netip.Prefix{}, fmt.Errorf("invalid gateway subnet %q: must be IPv4", g.Subnet)
+	}
+	if prefix.Bits() > 30 {
+		return netip.Prefix{}, fmt.Errorf("invalid gateway subnet %q: has no host addresses", g.Subnet)
+	}
+	if prefix.Masked() != prefix {
+		return netip.Prefix{}, fmt.Errorf("invalid gateway subnet %q: names a host, not a network", g.Subnet)
+	}
+
+	return prefix, nil
+}
+
+// Validate checks the gateway block.
+//
+// root is the directory the config was read from. The policy file path is
+// resolved here so that one which leaves the config tree is reported when
+// the config is read rather than when the gateway is started. Resolving
+// is path arithmetic and reads nothing, so validation still does not
+// touch the filesystem.
+func (g GatewayConfig) Validate(root string) error {
+	if err := valid(g.Image, "gateway image", 100, false, imageRegex); err != nil {
+		return err
+	}
+	if err := valid(g.Config, "gateway config", 200, false, nil); err != nil {
+		return err
+	}
+	if _, err := g.ConfigPath(root); err != nil {
+		return err
+	}
+	if _, err := g.SubnetPrefix(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (c *Config) Profile(name string) (*Profile, bool) {
@@ -375,6 +466,12 @@ func DecodeConfig(r io.Reader, path string) (*Config, error) {
 	for k, v := range cfg.Profiles {
 		if err := v.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid profile %q: %w", k, err)
+		}
+	}
+
+	if cfg.Gateway != nil {
+		if err := cfg.Gateway.Validate(cfg.RootDir); err != nil {
+			return nil, fmt.Errorf("invalid gateway: %w", err)
 		}
 	}
 

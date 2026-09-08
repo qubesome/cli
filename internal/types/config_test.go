@@ -360,3 +360,184 @@ func TestWarnIgnoredDNS(t *testing.T) {
 	assert.Contains(t, out, "ignored")
 	assert.Contains(t, out, "1.1.1.1")
 }
+
+func TestGatewayConfigValidate(t *testing.T) {
+	t.Parallel()
+
+	base := GatewayConfig{
+		Image:  "ghcr.io/qubesome/gateway:latest",
+		Config: "gateway.yml",
+		Subnet: "10.111.0.0/24",
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*GatewayConfig)
+		wantErr string
+	}{
+		{
+			name:   "valid",
+			mutate: func(*GatewayConfig) {},
+		},
+		{
+			name:    "image does not match the format",
+			mutate:  func(g *GatewayConfig) { g.Image = "Gateway Image:latest" },
+			wantErr: "does not match format",
+		},
+		{
+			name:    "image is empty",
+			mutate:  func(g *GatewayConfig) { g.Image = "" },
+			wantErr: "gateway image cannot be empty",
+		},
+		{
+			name:    "config is empty",
+			mutate:  func(g *GatewayConfig) { g.Config = "" },
+			wantErr: "gateway config cannot be empty",
+		},
+		{
+			name:    "config leaves the config tree",
+			mutate:  func(g *GatewayConfig) { g.Config = "../gateway.yml" },
+			wantErr: "unsafe path",
+		},
+		{
+			name:    "subnet is not a prefix",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "10.111.0.0" },
+			wantErr: "invalid gateway subnet",
+		},
+		{
+			name:    "subnet is empty",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "" },
+			wantErr: "invalid gateway subnet",
+		},
+		{
+			name:    "subnet is IPv6",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "fd00::/64" },
+			wantErr: "must be IPv4",
+		},
+		{
+			name:    "subnet has no host addresses",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "10.111.0.0/31" },
+			wantErr: "has no host addresses",
+		},
+		{
+			name:    "subnet names a host",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "10.111.0.5/24" },
+			wantErr: "names a host, not a network",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			gw := base
+			tc.mutate(&gw)
+
+			err := gw.Validate("/config/root")
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+// Both spellings of an absolute path a real configuration uses resolve
+// under the config root, and so does a relative one.
+func TestGatewayConfigPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"relative", "gateway.yml", "/config/root/gateway.yml"},
+		{"rooted at the config tree", "/gateway.yml", "/config/root/gateway.yml"},
+		{"under the config root", "/config/root/gateway.yml", "/config/root/gateway.yml"},
+		{"rooted at the tree, in a subdirectory", "/shared/gateway.yml", "/config/root/shared/gateway.yml"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := GatewayConfig{Config: tc.path}.ConfigPath("/config/root")
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDecodeConfigGateway(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+		want    *GatewayConfig
+	}{
+		{
+			name:    "absent block means no gateway",
+			content: "profiles: {}\n",
+		},
+		{
+			name: "present block",
+			content: `gateway:
+  image: ghcr.io/qubesome/gateway:latest
+  config: /gateway.yml
+  subnet: 10.111.0.0/24
+`,
+			want: &GatewayConfig{
+				Image:  "ghcr.io/qubesome/gateway:latest",
+				Config: "/gateway.yml",
+				Subnet: "10.111.0.0/24",
+			},
+		},
+		{
+			name: "unknown field in the block",
+			content: `gateway:
+  image: ghcr.io/qubesome/gateway:latest
+  configPath: gateway.yml
+`,
+			wantErr: "failed to decode config",
+		},
+		{
+			name: "invalid subnet",
+			content: `gateway:
+  image: ghcr.io/qubesome/gateway:latest
+  config: gateway.yml
+  subnet: 10.111.0.0/31
+`,
+			wantErr: "invalid gateway",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := DecodeConfig(strings.NewReader(tc.content), "/config/root/qubesome.config")
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, cfg.Gateway)
+
+			if tc.want == nil {
+				return
+			}
+
+			got, err := cfg.Gateway.ConfigPath(cfg.RootDir)
+			require.NoError(t, err)
+			assert.Equal(t, "/config/root/gateway.yml", got)
+		})
+	}
+}
