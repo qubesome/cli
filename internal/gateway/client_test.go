@@ -146,6 +146,14 @@ func startGateway(t *testing.T, gw *testGateway) *Client {
 func listen(t *testing.T, gw *testGateway, creds *mtls.Credentials) string {
 	t.Helper()
 
+	return listenOn(t, gw, creds, filepath.Join(t.TempDir(), "control.sock"))
+}
+
+// listenOn serves the control channel on a given socket path, for a test that
+// has to put the socket where a Gateway expects to find it.
+func listenOn(t *testing.T, gw *testGateway, creds *mtls.Credentials, socket string) string {
+	t.Helper()
+
 	certPool := x509.NewCertPool()
 	require.True(t, certPool.AppendCertsFromPEM(creds.CA))
 
@@ -158,7 +166,6 @@ func listen(t *testing.T, gw *testGateway, creds *mtls.Credentials) string {
 	})))
 	pb.RegisterGatewayControlServer(s, gw)
 
-	socket := filepath.Join(t.TempDir(), "control.sock")
 	lc := net.ListenConfig{}
 	lis, err := lc.Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)

@@ -45,21 +45,48 @@ const writeTimeout = 5 * time.Second
 // is allowed to use.
 const readyTimeout = 10 * time.Minute
 
-// NewClient returns a client for the gateway control channel served on socket.
+// NewClient returns a client for the gateway control channel served on socket,
+// presenting the credentials in the process environment.
 func NewClient(socket string) *Client {
 	return &Client{
 		socket: "unix://" + socket,
 	}
 }
 
-type Client struct {
-	socket string
+// NewClientWithCreds returns a client that presents the credentials it is
+// given.
+//
+// qubesome mints the session's control credentials itself and keeps the client
+// half in a file only it can read. Putting them in its own environment instead
+// would hand them to every process it starts, workload sandboxes included, and
+// the client half is what writes the map every classification decision is made
+// from.
+func NewClientWithCreds(socket string, ca, cert, key []byte) *Client {
+	return &Client{
+		socket: "unix://" + socket,
+		ca:     ca,
+		cert:   cert,
+		key:    key,
+	}
 }
 
-func getCreds() (credentials.TransportCredentials, error) {
-	caPEM := []byte(os.Getenv("Q_MTLS_CA"))
-	certPEM := []byte(os.Getenv("Q_MTLS_CERT"))
-	keyPEM := []byte(os.Getenv("Q_MTLS_KEY"))
+type Client struct {
+	socket string
+
+	// ca, cert and key are empty for a client that reads its credentials
+	// from the environment.
+	ca   []byte
+	cert []byte
+	key  []byte
+}
+
+func (c *Client) getCreds() (credentials.TransportCredentials, error) {
+	caPEM, certPEM, keyPEM := c.ca, c.cert, c.key
+	if len(caPEM) == 0 && len(certPEM) == 0 && len(keyPEM) == 0 {
+		caPEM = []byte(os.Getenv("Q_MTLS_CA"))
+		certPEM = []byte(os.Getenv("Q_MTLS_CERT"))
+		keyPEM = []byte(os.Getenv("Q_MTLS_KEY"))
+	}
 
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
@@ -85,7 +112,7 @@ func getCreds() (credentials.TransportCredentials, error) {
 }
 
 func (c *Client) dial() (*grpc.ClientConn, error) {
-	creds, err := getCreds()
+	creds, err := c.getCreds()
 	if err != nil {
 		return nil, err
 	}

@@ -23,7 +23,15 @@ const (
 )
 
 type Credentials struct {
-	ServerCert   tls.Certificate
+	ServerCert tls.Certificate
+
+	// ServerPEM and ServerKeyPEM are the same material as ServerCert in the
+	// form a server in another process needs. The inception server runs in
+	// this one and takes the parsed pair. The gateway is a sandbox of its
+	// own, so it is handed PEM through its environment.
+	ServerPEM    []byte
+	ServerKeyPEM []byte
+
 	CA           []byte
 	ClientPEM    []byte
 	ClientKeyPEM []byte
@@ -72,6 +80,8 @@ func NewCredentialsFor(serverName string) (*Credentials, error) {
 	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caBytes})
 	return &Credentials{
 		ServerCert:   serverCert,
+		ServerPEM:    serverCertPEM,
+		ServerKeyPEM: serverKeyPEM,
 		CA:           ca,
 		ClientPEM:    clientCertPEM,
 		ClientKeyPEM: clientKeyPEM,

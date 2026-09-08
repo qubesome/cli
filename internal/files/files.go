@@ -245,14 +245,63 @@ func GatewayStatePath() string {
 	return filepath.Join(SessionDir(), "sandbox-gateway.json")
 }
 
-// GatewaySocket returns the host path of the gateway's control socket.
+// GatewaySocketDir returns the host directory the gateway's control socket
+// is created in.
 //
-// It is in a directory of its own below the session directory rather than
-// beside the lock and the state files. The directory holding it is bound
-// into the gateway's sandbox, so anything sharing it would be handed to
-// the gateway as well, and the session lock is not the gateway's to take.
+// It is a directory of its own below the session directory rather than the
+// session directory itself. It is bound into the gateway's sandbox, so
+// anything sharing it would be handed to the gateway as well, and neither
+// the session lock nor the control channel's client credentials are the
+// gateway's to read.
+func GatewaySocketDir() string {
+	return filepath.Join(SessionDir(), "gateway")
+}
+
+// GatewaySocket returns the host path of the gateway's control socket.
 func GatewaySocket() string {
-	return filepath.Join(SessionDir(), "gateway", "control.sock")
+	return filepath.Join(GatewaySocketDir(), "control.sock")
+}
+
+// GatewayLockPath returns the lock that serialises starting the session's
+// gateway and handing out its addresses.
+//
+// It is not SessionLockPath. That one is held for the whole life of the
+// namespace holder, so nothing else can ever take it. The gateway is an
+// image qubesome did not write and cannot ask to hold a lock, so its
+// singleton is the state file plus a lock held only across the check and
+// the start, which is short and which every launch can take in turn.
+func GatewayLockPath() string {
+	return filepath.Join(SessionDir(), "gateway.lock")
+}
+
+// GatewayAllocPath returns the record of how much of the gateway's subnet
+// has been handed out. It sits beside the gateway's state file, because
+// the two have the same lifetime: a gateway that is started afresh has an
+// empty map and hands the count back to zero.
+func GatewayAllocPath() string {
+	return filepath.Join(SessionDir(), "gateway-addresses.json")
+}
+
+// GatewayCredsPath returns the client half of the control channel's mTLS
+// material.
+//
+// It is written because the gateway outlives the launch that started it,
+// and a later qubesome run has to reach the same gateway. Only the client
+// half is here. The server half exists in the gateway's own environment
+// and nowhere else.
+func GatewayCredsPath() string {
+	return filepath.Join(SessionDir(), "gateway-creds.json")
+}
+
+// GatewaySecretsDir returns the host directory the gateway resolves its
+// policy's secret references against.
+//
+// It is persistent rather than under the run directory, since the values
+// in it are the user's and not one session's, and it is outside the
+// config tree so that a secret is not something a dotfiles repository
+// carries.
+func GatewaySecretsDir() string {
+	return filepath.Join(QubesomeDir(), "gateway", "secrets")
 }
 
 // ClientCookiePath returns the path to the client cookie file for the given profile.
