@@ -148,3 +148,19 @@ func TestMissingImagesReportsWhatTheStoreLacks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{kaliRef}, missing)
 }
+
+// A workload launch used to wait on a refresh of every image the config
+// named. The refresh now belongs to starting a profile, and on-demand
+// configurations do no refreshing at all, so nothing here may reach for
+// skopeo or umoci.
+func TestRefreshExpiredDoesNothingOnDemand(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	s.cmdRunner = func(bin string, args []string) error {
+		t.Fatalf("on-demand refresh executed %s %v", bin, args)
+		return nil
+	}
+
+	refreshExpired(s, &types.Config{WorkloadPullMode: types.OnDemand})
+}

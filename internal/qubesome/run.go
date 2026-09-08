@@ -11,11 +11,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
-	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/runners/docker"
 	"github.com/qubesome/cli/internal/runners/firecracker"
@@ -66,10 +64,6 @@ func Run(opts ...command.Option[Options]) error {
 		return err
 	}
 
-	wg := sync.WaitGroup{}
-	if err := images.Pull(o.Config, &wg); err != nil {
-		return err
-	}
 	in := WorkloadInfo{
 		Name:    o.Workload,
 		Profile: o.Profile,
@@ -77,8 +71,9 @@ func Run(opts ...command.Option[Options]) error {
 		Config:  o.Config,
 	}
 
-	// Wait for any background operation that is in-flight.
-	defer wg.Wait()
+	// Nothing config-wide happens here. Refreshing every image the
+	// configuration names belongs to starting a profile, which is a
+	// process that stays up, not to opening one app.
 	return runner(in, o.Runner, o.Headless)
 }
 

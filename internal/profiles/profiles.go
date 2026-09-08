@@ -296,6 +296,12 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		}
 	}
 
+	// The periodic refresh runs here rather than on a workload launch.
+	// This process stays up for as long as the profile does, so the
+	// goroutine has somewhere to live, and nothing a user is waiting on
+	// is behind it.
+	go images.RefreshExpired(cfg)
+
 	if profile.Gpus != "" {
 		switch {
 		case gpu.NvidiaToolkitPresent():

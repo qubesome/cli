@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/qubesome/cli/internal/command"
@@ -26,21 +25,37 @@ func Run(opts ...command.Option[Options]) error {
 	return PullAll(o.Config)
 }
 
-func Pull(cfg *types.Config, wg *sync.WaitGroup) error {
-	switch cfg.WorkloadPullMode {
-	case types.Background:
-		wg.Go(func() {
-			if exp, _ := pullExpired(); exp {
-				err := PullAll(cfg)
-				if err != nil {
-					slog.Error("error pulling images", "error", err)
-				}
-			}
-		})
-	case types.OnDemand:
-		// no-op as images will be pull when needed.
+// RefreshExpired re-pulls every image in a config once the last check is
+// older than pullExpiration. It blocks, so it belongs on a goroutine of a
+// process that outlives it.
+//
+// It is deliberately not called from a workload launch. It used to be,
+// with the launch waiting on it, so opening one app re-pulled and
+// re-unpacked every image the configuration named and the caller waited
+// for all of them. The refresh now runs where a profile is being started,
+// which is a process that stays up and where the wait is expected
+// anyway.
+func RefreshExpired(cfg *types.Config) {
+	refreshExpired(NewStore(), cfg)
+}
+
+func refreshExpired(s *Store, cfg *types.Config) {
+	if cfg.WorkloadPullMode != types.Background {
+		return
 	}
-	return nil
+
+	exp, err := pullExpired()
+	if err != nil {
+		slog.Error("cannot tell whether images are due a refresh", "error", err)
+		return
+	}
+	if !exp {
+		return
+	}
+
+	if err := pullAll(s, cfg); err != nil {
+		slog.Error("error pulling images", "error", err)
+	}
 }
 
 var (
