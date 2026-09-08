@@ -6,7 +6,6 @@ require (
 	github.com/go-git/go-git/v6 v6.0.0-alpha.5
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/google/uuid v1.6.0
-	github.com/qubesome/gateway v0.0.5
 	github.com/qubesome/libudev v0.0.2
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v3 v3.11.0

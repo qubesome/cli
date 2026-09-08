@@ -2,41 +2,47 @@ package gateway
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"net"
 	"net/netip"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/qubesome/cli/internal/util/mtls"
-	"github.com/qubesome/gateway/pkg/control"
+	"github.com/qubesome/cli/pkg/control"
+	pb "github.com/qubesome/cli/pkg/control/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
 const (
 	testWorkload = "shell-dev"
 	testAddress  = "10.111.0.2"
 	testTimeout  = 5 * time.Second
-	pollInterval = 5 * time.Millisecond
 )
 
 func TestRegisterNamesTheWorkloadBehindAnAddress(t *testing.T) {
-	reg := newRegistry(testWorkload, "other-dev")
-	c := startGateway(t, reg, closedChan())
+	gw := newGateway(closedChan(), testWorkload, "other-dev")
+	c := startGateway(t, gw)
 
 	require.NoError(t, c.Register(t.Context(), testWorkload, testAddress))
 
-	assert.Equal(t, map[string]string{testAddress: testWorkload}, reg.mapped())
+	assert.Equal(t, map[string]string{testAddress: testWorkload}, gw.mapped())
 }
 
 // Two workloads at one address means something upstream is wrong. The gateway
 // refuses it, and the client has to surface that rather than carry on as if
 // the address were classified.
 func TestRegisterFailsWhenTheAddressIsAlreadyTaken(t *testing.T) {
-	reg := newRegistry(testWorkload, "other-dev")
-	c := startGateway(t, reg, closedChan())
+	gw := newGateway(closedChan(), testWorkload, "other-dev")
+	c := startGateway(t, gw)
 
 	require.NoError(t, c.Register(t.Context(), testWorkload, testAddress))
 
@@ -44,40 +50,40 @@ func TestRegisterFailsWhenTheAddressIsAlreadyTaken(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "other-dev")
-	assert.Equal(t, map[string]string{testAddress: testWorkload}, reg.mapped())
+	assert.Equal(t, map[string]string{testAddress: testWorkload}, gw.mapped())
 }
 
 func TestRegisterFailsForAWorkloadWithNoPolicy(t *testing.T) {
-	reg := newRegistry(testWorkload)
-	c := startGateway(t, reg, closedChan())
+	gw := newGateway(closedChan(), testWorkload)
+	c := startGateway(t, gw)
 
 	err := c.Register(t.Context(), "not-in-the-policy", testAddress)
 
 	require.Error(t, err)
-	assert.Empty(t, reg.mapped())
+	assert.Empty(t, gw.mapped())
 }
 
 func TestUnregisterDropsTheAddress(t *testing.T) {
-	reg := newRegistry(testWorkload)
-	c := startGateway(t, reg, closedChan())
+	gw := newGateway(closedChan(), testWorkload)
+	c := startGateway(t, gw)
 
 	require.NoError(t, c.Register(t.Context(), testWorkload, testAddress))
 	require.NoError(t, c.Unregister(t.Context(), testWorkload))
 
-	assert.Empty(t, reg.mapped())
+	assert.Empty(t, gw.mapped())
 }
 
 // A workload that crashed unregisters on a name the gateway may already have
 // forgotten.
 func TestUnregisterAcceptsAnUnknownWorkload(t *testing.T) {
-	c := startGateway(t, newRegistry(testWorkload), closedChan())
+	c := startGateway(t, newGateway(closedChan(), testWorkload))
 
 	assert.NoError(t, c.Unregister(t.Context(), "never-registered"))
 }
 
 func TestReadyAnswersOnceTheGatewayIsUp(t *testing.T) {
 	up := make(chan struct{})
-	c := startGateway(t, newRegistry(testWorkload), up)
+	c := startGateway(t, newGateway(up, testWorkload))
 
 	answered := make(chan error, 1)
 	go func() {
@@ -103,7 +109,7 @@ func TestReadyAnswersOnceTheGatewayIsUp(t *testing.T) {
 // readyTimeout is a ceiling, so a caller that needs to give up sooner brings
 // its own deadline and that one wins.
 func TestReadyGivesUpWithTheCaller(t *testing.T) {
-	c := startGateway(t, newRegistry(testWorkload), make(chan struct{}))
+	c := startGateway(t, newGateway(make(chan struct{}), testWorkload))
 
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
@@ -114,49 +120,58 @@ func TestReadyGivesUpWithTheCaller(t *testing.T) {
 // The control channel writes the map every classification decision is made
 // from, so a client the gateway's CA did not sign gets nowhere.
 func TestClientWithTheWrongCAIsRefused(t *testing.T) {
-	reg := newRegistry(testWorkload)
-	socket := listen(t, reg, closedChan(), newCreds(t))
+	gw := newGateway(closedChan(), testWorkload)
+	socket := listen(t, gw, newCreds(t))
 
 	setCredsEnv(t, newCreds(t))
 
 	err := NewClient(socket).Register(t.Context(), testWorkload, testAddress)
 
 	require.Error(t, err)
-	assert.Empty(t, reg.mapped())
+	assert.Empty(t, gw.mapped())
 }
 
 // startGateway serves the control channel over a socket in the test's temp
 // directory and returns a client that trusts it.
-func startGateway(t *testing.T, reg control.Registry, up <-chan struct{}) *Client {
+func startGateway(t *testing.T, gw *testGateway) *Client {
 	t.Helper()
 
 	creds := newCreds(t)
-	socket := listen(t, reg, up, creds)
+	socket := listen(t, gw, creds)
 	setCredsEnv(t, creds)
 
 	return NewClient(socket)
 }
 
-func listen(t *testing.T, reg control.Registry, up <-chan struct{}, creds *mtls.Credentials) string {
+func listen(t *testing.T, gw *testGateway, creds *mtls.Credentials) string {
 	t.Helper()
 
+	certPool := x509.NewCertPool()
+	require.True(t, certPool.AppendCertsFromPEM(creds.CA))
+
+	s := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
+		Certificates: []tls.Certificate{creds.ServerCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    certPool,
+		MinVersion:   tls.VersionTLS13,
+		ServerName:   control.ServerName,
+	})))
+	pb.RegisterGatewayControlServer(s, gw)
+
 	socket := filepath.Join(t.TempDir(), "control.sock")
-	s := control.NewServer(reg, up)
+	lc := net.ListenConfig{}
+	lis, err := lc.Listen(t.Context(), "unix", socket)
+	require.NoError(t, err)
 
 	served := make(chan error, 1)
 	go func() {
-		served <- s.Listen(creds.ServerCert, creds.CA, socket)
+		served <- s.Serve(lis)
 	}()
 
 	t.Cleanup(func() {
 		s.Stop()
 		require.NoError(t, <-served)
 	})
-
-	require.Eventually(t, func() bool {
-		_, err := os.Stat(socket)
-		return err == nil
-	}, testTimeout, pollInterval, "the control socket was never created")
 
 	return socket
 }
@@ -187,83 +202,93 @@ func closedChan() <-chan struct{} {
 	return ch
 }
 
-// registry stands in for the gateway's loaded policy. It answers the same
-// three questions the real one does and nothing else.
-type registry struct {
+// testGateway stands in for the gateway's side of the control channel. It
+// answers the three methods the same way the gateway does, over a policy that
+// is just the set of names it was built with.
+type testGateway struct {
+	pb.UnimplementedGatewayControlServer
+
+	ready <-chan struct{}
+
 	mu       sync.Mutex
 	known    map[string]bool
 	byAddr   map[netip.Addr]string
 	addrOfWl map[string]netip.Addr
 }
 
-func newRegistry(known ...string) *registry {
-	r := &registry{
+func newGateway(ready <-chan struct{}, known ...string) *testGateway {
+	gw := &testGateway{
+		ready:    ready,
 		known:    make(map[string]bool, len(known)),
 		byAddr:   make(map[netip.Addr]string),
 		addrOfWl: make(map[string]netip.Addr),
 	}
 	for _, name := range known {
-		r.known[name] = true
+		gw.known[name] = true
 	}
 
-	return r
+	return gw
 }
 
-func (r *registry) HasWorkload(name string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (gw *testGateway) Register(_ context.Context, in *pb.RegisterRequest) (*pb.RegisterReply, error) {
+	addr, err := netip.ParseAddr(in.GetAddress())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "address %q is not an IP address", in.GetAddress())
+	}
 
-	return r.known[name]
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+
+	name := in.GetName()
+	if !gw.known[name] {
+		return nil, status.Errorf(codes.InvalidArgument, "workload %q is not in the loaded policy", name)
+	}
+
+	if existing, ok := gw.byAddr[addr]; ok {
+		return nil, status.Errorf(codes.AlreadyExists, "address %s is already mapped to %s", addr, existing)
+	}
+	if _, ok := gw.addrOfWl[name]; ok {
+		return nil, status.Errorf(codes.AlreadyExists, "workload %s is already mapped", name)
+	}
+
+	gw.byAddr[addr] = name
+	gw.addrOfWl[name] = addr
+
+	return &pb.RegisterReply{}, nil
 }
 
-func (r *registry) SetWorkload(addr netip.Addr, name string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (gw *testGateway) Unregister(_ context.Context, in *pb.UnregisterRequest) (*pb.UnregisterReply, error) {
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
 
-	if existing, ok := r.byAddr[addr]; ok {
-		return &takenError{addr: addr, name: existing}
+	addr, ok := gw.addrOfWl[in.GetName()]
+	if ok {
+		delete(gw.addrOfWl, in.GetName())
+		delete(gw.byAddr, addr)
 	}
-	if _, ok := r.addrOfWl[name]; ok {
-		return &takenError{addr: addr, name: name}
-	}
 
-	r.byAddr[addr] = name
-	r.addrOfWl[name] = addr
-
-	return nil
+	return &pb.UnregisterReply{}, nil
 }
 
-func (r *registry) RemoveWorkload(name string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	addr, ok := r.addrOfWl[name]
-	if !ok {
-		return
+func (gw *testGateway) Ready(ctx context.Context, _ *pb.ReadyRequest) (*pb.ReadyReply, error) {
+	select {
+	case <-gw.ready:
+		return &pb.ReadyReply{}, nil
+	case <-ctx.Done():
+		//nolint:wrapcheck // A gRPC status is the wire representation of the failure.
+		return nil, status.FromContextError(ctx.Err()).Err()
 	}
-
-	delete(r.addrOfWl, name)
-	delete(r.byAddr, addr)
 }
 
 // mapped returns the address to workload map the control channel has written.
-func (r *registry) mapped() map[string]string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (gw *testGateway) mapped() map[string]string {
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
 
-	out := make(map[string]string, len(r.byAddr))
-	for addr, name := range r.byAddr {
+	out := make(map[string]string, len(gw.byAddr))
+	for addr, name := range gw.byAddr {
 		out[addr.String()] = name
 	}
 
 	return out
-}
-
-type takenError struct {
-	addr netip.Addr
-	name string
-}
-
-func (e *takenError) Error() string {
-	return "address " + e.addr.String() + " is already mapped to " + e.name
 }

@@ -15,8 +15,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/qubesome/gateway/pkg/control"
-	pb "github.com/qubesome/gateway/pkg/control/proto"
+	"github.com/qubesome/cli/pkg/control"
+	pb "github.com/qubesome/cli/pkg/control/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )

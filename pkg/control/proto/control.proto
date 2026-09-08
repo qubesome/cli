@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+option go_package = "github.com/qubesome/cli/pkg/control/proto";
+
+package control;
+
+service GatewayControl {
+  rpc Register (RegisterRequest) returns (RegisterReply) {}
+  rpc Unregister (UnregisterRequest) returns (UnregisterReply) {}
+  rpc Ready (ReadyRequest) returns (ReadyReply) {}
+}
+
+// name is the policy key, which is the single string the gateway's workloads
+// map is keyed by. Profile and workload are not sent separately, otherwise
+// two repositories would have to agree on how they are joined.
+message RegisterRequest {
+  string name = 1;
+  string address = 2;
+}
+
+message RegisterReply {
+}
+
+message UnregisterRequest {
+  string name = 1;
+}
+
+message UnregisterReply {
+}
+
+message ReadyRequest {
+}
+
+message ReadyReply {
+}
