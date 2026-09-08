@@ -26,7 +26,7 @@ func serving(t *testing.T) (*supervisor, string) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 
-	s := &supervisor{}
+	s := &supervisor{starter: procStarter{}}
 	go s.serve(ln)
 
 	return s, socket

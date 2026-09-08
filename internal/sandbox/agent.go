@@ -77,29 +77,43 @@ func Supervise(socket string, argv []string) error {
 	return supervise(ln, argv)
 }
 
-// supervise runs argv and serves spawn requests on ln until argv exits.
+// supervise runs argv and serves spawn requests on ln until argv exits,
+// with the processes waited for as ordinary children of this one.
 //
 // It is the half of Supervise that does not know what it is listening on.
-// A sandbox in a VM has no unix socket to be reached on and reuses this
-// with a vsock listener instead. See SuperviseVM.
+// A sandbox in a VM has no unix socket to be reached on and reuses
+// superviseWith with a vsock listener and a starter of its own. See
+// SuperviseVM.
 func supervise(ln net.Listener, argv []string) error {
+	return superviseWith(ln, argv, procStarter{})
+}
+
+// superviseWith is supervise with the transport and the way processes are
+// waited for both left to the caller.
+//
+// The two are separate questions and the VM answers both differently: it
+// is reached over vsock rather than over a unix socket, and it is pid 1,
+// so it cannot wait for a process by pid. See guestReaper.
+func superviseWith(ln net.Listener, argv []string, st starter) error {
 	defer ln.Close()
 
-	main, err := start(argv)
+	main, err := st.start(argv)
 	if err != nil {
 		return err
 	}
 
-	s := &supervisor{}
+	s := &supervisor{starter: st}
 	go s.serve(ln)
 
 	// The sandbox's lifetime is the main command's, exactly as the
-	// container's was. Returning ends this process, and this process is
-	// the first child of the pid namespace bwrap unshared, so the kernel
-	// tears that namespace down and every sibling spawned into it goes
-	// with it. Siblings are deliberately neither waited for nor signalled
-	// first: a sibling is another window of the same application, and the
-	// container ended them the same way when its main process exited.
+	// container's was. Returning ends the sandbox: under bwrap this
+	// process is the first child of the unshared pid namespace, so the
+	// kernel tears that namespace down, and in a VM it is pid 1 and the
+	// caller shuts the machine down. Either way every sibling spawned
+	// into it goes with it. Siblings are deliberately neither waited for
+	// nor signalled first: a sibling is another window of the same
+	// application, and the container ended them the same way when its
+	// main process exited.
 	return main.Wait()
 }
 
@@ -191,8 +205,38 @@ func listen(socket string) (net.Listener, error) {
 	return ln, nil
 }
 
+// starter runs a process for the supervisor and hands back the way to
+// wait for it.
+//
+// It exists because who is allowed to wait for a process depends on where
+// the sandbox is. Under bwrap the supervisor is an ordinary process and
+// os/exec waits for its own children. In a VM the supervisor is pid 1 and
+// a single wait4 loop owns every exit status in the machine, so a caller
+// is handed a delivery rather than a wait of its own.
+type starter interface {
+	start(argv []string) (waiter, error)
+}
+
+// waiter waits for one process the supervisor started and reports how it
+// ended.
+type waiter interface {
+	Wait() error
+}
+
+// procStarter waits for a process through os/exec, as a child of this
+// one. It is the arrangement every sandbox but a VM's is in.
+type procStarter struct{}
+
+func (procStarter) start(argv []string) (waiter, error) {
+	return start(argv)
+}
+
 // supervisor serves spawn requests for one sandbox.
 type supervisor struct {
+	// starter runs the siblings. See the interface for why it is not
+	// always os/exec.
+	starter starter
+
 	// spawned counts the siblings still being waited for. Nothing outside
 	// the tests reads it. See reap for why the waiting matters.
 	spawned sync.WaitGroup
@@ -241,47 +285,59 @@ func (s *supervisor) handle(conn net.Conn) {
 
 	slog.Debug("spawning a sibling", "argv", argv)
 
-	cmd, err := start(argv)
+	child, err := s.starter.start(argv)
 	if err != nil {
 		reply(conn, err)
 		return
 	}
 
-	s.reap(cmd)
+	s.reap(child)
 	reply(conn, nil)
 }
 
-// reap waits for a spawned sibling.
+// reap waits for a spawned sibling, so that a long session does not hold
+// a zombie for every window that was ever closed.
 //
-// bwrap installs a reaper at pid 1 of the namespace it unshares, but that
-// reaper is not this process. Without --as-pid-1, which qubesome does not
-// pass, pid 1 is bwrap's own init and the supervisor is its first child,
-// so a sibling started here is a child of the supervisor and not of the
-// reaper. It only becomes an orphan the reaper collects if the supervisor
-// dies first, which is the moment the whole sandbox ends anyway. So the
-// supervisor waits for its own children, or a long session holds a zombie
-// for every window that was ever closed.
-func (s *supervisor) reap(cmd *execabs.Cmd) {
+// Under bwrap the wait has to happen here. bwrap installs a reaper at pid
+// 1 of the namespace it unshares, but that reaper is not this process.
+// Without --as-pid-1, which qubesome does not pass, pid 1 is bwrap's own
+// init and the supervisor is its first child, so a sibling started here
+// is a child of the supervisor and not of the reaper. It only becomes an
+// orphan the reaper collects if the supervisor dies first, which is the
+// moment the whole sandbox ends anyway.
+//
+// In a VM there is no reaper above this process, because this process is
+// the reaper. Being pid 1 makes the job harder rather than easier and the
+// waiting is arranged differently underneath, but from here it reads the
+// same. See guestReaper.
+func (s *supervisor) reap(child waiter) {
 	s.spawned.Add(1)
 
 	go func() {
 		defer s.spawned.Done()
 
-		if err := cmd.Wait(); err != nil {
+		if err := child.Wait(); err != nil {
 			slog.Debug("a spawned sibling exited", "error", err)
 		}
 	}()
 }
 
-// start runs argv with the sandbox's own standard streams.
+// command prepares argv with the sandbox's own standard streams.
 //
 // A sibling shares them with the main command, which is what the container
 // runner's exec did, and it is the only place its output can go: the
 // sandbox has no terminal of its own.
-func start(argv []string) (*execabs.Cmd, error) {
+func command(argv []string) *execabs.Cmd {
 	cmd := execabs.Command(argv[0], argv[1:]...) //nolint:gosec // the command is the workload's own, from its configuration.
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	return cmd
+}
+
+// start runs argv as a child of this process.
+func start(argv []string) (*execabs.Cmd, error) {
+	cmd := command(argv)
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("sandbox: failed to start %q: %w", argv[0], err)

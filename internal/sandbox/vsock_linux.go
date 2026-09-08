@@ -32,7 +32,8 @@ const (
 //
 // It is Supervise reached over vsock rather than over a unix socket,
 // because a guest has no filesystem in common with the host to put a
-// socket file on.
+// socket file on. It also waits for what it starts differently, because
+// it is pid 1 of the machine. See guestReaper.
 func SuperviseVM(port uint32, argv []string) error {
 	if len(argv) == 0 {
 		return errors.New("sandbox: supervise needs a command to run")
@@ -46,7 +47,11 @@ func SuperviseVM(port uint32, argv []string) error {
 		return err
 	}
 
-	return supervise(ln, argv)
+	// The reaper is collecting before the first process is started, or
+	// something could exit into a loop that is not running yet.
+	reaper := startReaping()
+
+	return superviseWith(ln, argv, reaper)
 }
 
 // SpawnVM asks the supervisor listening on a guest port to start argv

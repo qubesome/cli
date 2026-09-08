@@ -64,6 +64,11 @@ type InitConfig struct {
 	// Hostname is the effective workload name, which is what the bwrap
 	// runner gives its sandboxes too.
 	Hostname string `json:"hostname"`
+
+	// DataMount is where the guest mounts the persistent disk, and is
+	// empty when the workload configured none. It is also how the guest
+	// knows there is a second drive to mount at all.
+	DataMount string `json:"dataMount,omitempty"`
 }
 
 // roPath is one host path composed into the guest tree. Both sides are
@@ -326,11 +331,17 @@ func initConfig(bundle images.Bundle, ew types.EffectiveWorkload) InitConfig {
 		vars = append(vars, "QUBESOME_PROFILE="+ew.Profile.Name)
 	}
 
+	var dataMount string
+	if data := wl.MicroVM.WithDefaults().Data; data != nil {
+		dataMount = data.Mount
+	}
+
 	return InitConfig{
-		Argv:     argv,
-		Env:      vars,
-		Cwd:      bundle.Cwd,
-		Hostname: ew.Name,
+		Argv:      argv,
+		Env:       vars,
+		Cwd:       bundle.Cwd,
+		Hostname:  ew.Name,
+		DataMount: dataMount,
 	}
 }
 

@@ -51,7 +51,7 @@ func TestSpawnVMAsksForTheGuestPort(t *testing.T) {
 	t.Parallel()
 
 	requests := make(chan string, 1)
-	s := &supervisor{}
+	s := &supervisor{starter: procStarter{}}
 
 	// Once the handshake is done the connection is an ordinary supervisor
 	// exchange, so the stub hands it to the supervisor unchanged. That is
