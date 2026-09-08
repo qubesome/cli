@@ -15,11 +15,19 @@
 #   4. nsenter --mount alone            FAIL, as expected
 #   5. veth in an owned netns           PASS
 #   6. veth across two netns, one userns PASS
+#   7. veth into a descendant's netns    PASS
+#   8. nsenter --net into a descendant    (run pending)
 #
 # Check 3 stopping at ns/pid while check 4 stops at ns/mnt is the useful
 # part. nsenter joins the user namespace first, so that join succeeded and
 # carried its capabilities forward. The pid namespace is the wall, not the
 # route to it, and re-entry was designed around it rather than through it.
+#
+# Check 7 is the one the gateway is built on. A capability held in an
+# ancestor user namespace does carry into the namespaces its descendants
+# own, so a session namespace can wire a veth into a sandbox that nested
+# its own inside it. That is what lets each sandbox keep --disable-userns
+# and its own uid mapping instead of sharing one flat namespace.
 #
 # Check 6 was run separately, after the first version of it was rewritten:
 # the original passed a pid where iproute2 wanted a namespace and so tested
@@ -157,6 +165,36 @@ if command -v ip >/dev/null 2>&1; then
         exit $rc
     ' 2>&1
     res $? "veth into a descendant userns netns"
+else
+    printf '   SKIP  ip is not installed\n\n'
+fi
+
+printf '== 8. entering a descendant network namespace\n'
+printf '   Moving a link in is not enough. RTM_NEWADDR carries no target\n'
+printf '   namespace, so giving the veth an address means being in the\n'
+printf '   namespace. setns of a network namespace wants CAP_SYS_ADMIN in\n'
+printf '   the caller own user namespace as well as in the owning one, and\n'
+printf '   inside the session both are satisfied. Check 4 shows the same\n'
+printf '   call failing from outside, so this is the difference the session\n'
+printf '   namespace makes.\n'
+if command -v ip >/dev/null 2>&1; then
+    unshare --user --map-root-user --net sh -c '
+        unshare --user --map-root-user --net sleep 5 &
+        child=$!
+        sleep 1
+
+        if nsenter --net=/proc/"$child"/ns/net ip link show lo >/dev/null 2>&1; then
+            echo "   entered and listed the descendant namespace"
+            rc=0
+        else
+            nsenter --net=/proc/"$child"/ns/net ip link show lo 2>&1 | sed "s/^/   /"
+            rc=1
+        fi
+
+        kill "$child" 2>/dev/null
+        exit $rc
+    ' 2>&1
+    res $? "nsenter --net into a descendant userns netns"
 else
     printf '   SKIP  ip is not installed\n\n'
 fi
