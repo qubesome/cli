@@ -729,3 +729,25 @@ func countArg(args []string, flag, value string) int {
 
 	return n
 }
+
+// A mapping is src:dst with an optional :ro flag, and cutting at the
+// first colon left the flag on the destination. Every read-only mapping
+// in a real configuration landed at a path with ":ro" on the end, so a
+// dotfile was present under a name nothing reads, and it was writable.
+func TestMappedPathsSplitsTheReadOnlyFlagOff(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	rc := filepath.Join(dir, ".zshrc")
+	require.NoError(t, os.WriteFile(rc, nil, 0o600))
+
+	got := mappedPaths([]string{
+		rc + ":/home/coder/.zshrc:ro",
+		dir + ":/home/coder/git",
+	})
+
+	require.Equal(t, []sandbox.Mount{
+		{Src: rc, Dst: "/home/coder/.zshrc", ReadOnly: true},
+		{Src: dir, Dst: "/home/coder/git"},
+	}, got)
+}

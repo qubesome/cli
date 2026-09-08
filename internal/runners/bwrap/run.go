@@ -431,23 +431,32 @@ func localtime() []string {
 //
 // A directory that does not exist is created here rather than by the
 // sandbox, because bwrap would create it owned by the sandbox user.
+//
+// A mapping is src:dst with an optional :ro, which pathRegex allows a
+// colon in neither half, so the fields are split rather than cut. Cutting
+// at the first colon leaves the flag attached to the destination: a
+// mapping ending :ro mounted onto "/home/user/.zshrc:ro" instead of
+// "/home/user/.zshrc", so the file was there under a name nothing looks
+// for, and read-only mappings were mounted writable.
 func mappedPaths(paths []string) []sandbox.Mount {
 	mounts := make([]sandbox.Mount, 0, len(paths))
 
 	for _, p := range paths {
-		src, dst, ok := strings.Cut(p, ":")
-		if !ok {
-			slog.Warn("failed to mount path", "path", p)
-			continue
-		}
+		parts := strings.Split(p, ":")
 
-		src = env.Expand(src)
+		src := env.Expand(parts[0])
 		if err := files.EnsureMappedDir(src); err != nil {
 			slog.Warn("failed to mount path", "path", src, "error", err)
 			continue
 		}
 
-		mounts = append(mounts, sandbox.Mount{Src: src, Dst: dst})
+		m := sandbox.Mount{Src: src, Dst: src}
+		if len(parts) > 1 {
+			m.Dst = parts[1]
+		}
+		m.ReadOnly = len(parts) > 2 && parts[2] == "ro"
+
+		mounts = append(mounts, m)
 	}
 
 	return mounts
