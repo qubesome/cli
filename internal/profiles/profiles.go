@@ -73,7 +73,7 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	if o.GitURL != "" {
-		return StartFromGit(o.Runner, o.Profile, o.GitURL, o.Path, o.Local, o.Interactive)
+		return StartFromGit(o.Profile, o.GitURL, o.Path, o.Local, o.Interactive)
 	}
 
 	if o.Local != "" {
@@ -104,7 +104,7 @@ func Run(opts ...command.Option[Options]) error {
 		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
 	}
 
-	return Start(o.Runner, profile, cfg, o.Interactive)
+	return Start(profile, cfg, o.Interactive)
 }
 
 func validGitDir(path string) bool {
@@ -162,7 +162,7 @@ func errAlreadyStarted(profile string) error {
 	return fmt.Errorf("profile %q is already started", profile)
 }
 
-func StartFromGit(runner, name, gitURL, path, local string, interactive bool) error {
+func StartFromGit(name, gitURL, path, local string, interactive bool) error {
 	ln := files.ProfileConfig(name)
 
 	if _, err := os.Lstat(ln); err == nil {
@@ -259,10 +259,10 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 
 	slog.Debug("start from git", "profile", p.Name, "p", path, "path", p.Path, "config", cfgPath)
 
-	return Start(runner, p, cfg, interactive)
+	return Start(p, cfg, interactive)
 }
 
-func Start(runner string, profile *types.Profile, cfg *types.Config, interactive bool) (err error) {
+func Start(profile *types.Profile, cfg *types.Config, interactive bool) (err error) {
 	if cfg == nil {
 		return fmt.Errorf("cannot start profile: config is nil")
 	}

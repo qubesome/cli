@@ -9,7 +9,6 @@ type Options struct {
 	Path        string
 	Local       string
 	Profile     string
-	Runner      string
 	Interactive bool
 }
 
@@ -34,12 +33,6 @@ func WithLocal(local string) command.Option[Options] {
 func WithProfile(profile string) command.Option[Options] {
 	return func(o *Options) {
 		o.Profile = profile
-	}
-}
-
-func WithRunner(runner string) command.Option[Options] {
-	return func(o *Options) {
-		o.Runner = runner
 	}
 }
 

@@ -36,7 +36,7 @@ func TestStartRefusesARunningProfile(t *testing.T) {
 
 	require.NoError(t, sandbox.WriteState(SandboxStatePath(name), os.Getpid()))
 
-	err := Start("", &types.Profile{Name: name, WindowManager: "i3"}, &types.Config{}, false)
+	err := Start(&types.Profile{Name: name, WindowManager: "i3"}, &types.Config{}, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already started")
 
@@ -93,7 +93,7 @@ func lastEnv(env []string, name string) string {
 func TestStartWithoutAConfig(t *testing.T) {
 	t.Parallel()
 
-	err := Start("", &types.Profile{Name: "work", WindowManager: "i3"}, nil, false)
+	err := Start(&types.Profile{Name: "work", WindowManager: "i3"}, nil, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "config is nil")
 }
