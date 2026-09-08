@@ -87,7 +87,122 @@ const (
 
 	// ptsDir is where the slave of a pty appears.
 	ptsDir = "/dev/pts/"
+
+	// consoleGrace bounds how long a machine that was given no command
+	// waits for its first console.
+	//
+	// It is minutes rather than seconds because a console is a workload
+	// of its own. The host boots the machine and then builds a terminal
+	// sandbox beside it, and the first launch of that terminal pulls and
+	// unpacks an image before anything dials.
+	consoleGrace = 5 * time.Minute
 )
+
+// consoleGate is the lifetime of a machine whose whole job is to accept
+// consoles.
+//
+// A firecracker workload is allowed to leave command empty, and both of
+// the ones in the reference configuration do, because what such a
+// machine is for is the consoles that attach to it and each of those
+// brings an argv of its own. There is no main command whose exit ends
+// the machine, so the consoles have to say when it is finished.
+//
+// It ends on the first of two things. Either a console attached and the
+// last one has now closed, which is the machine having done what it was
+// booted for, or nothing attached within consoleGrace. The second is
+// what keeps a machine started by mistake from holding its memory
+// reservation until the host is rebooted, since qubesome has no command
+// that stops one.
+type consoleGate struct {
+	mu sync.Mutex
+
+	// open is how many consoles are attached and seen records whether
+	// one ever was. Both are needed: an open count of zero is the state
+	// a machine boots into as well as the state it finishes in.
+	open int
+	seen bool
+
+	ended bool
+	done  chan struct{}
+}
+
+func newConsoleGate(grace time.Duration) *consoleGate {
+	g := &consoleGate{done: make(chan struct{})}
+
+	// There is nothing to cancel when a console does attach, because
+	// giveUp answers that case by doing nothing.
+	time.AfterFunc(grace, g.giveUp)
+
+	return g
+}
+
+// enter records a console that has attached.
+func (g *consoleGate) enter() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.seen = true
+	g.open++
+}
+
+// leave records a console that has closed, and finishes the machine when
+// it was the last one.
+func (g *consoleGate) leave() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.open--
+	if g.open <= 0 {
+		g.end()
+	}
+}
+
+// giveUp finishes a machine no console ever attached to.
+func (g *consoleGate) giveUp() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.seen {
+		return
+	}
+
+	slog.Info("no console attached to the machine, shutting it down")
+
+	g.end()
+}
+
+// end is called with the lock held. Both callers can be the one that
+// finishes the machine, and closing a closed channel panics.
+func (g *consoleGate) end() {
+	if g.ended {
+		return
+	}
+
+	g.ended = true
+	close(g.done)
+}
+
+// wait blocks until the machine has no reason left to be up.
+func (g *consoleGate) wait() {
+	<-g.done
+}
+
+// superviseConsoles serves a machine that was given no command.
+//
+// It is superviseWith with the main command taken out. Spawn requests
+// are still answered, since something may be started into the machine
+// from outside it, but a sibling does not extend a machine's life any
+// more than it extends a sandbox's. The gate does. See consoleGate.
+func superviseConsoles(ln net.Listener, st starter, gate *consoleGate) error {
+	defer ln.Close()
+
+	s := &supervisor{starter: st}
+	go s.serve(ln)
+
+	gate.wait()
+
+	return nil
+}
 
 // winSize is a terminal's size in character cells.
 type winSize struct {
@@ -485,7 +600,7 @@ func (p *procConsole) WaitStatus() int {
 }
 
 // serveConsoles answers console connections until the machine ends.
-func serveConsoles(ln net.Listener, st consoleStarter) {
+func serveConsoles(ln net.Listener, st consoleStarter, gate *consoleGate) {
 	defer ln.Close()
 
 	for {
@@ -496,11 +611,20 @@ func serveConsoles(ln net.Listener, st consoleStarter) {
 			return
 		}
 
+		// The gate is entered here rather than in the goroutine below,
+		// so that a console which attaches and closes at once cannot be
+		// counted out before it was counted in.
+		gate.enter()
+
 		// A session lasts as long as the user keeps the terminal open, so
 		// each gets a goroutine of its own. This is the difference from
 		// supervisor.serve, which answers one request at a time because
 		// each is only a fork and an exec.
-		go serveConsole(conn, st)
+		go func() {
+			defer gate.leave()
+
+			serveConsole(conn, st)
+		}()
 	}
 }
 

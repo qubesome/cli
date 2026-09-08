@@ -71,6 +71,13 @@ type input struct {
 	// socket. Set only for a single instance workload.
 	AgentDir string
 
+	// VMVsockDir is the vsock directory of the machine this workload
+	// attaches to. Set only for a workload that declares attachVM, and
+	// it is the whole of the machine that reaches into this sandbox. The
+	// firecracker API socket sits one level above it and deliberately
+	// does not come with it. See files.VMAPISocket.
+	VMVsockDir string
+
 	// HomeDir is the home directory of the image's user, which is where a
 	// mime enabled workload's desktop files have to land. Empty when the
 	// workload does not handle mime types.
@@ -375,9 +382,10 @@ func workloadMounts(in input) []sandbox.Mount {
 		)
 	}
 
-	// Both the mime handler and the supervisor are the qubesome binary, so
-	// a workload that is both still shares it once.
-	if wl.HostAccess.Mime || wl.SingleInstance {
+	// The mime handler, the supervisor and the console are all the
+	// qubesome binary, so a workload that is more than one of them still
+	// shares it once.
+	if needsQubesomeBin(wl) {
 		mounts = append(mounts, sandbox.Mount{
 			Src: in.QubesomeBin, Dst: files.InProfileBinary, ReadOnly: true,
 		})
@@ -392,6 +400,17 @@ func workloadMounts(in input) []sandbox.Mount {
 		})
 	}
 
+	if in.VMVsockDir != "" {
+		// Read-only, because nothing in here creates anything: the
+		// socket is firecracker's and the sandbox only connects to it,
+		// which needs no write to the directory it sits in.
+		mounts = append(mounts, sandbox.Mount{
+			Src:      in.VMVsockDir,
+			Dst:      filepath.Dir(files.InVMConsoleSocket()),
+			ReadOnly: true,
+		})
+	}
+
 	for _, m := range in.GPUMounts {
 		mounts = append(mounts, sandbox.Mount{
 			Src:      m.HostPath,
@@ -401,6 +420,17 @@ func workloadMounts(in input) []sandbox.Mount {
 	}
 
 	return append(mounts, in.Paths...)
+}
+
+// needsQubesomeBin reports whether the sandbox has to be given the
+// qubesome binary.
+//
+// Three things run it from inside a sandbox and none of them can be
+// shipped by the workload's image: the mime handler, the supervisor of a
+// single instance workload, and the console of a workload that attaches
+// to a machine.
+func needsQubesomeBin(wl types.Workload) bool {
+	return wl.HostAccess.Mime || wl.SingleInstance || wl.AttachVM != ""
 }
 
 // workloadEnv builds the whole environment of the workload process.

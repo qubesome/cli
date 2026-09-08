@@ -10,17 +10,14 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/util/dbus"
-	"golang.org/x/sys/execabs"
 
 	_ "embed"
 )
@@ -37,15 +34,9 @@ const (
 	// of it. Update it together with kernelURL.
 	kernelSHA256 = "cf42303c29e8c4a02798f357ba056c5567baf074aaed4eec78c997fb9df08cf9"
 
-	// light-weight image that contains the necessary tools for setting up
-	// firecracker's network taps.
-	firecrackerImg = "ghcr.io/qubesome/firecracker:latest"
-
 	MB              = 1024 * 1024
 	maxDownloadSize = 100 * MB
 	downloadTimeout = 10 * time.Minute
-
-	networkDevName = "tap1"
 )
 
 func ensureDependencies() error {
@@ -70,57 +61,6 @@ func ensureDependencies() error {
 		if err != nil {
 			return fmt.Errorf("failed to download kernel image: %w", err)
 		}
-	}
-
-	_, err = net.InterfaceByName(networkDevName)
-	if err != nil {
-		return setupTaps()
-	}
-
-	return nil
-}
-
-func createRootFs(dir, img string) (string, error) {
-	slog.Info("creating root fs")
-	rootfs := filepath.Join(dir, "roofs.ext4")
-	bin := files.ContainerRunnerBinary("docker")
-	cmd := execabs.Command(bin,
-		"run", "--rm", "--privileged",
-		"-v", dir+":"+dir,
-		img,
-		"create_rootfs", rootfs, strconv.Itoa(os.Getuid()),
-	)
-
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-
-	if err := cmd.Run(); err != nil {
-		return "", err
-	}
-
-	return rootfs, nil
-}
-
-func setupTaps() error {
-	slog.Info("setting up taps")
-	bin := files.ContainerRunnerBinary("docker")
-
-	slog.Debug("setting up taps", "device name", networkDevName)
-	cmd := execabs.Command(bin,
-		"run", "--rm", "--privileged",
-		"--network", "host",
-		"-e", fmt.Sprintf("TAP_DEV=%s", networkDevName),
-		firecrackerImg,
-		"setup_taps",
-	)
-
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-
-	if err := cmd.Run(); err != nil {
-		return err
 	}
 
 	return nil

@@ -119,6 +119,14 @@ func TestRunnerRefusesAnAttachVMThatNamesNoMachine(t *testing.T) {
 		[]byte("image: example.com/app\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "app-console.yaml"),
 		[]byte("image: example.com/console\nattachVM: app\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken.yaml"),
+		[]byte("image: example.com/vm\nnotAField: true\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken-console.yaml"),
+		[]byte("image: example.com/console\nattachVM: broken\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "many.yaml"),
+		[]byte("image: example.com/vm\nrunner: firecracker\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "many-console.yaml"),
+		[]byte("image: example.com/console\nattachVM: many\n"), 0o600))
 
 	cfg := &types.Config{
 		RootDir: root,
@@ -141,6 +149,22 @@ func TestRunnerRefusesAnAttachVMThatNamesNoMachine(t *testing.T) {
 			name:     "not a firecracker workload",
 			workload: "app-console",
 			wantErr:  `attachVM names "app", which is not a firecracker workload`,
+		},
+		{
+			// The target is read the same way the workload itself is,
+			// KnownFields included, so a field qubesome does not have is
+			// refused rather than ignored.
+			name:     "a target whose config does not decode",
+			workload: "broken-console",
+			wantErr:  `attachVM names "broken", whose config cannot be read`,
+		},
+		{
+			// The target is validated as a machine before anything is
+			// started, so a firecracker workload the runner would refuse
+			// is refused here, naming the field rather than the console.
+			name:     "a target that is not a valid machine",
+			workload: "many-console",
+			wantErr:  "singleInstance must be true on a firecracker workload",
 		},
 	}
 

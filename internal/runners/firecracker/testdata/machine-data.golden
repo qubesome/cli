@@ -1,42 +1,42 @@
 {
     "boot-source": {
-        "kernel_image_path": {{json .KernelImagePath}},
-        "boot_args": {{json .BootArgs}},
+        "kernel_image_path": "/home/coder/.qubesome/vmlinux",
+        "boot_args": "keep_bootcon console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/sbin/qubesome-init vm-init",
         "initrd_path": null
     },
     "drives": [
         {
             "drive_id": "rootfs",
-            "path_on_host": {{json .RootFsPath}},
+            "path_on_host": "/home/coder/.qubesome/run/personal/vm/dev/rootfs.ext4",
             "is_root_device": true,
             "is_read_only": false,
             "partuuid": null,
             "cache_type": "Unsafe",
             "io_engine": "Sync",
             "rate_limiter": null
-        }{{if .DataPath}},
+        },
         {
             "drive_id": "data",
-            "path_on_host": {{json .DataPath}},
+            "path_on_host": "/home/coder/.local/share/qubesome/dev.ext4",
             "is_root_device": false,
             "is_read_only": false,
             "partuuid": null,
             "cache_type": "Writeback",
             "io_engine": "Sync",
             "rate_limiter": null
-        }{{end}}
+        }
     ],
     "machine-config": {
-        "vcpu_count": {{.VCPUs}},
-        "mem_size_mib": {{.MemoryMiB}},
+        "vcpu_count": 4,
+        "mem_size_mib": 4096,
         "smt": false,
         "track_dirty_pages": false
     },
     "cpu-config": null,
     "balloon": null,
     "vsock": {
-        "guest_cid": {{.GuestCID}},
-        "uds_path": {{json .VsockPath}}
+        "guest_cid": 3,
+        "uds_path": "/home/coder/.qubesome/run/personal/vm/dev/vsock/vsock.sock"
     },
     "logger": null,
     "metrics": null,

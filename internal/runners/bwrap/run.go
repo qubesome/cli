@@ -332,8 +332,9 @@ func resolve(ew types.EffectiveWorkload) (input, error) {
 		}
 	}
 
-	if wl.HostAccess.Mime || wl.SingleInstance {
-		// The mime handler and the supervisor are both this binary.
+	if needsQubesomeBin(wl) {
+		// The mime handler, the supervisor and the console are all this
+		// binary.
 		bin, err := os.Executable()
 		if err != nil {
 			return input{}, err
@@ -353,6 +354,18 @@ func resolve(ew types.EffectiveWorkload) (input, error) {
 			return input{}, fmt.Errorf("failed to create workload agent dir: %w", err)
 		}
 		in.AgentDir = agentDir
+	}
+
+	if wl.AttachVM != "" {
+		// The machine itself was started before this, by the attach path
+		// in internal/qubesome/run.go, which is also what refused an
+		// attachVM naming no machine. All that is left here is where its
+		// socket is.
+		dir, err := files.VMVsockDir(ew.Profile.Name, wl.AttachVM)
+		if err != nil {
+			return input{}, err
+		}
+		in.VMVsockDir = dir
 	}
 
 	if wl.HostAccess.Mime {

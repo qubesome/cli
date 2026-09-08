@@ -751,3 +751,36 @@ func TestMappedPathsSplitsTheReadOnlyFlagOff(t *testing.T) {
 		{Src: dir, Dst: "/home/coder/git"},
 	}, got)
 }
+
+// A workload that attaches to a machine is an ordinary sandbox with two
+// extra things in it: the qubesome binary, which is what qubesome
+// console is, and the machine's vsock directory, which is the only part
+// of the machine it can reach. The firecracker API socket sits one level
+// above that directory and must not come with it.
+func TestSpecAttachVMSharesOnlyTheVsockDir(t *testing.T) {
+	t.Parallel()
+
+	in := plainInput()
+	in.Workload.Workload.AttachVM = "dev"
+	in.Workload.Workload.Command = files.InProfileBinary
+	in.Workload.Workload.Args = []string{sandbox.ConsoleCommand}
+	in.QubesomeBin = "/usr/bin/qubesome"
+	in.VMVsockDir = "/run/user/1000/qubesome/work/vm/dev/vsock"
+
+	args := render(t, in)
+
+	assert.NotEqual(t, -1, indexOfArg(args, "--ro-bind", in.VMVsockDir))
+	assert.NotEqual(t, -1, indexOfArg(args, "--ro-bind", in.QubesomeBin))
+	assert.Equal(t, -1, indexOfArg(args, "--bind", "/run/user/1000/qubesome/work/vm/dev"),
+		"the api socket lives one level up and stays on the host")
+}
+
+func TestSpecWithoutAttachVMSharesNoMachine(t *testing.T) {
+	t.Parallel()
+
+	args := render(t, plainInput())
+
+	for _, a := range args {
+		assert.NotContains(t, a, "/vm/")
+	}
+}

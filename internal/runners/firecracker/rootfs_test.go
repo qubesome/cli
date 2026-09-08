@@ -31,8 +31,14 @@ var update = flag.Bool("update", false, "update the golden files")
 func golden(t *testing.T, name string, args []string) {
 	t.Helper()
 
+	goldenText(t, name, strings.Join(args, "\n")+"\n")
+}
+
+// goldenText compares a rendered file against testdata/<name>.golden.
+func goldenText(t *testing.T, name, got string) {
+	t.Helper()
+
 	path := filepath.Join("testdata", name+".golden")
-	got := strings.Join(args, "\n") + "\n"
 
 	if *update {
 		require.NoError(t, os.WriteFile(path, []byte(got), 0o600))

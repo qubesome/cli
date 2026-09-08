@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
@@ -23,6 +24,9 @@ import (
 	"github.com/qubesome/cli/internal/util/env"
 	"go.yaml.in/yaml/v3"
 )
+
+// firecrackerRunner is the runner that backs a workload with a microVM.
+const firecrackerRunner = "firecracker"
 
 func XdgRun(opts ...command.Option[Options]) error {
 	o := &Options{}
@@ -130,26 +134,9 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	}
 	defer root.Close()
 
-	name := fmt.Sprintf("%s.%s", in.Name, configExtension)
-	cfg := filepath.Join(workloadsDir, name)
-
-	if fi, err := root.Stat(name); err != nil || fi.IsDir() {
-		return fmt.Errorf("%w: %w", ErrWorkloadConfigNotFound, err)
-	}
-
-	data, err := root.ReadFile(name)
+	w, err := readWorkload(root, in.Name)
 	if err != nil {
-		return fmt.Errorf("cannot read file %q: %w", cfg, err)
-	}
-
-	w := types.Workload{}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
-	if err := decoder.Decode(&w); err != nil {
-		if errors.Is(err, io.EOF) {
-			return fmt.Errorf("workload config %q is empty", cfg)
-		}
-		return fmt.Errorf("cannot unmarshal workload config %q: %w", cfg, err)
+		return err
 	}
 
 	pp, err := files.JoinProfilePath(in.Config.RootDir, profile.Path)
@@ -197,7 +184,7 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	types.WarnIgnoredMicroVMFields(ew.Name, ew.Workload)
 
 	if ew.Workload.AttachVM != "" {
-		if err := checkAttachVM(root, ew.Workload.AttachVM); err != nil {
+		if err := attachVM(root, profile, ew.Workload.AttachVM); err != nil {
 			return err
 		}
 	}
@@ -225,7 +212,7 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	switch ew.Workload.Runner {
 	case "":
 		return bwrap.Run(ew)
-	case "firecracker":
+	case firecrackerRunner:
 		return firecracker.Run(ew)
 	case "docker", "podman":
 		return fmt.Errorf("workload %q asks for the %q runner, which has been removed: workloads run under bwrap",
@@ -235,37 +222,122 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	}
 }
 
-// checkAttachVM reports whether attachVM names a workload that can be
-// attached to.
+// readWorkload reads and decodes one workload of a profile.
 //
-// This is the one refusal in the microVM configuration that cannot happen
-// at config load. types.ValidateMicroVM sees a single workload file, and
-// what attachVM names lives in another one, so whether the target exists
-// and whether it is a firecracker workload can only be answered where the
-// other file can be read. That is here.
+// root is the profile's workloads directory, already opened, so the
+// kernel refuses a name that walks out of it. See the comment on the
+// OpenRoot in runner for why the read is the check.
 //
-// root is the profile's workloads directory, already opened, so the kernel
-// refuses a name that walks out of it. The name has been through
-// files.ValidateName by the time it arrives, which is what makes it safe
-// to build a filename from.
-func checkAttachVM(root *os.Root, name string) error {
-	data, err := root.ReadFile(fmt.Sprintf("%s.%s", name, configExtension))
-	if err != nil {
-		return fmt.Errorf("attachVM names %q, which is not a workload of this profile: %w", name, err)
+// It is a function of its own because the attach path reads a second
+// workload from the same directory, and the two must read a workload the
+// same way. KnownFields in particular: a target whose config carries a
+// field qubesome does not have is refused there as it is here, rather
+// than being booted with the field ignored.
+func readWorkload(root *os.Root, name string) (types.Workload, error) {
+	file := fmt.Sprintf("%s.%s", name, configExtension)
+	cfg := filepath.Join(root.Name(), file)
+
+	if fi, err := root.Stat(file); err != nil || fi.IsDir() {
+		return types.Workload{}, fmt.Errorf("%w: %w", ErrWorkloadConfigNotFound, err)
 	}
 
-	target := types.Workload{}
+	data, err := root.ReadFile(file)
+	if err != nil {
+		return types.Workload{}, fmt.Errorf("cannot read file %q: %w", cfg, err)
+	}
+
+	w := types.Workload{}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
-	if err := decoder.Decode(&target); err != nil {
+	if err := decoder.Decode(&w); err != nil {
+		if errors.Is(err, io.EOF) {
+			return types.Workload{}, fmt.Errorf("workload config %q is empty", cfg)
+		}
+		return types.Workload{}, fmt.Errorf("cannot unmarshal workload config %q: %w", cfg, err)
+	}
+
+	return w, nil
+}
+
+const (
+	// vmSocketGrace bounds the wait for a machine that was just started
+	// to have a socket to be reached on. Firecracker binds it while it
+	// is reading the machine description, which is before the guest
+	// kernel is even loaded, so anything slower than this is a
+	// firecracker that did not start rather than one that is starting.
+	vmSocketGrace = 10 * time.Second
+
+	vmSocketPoll = 50 * time.Millisecond
+)
+
+// attachVM starts the machine a workload attaches to and waits for it to
+// be reachable.
+//
+// The refusals here are the one part of the microVM configuration that
+// cannot be answered at config load. types.ValidateMicroVM sees a single
+// workload file and what attachVM names lives in another one, so whether
+// the target exists, and whether it is a firecracker workload, can only
+// be answered where the other file can be read. That is here.
+//
+// The name has been through files.ValidateName by the time it arrives,
+// which is what makes it safe to build a filename from, and root is the
+// profile's workloads directory, so the kernel refuses one that walks
+// out of it anyway.
+//
+// Starting the machine is a no-op when it is already up, which is what
+// makes a second console on one machine the ordinary case rather than a
+// second machine.
+func attachVM(root *os.Root, profile *types.Profile, name string) error {
+	w, err := readWorkload(root, name)
+	if err != nil {
+		// A file that is not there and a file that does not decode are
+		// different mistakes in the configuration, and the name of a
+		// workload that does exist is the wrong thing to go looking for.
+		if errors.Is(err, ErrWorkloadConfigNotFound) {
+			return fmt.Errorf("attachVM names %q, which is not a workload of this profile: %w", name, err)
+		}
+
 		return fmt.Errorf("attachVM names %q, whose config cannot be read: %w", name, err)
 	}
 
-	if target.Runner != "firecracker" {
+	if w.Runner != firecrackerRunner {
 		return fmt.Errorf("attachVM names %q, which is not a firecracker workload: there is no machine to attach to", name)
 	}
 
-	return nil
+	w.Name = name
+
+	if err := firecracker.Run(w.ApplyProfile(profile)); err != nil {
+		return fmt.Errorf("failed to start the microVM %q: %w", name, err)
+	}
+
+	socket, err := files.VMVsockSocket(profile.Name, name)
+	if err != nil {
+		return err
+	}
+
+	return waitForVMSocket(socket)
+}
+
+// waitForVMSocket waits for firecracker to bind the socket a console is
+// reached over.
+//
+// The machine is started and the console workload is built right after
+// it, so without this the console would dial a path that firecracker has
+// not created yet and report a machine that is not there.
+func waitForVMSocket(path string) error {
+	deadline := time.Now().Add(vmSocketGrace)
+
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the microVM did not open %q within %s", path, vmSocketGrace)
+		}
+
+		time.Sleep(vmSocketPoll)
+	}
 }
 
 func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {

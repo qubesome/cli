@@ -34,11 +34,11 @@ const (
 // because a guest has no filesystem in common with the host to put a
 // socket file on. It also waits for what it starts differently, because
 // it is pid 1 of the machine. See guestReaper.
+//
+// An empty argv is a machine with no command of its own, which Supervise
+// refuses and this accepts. See consoleGate for what such a machine is
+// and for what decides when it comes down.
 func SuperviseVM(port, consolePort uint32, argv []string) error {
-	if len(argv) == 0 {
-		return errors.New("sandbox: supervise needs a command to run")
-	}
-
 	// Both listeners come before the command for the same reason one does
 	// in Supervise. A workload started before anything can reach it is a
 	// workload that can be started twice.
@@ -58,9 +58,15 @@ func SuperviseVM(port, consolePort uint32, argv []string) error {
 	// something could exit into a loop that is not running yet.
 	reaper := startReaping()
 
+	gate := newConsoleGate(consoleGrace)
+
 	// Consoles are served on a port and an accept loop of their own. See
 	// VMConsolePort for why they are not requests on the supervisor's.
-	go serveConsoles(cln, reaper)
+	go serveConsoles(cln, reaper, gate)
+
+	if len(argv) == 0 {
+		return superviseConsoles(ln, reaper, gate)
+	}
 
 	return superviseWith(ln, argv, reaper)
 }

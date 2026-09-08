@@ -332,3 +332,119 @@ func TestConsoleRefusesAWindowSizeItCannotRead(t *testing.T) {
 	require.NoError(t, (&consoleWriter{w: host}).send(consoleWinSize, []byte{0, 24}))
 	require.Error(t, <-done)
 }
+
+// gateEnded reports whether the gate has finished, without blocking.
+func gateEnded(g *consoleGate) bool {
+	select {
+	case <-g.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// The grace here is long enough that only a console can end the gate, so
+// a failure names the console counting and not the timer.
+func TestConsoleGateEndsWhenTheLastConsoleLeaves(t *testing.T) {
+	t.Parallel()
+
+	g := newConsoleGate(time.Hour)
+
+	g.enter()
+	g.enter()
+	assert.False(t, gateEnded(g))
+
+	g.leave()
+	assert.False(t, gateEnded(g), "one console is still attached")
+
+	g.leave()
+	g.wait()
+}
+
+// A machine boots with no console attached, and that state must not read
+// as the last one having left.
+func TestConsoleGateDoesNotEndBeforeAConsoleAttaches(t *testing.T) {
+	t.Parallel()
+
+	g := newConsoleGate(time.Hour)
+	assert.False(t, gateEnded(g))
+}
+
+func TestConsoleGateGivesUpWhenNoConsoleAttaches(t *testing.T) {
+	t.Parallel()
+
+	g := newConsoleGate(time.Millisecond)
+	g.wait()
+}
+
+// The grace covers the wait for the first console and nothing after it.
+// A session that outlasts it must not have the machine shut down under
+// the terminal it is on.
+func TestConsoleGateDoesNotGiveUpOnAnAttachedConsole(t *testing.T) {
+	t.Parallel()
+
+	g := newConsoleGate(time.Millisecond)
+	g.enter()
+
+	time.Sleep(20 * time.Millisecond)
+	assert.False(t, gateEnded(g))
+
+	g.leave()
+	g.wait()
+}
+
+// superviseConsoles is what a machine with no command of its own runs.
+// It returns when the gate does, which is what brings the machine down.
+func TestSuperviseConsolesReturnsWithTheGate(t *testing.T) {
+	t.Parallel()
+
+	lc := net.ListenConfig{}
+
+	ln, err := lc.Listen(t.Context(), "unix", filepath.Join(t.TempDir(), "s.sock"))
+	require.NoError(t, err)
+
+	g := newConsoleGate(time.Hour)
+
+	done := make(chan error, 1)
+	go func() { done <- superviseConsoles(ln, procStarter{}, g) }()
+
+	g.enter()
+	g.leave()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("superviseConsoles did not return when the last console left")
+	}
+}
+
+// The whole path a console-only machine takes, from an accepted
+// connection to the shutdown the closed session causes.
+func TestSuperviseConsolesEndsWhenAServedConsoleCloses(t *testing.T) {
+	t.Parallel()
+	requirePTY(t)
+
+	lc := net.ListenConfig{}
+
+	ln, err := lc.Listen(t.Context(), "unix", filepath.Join(t.TempDir(), "c.sock"))
+	require.NoError(t, err)
+
+	g := newConsoleGate(time.Hour)
+	go serveConsoles(ln, procStarter{}, g)
+
+	var d net.Dialer
+
+	host, err := d.DialContext(t.Context(), "unix", ln.Addr().String())
+	require.NoError(t, err)
+
+	require.NoError(t, exchange(host, []string{"/bin/sh", "-c", "exit 3"}))
+
+	var out bytes.Buffer
+
+	status, err := console(host, consoleStdin(t, ""), &out)
+	require.NoError(t, err)
+	assert.Equal(t, 3, status)
+
+	g.wait()
+}
