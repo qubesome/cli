@@ -128,6 +128,39 @@ else
     printf '   SKIP  ip is not installed\n\n'
 fi
 
+printf '== 7. a veth into a namespace owned by a DESCENDANT user namespace\n'
+printf '   Check 6 put both network namespaces in one user namespace. The\n'
+printf '   gateway design cannot: joining one user namespace would forbid\n'
+printf '   --disable-userns and pin every sandbox to a single uid, so each\n'
+printf '   sandbox nests its own inside a session one instead.\n'
+printf '   So the question is whether CAP_NET_ADMIN in the session reaches a\n'
+printf '   network namespace owned by a child of it. The documented rule says\n'
+printf '   an ancestor carries, and this is what asks the kernel.\n'
+if command -v ip >/dev/null 2>&1; then
+    unshare --user --map-root-user --net sh -c '
+        # This shell is root in the session user namespace S, in a network
+        # namespace owned by S. The child makes its own user namespace C,
+        # a child of S, and a network namespace owned by C.
+        unshare --user --map-root-user --net sleep 5 &
+        child=$!
+        sleep 1
+
+        ip link add v0 type veth peer name v1 || exit 1
+        if ip link set v1 netns "$child" 2>&1; then
+            echo "   moved v1 into the descendant namespace"
+            rc=0
+        else
+            rc=1
+        fi
+
+        kill "$child" 2>/dev/null
+        exit $rc
+    ' 2>&1
+    res $? "veth into a descendant userns netns"
+else
+    printf '   SKIP  ip is not installed\n\n'
+fi
+
 printf '== cleaning up\n'
 pkill -f "$MARK" 2>/dev/null
 printf '   done\n'
