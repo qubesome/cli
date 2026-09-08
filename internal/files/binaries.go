@@ -42,6 +42,14 @@ const (
 	// UmociBinary applies image layers, rootless.
 	UmociBinary = "/usr/bin/umoci"
 
+	// MkfsExt4Binary builds the root filesystem a microVM boots.
+	//
+	// It is an absolute path like every other binary here, and for one
+	// reason of its own as well: /usr/sbin is frequently not on an
+	// ordinary user's PATH, so exec.LookPath would report a tool that is
+	// installed as missing.
+	MkfsExt4Binary = "/usr/sbin/mkfs.ext4"
+
 	// GetfaclBinary reports the ACLs on a device node. deps uses it to
 	// check for the uaccess ACL that systemd-logind grants the seat's
 	// user, without which a profile silently drops to software rendering.

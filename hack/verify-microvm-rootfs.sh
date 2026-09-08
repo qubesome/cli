@@ -14,17 +14,23 @@
 # tool is missing skip rather than fail, so a partial host still answers
 # what it can.
 #
-# Result on the target host: NOT YET RUN. Record the answers here from a
-# host run, the way hack/verify-sandbox-reentry.sh records its own, with
-# the date and the versions the environment section prints:
+# Result on the target host, 2026-09-08, running as an ordinary user:
 #
-#   1. mkfs.ext4 -d reads through a bind mount   ?
-#   2. ownership, setuid, symlink, hardlink      ?
-#      xattrs                                    ?
-#   3. build time and sparse size                ?
-#   4. umoci bundle uniform in uid               ?
-#   5. guest kernel has vsock and devtmpfs       ?  by hand, needs a VM
-#   6. host and guest speak over vsock           ?  by hand, needs a VM
+#   1. mkfs.ext4 -d reads through a bind mount   PASS
+#   2. ownership, setuid, symlink, hardlink      PASS
+#      xattrs                                    PASS
+#   3. build time and sparse size                PASS, see below
+#   4. umoci bundle uniform in uid               PASS, every file uid 1000
+#   5. guest kernel has vsock and devtmpfs       SKIP, no kernel downloaded
+#   6. host and guest speak over vsock           SKIP, no kernel downloaded
+#
+# Check 3 in full: a 926M bundle, mkfs.ext4 at 4096M, 2.5 s elapsed, 4.0G
+# apparent and 943M on disk. That is what makes rebuilding the image on
+# every boot reasonable rather than something to cache: the build costs a
+# couple of seconds and the sparse file costs its contents.
+#
+# Checks 5 and 6 skipped only because no kernel has been downloaded on
+# that host yet. They are guest questions and no host run can answer them.
 #
 # Check 1 is the one the design rests on. mkfs.ext4 -d walks a directory
 # tree that is an overlay with bind mounts inside it, so the walk crosses
