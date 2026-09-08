@@ -26,8 +26,17 @@ func Run(ew types.EffectiveWorkload) error {
 		return err
 	}
 
+	// Every firecracker workload now sets this, because a machine is a
+	// boot and a memory reservation and types.ValidateMicroVM refuses one
+	// that does not. So this rejects all of them rather than the odd one,
+	// and it says so instead of claiming the grant is unsupported.
+	//
+	// Honouring it needs the supervisor to run as the guest init and
+	// answer over vsock, which is the microVM work. Accepting the grant
+	// and booting a second machine anyway would be the silent downgrade
+	// that refusing exists to avoid.
 	if ew.Workload.SingleInstance {
-		return fmt.Errorf("firecracker does not support single instance")
+		return fmt.Errorf("workload %q needs a single instance machine, which this runner cannot start yet", ew.Name)
 	}
 
 	if err := ensureDependencies(); err != nil {
