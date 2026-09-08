@@ -55,11 +55,18 @@ func TestHasUaccessACL(t *testing.T) {
 func TestSandboxCommandsRequireTheSandboxTools(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"run", "xdg-open", "images", "start"} {
+	for _, name := range []string{"run", "xdg-open", "start"} {
 		for _, tool := range sandboxTools {
 			assert.Contains(t, deps[name], tool, name)
 		}
 	}
+
+	// images fills the store and opens nothing, so it needs what fetches
+	// and unpacks and not what would have launched the result.
+	for _, tool := range imageTools {
+		assert.Contains(t, deps["images"], tool)
+	}
+	assert.NotContains(t, deps["images"], files.BwrapBinary)
 }
 
 // docker is left in exactly one place: firecracker runs it to build a

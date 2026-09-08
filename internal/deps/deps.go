@@ -26,16 +26,20 @@ var (
 	reset = "\033[0m"
 )
 
-// sandboxTools are the binaries a sandbox is built from. bwrap creates
-// it, and skopeo and umoci fill the OCI store its root filesystem is
-// unpacked from. They are one list because every command that opens a
-// profile or a workload needs all three, and a host missing one is
-// usually missing the rest.
-var sandboxTools = []string{
-	files.BwrapBinary,
+// imageTools fill the OCI store. skopeo fetches an image and umoci
+// unpacks it into the root filesystem a sandbox is built on.
+var imageTools = []string{
 	files.SkopeoBinary,
 	files.UmociBinary,
 }
+
+// sandboxTools are what opening a profile or a workload needs: the image
+// tools, and bwrap to build the sandbox around what they unpacked.
+//
+// They are derived from one list rather than written out twice because
+// the table drifted apart once already, with run, xdg-open and images
+// asking for a container runner long after nothing used one.
+var sandboxTools = append([]string{files.BwrapBinary}, imageTools...)
 
 var deps map[string][]string = map[string][]string{
 	"clip": {
@@ -44,7 +48,9 @@ var deps map[string][]string = map[string][]string{
 	},
 	"run":      sandboxTools,
 	"xdg-open": sandboxTools,
-	"images":   sandboxTools,
+	// Filling the store fetches and unpacks. Nothing is launched, so
+	// this is the one sandbox command that does not need bwrap.
+	"images": imageTools,
 	// A profile needs the same three and two of its own. sh is what the
 	// profile sandbox runs as its init, and xrandr reads the host screen
 	// geometry the profile is sized against.
