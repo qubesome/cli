@@ -311,3 +311,34 @@ func indexOfArg(args []string, flag, value string) int {
 	}
 	return -1
 }
+
+// bwrap applies capability arguments in the order they appear, so a
+// --cap-add emitted before the --cap-drop ALL is undone by it with no
+// diagnostic. The whole grant depends on this ordering.
+func TestArgsCapAddFollowsTheDrop(t *testing.T) {
+	t.Parallel()
+
+	args, err := Args(Spec{
+		Rootfs:  "/rootfs",
+		CapsAdd: []string{"CAP_NET_ADMIN"},
+		Args:    []string{"/bin/sh"},
+	}, -1)
+	require.NoError(t, err)
+
+	assert.Less(t, indexOfArg(args, "--cap-drop", "ALL"),
+		indexOfArg(args, "--cap-add", "CAP_NET_ADMIN"))
+}
+
+// bwrap rejects a bare NET_ADMIN at launch, which is late and only visible
+// on the sandbox's stderr.
+func TestArgsRejectsACapWithoutThePrefix(t *testing.T) {
+	t.Parallel()
+
+	_, err := Args(Spec{
+		Rootfs:  "/rootfs",
+		CapsAdd: []string{"NET_ADMIN"},
+		Args:    []string{"/bin/sh"},
+	}, -1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CAP_")
+}

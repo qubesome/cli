@@ -1,0 +1,361 @@
+package bwrap
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/images"
+	"github.com/qubesome/cli/internal/keyring"
+	"github.com/qubesome/cli/internal/keyring/backend"
+	"github.com/qubesome/cli/internal/runners/util/container"
+	"github.com/qubesome/cli/internal/runners/util/mime"
+	"github.com/qubesome/cli/internal/runners/util/usb"
+	"github.com/qubesome/cli/internal/sandbox"
+	"github.com/qubesome/cli/internal/seccomp"
+	"github.com/qubesome/cli/internal/types"
+	"github.com/qubesome/cli/internal/util/dbus"
+	"github.com/qubesome/cli/internal/util/env"
+	"github.com/qubesome/cli/internal/util/gpu"
+	"golang.org/x/sys/execabs"
+)
+
+// firstExtraFD is the descriptor os/exec puts the first ExtraFiles entry
+// on in the child.
+const firstExtraFD = 3
+
+// hostEnvPassthrough are the host variables a workload sharing the host
+// dbus reads. The container runners named them and let the runtime copy
+// the values over, and bwrap clears the environment instead.
+var hostEnvPassthrough = []string{
+	"DBUS_SESSION_BUS_ADDRESS",
+	"XDG_RUNTIME_DIR",
+	"XDG_SESSION_ID",
+}
+
+// StatePath returns where a running workload sandbox is recorded.
+//
+// The key is the workload's effective name, which is the name the
+// container runner gave the container, so a workload keeps the same
+// identity across the change.
+func StatePath(ew types.EffectiveWorkload) (string, error) {
+	if ew.Profile == nil {
+		return "", errors.New("workload has no profile")
+	}
+	if err := files.ValidateName("workload name", ew.Name); err != nil {
+		return "", err
+	}
+
+	return filepath.Join(files.ProfileDir(ew.Profile.Name), "sandbox-"+ew.Name+".json"), nil
+}
+
+// Run starts a workload in its own sandbox and waits for it to exit.
+//
+// It does not wait by choice. sandbox.Args passes --die-with-parent, so
+// the sandbox lives exactly as long as the process that started it.
+func Run(ew types.EffectiveWorkload) error {
+	if err := ew.Validate(); err != nil {
+		return err
+	}
+
+	in, err := resolve(ew)
+	if err != nil {
+		return err
+	}
+
+	spec, err := buildSpec(in)
+	if err != nil {
+		return err
+	}
+
+	statePath, err := StatePath(ew)
+	if err != nil {
+		return err
+	}
+
+	var extra []*os.File
+	seccompFD := -1
+
+	if spec.Seccomp {
+		filter, err := seccomp.MemFD()
+		if err != nil {
+			return err
+		}
+		defer filter.Close()
+
+		seccompFD = firstExtraFD + len(extra)
+		extra = append(extra, filter)
+	}
+
+	args, err := sandbox.Args(spec, seccompFD)
+	if err != nil {
+		return err
+	}
+
+	slog.Debug("exec", "binary", files.BwrapBinary, "args", container.RedactEnvArgs(args))
+
+	// A mime enabled workload carries the profile's mTLS private key in
+	// its environment, and a command line is world readable through
+	// /proc. Only the descriptor holding the options, and the command,
+	// stay on it.
+	outer, packed, err := sandbox.PackArgs(spec, args, firstExtraFD+len(extra))
+	if err != nil {
+		return err
+	}
+	defer packed.Close()
+
+	extra = append(extra, packed)
+
+	cmd := execabs.Command(files.BwrapBinary, outer...) //nolint:gosec // the arguments are built from the workload config.
+	cmd.ExtraFiles = extra
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start workload sandbox: %w", err)
+	}
+
+	if err := sandbox.WriteState(statePath, cmd.Process.Pid); err != nil {
+		// The state file is how a second launch of a single instance
+		// workload finds this one, so a sandbox that cannot be recorded
+		// must not keep running under a name nothing can reach.
+		if kerr := cmd.Process.Kill(); kerr != nil {
+			slog.Warn("failed to kill the unrecorded sandbox", "error", kerr)
+		}
+		_ = cmd.Wait()
+
+		return fmt.Errorf("failed to record sandbox state: %w", err)
+	}
+
+	defer func() {
+		if err := os.Remove(statePath); err != nil {
+			slog.Warn("failed to remove sandbox state", "path", statePath, "error", err)
+		}
+	}()
+
+	return cmd.Wait()
+}
+
+// resolve gathers everything the sandbox needs from the host.
+//
+// Every filesystem lookup, image pull and keyring read happens here, so
+// that buildSpec is a function of its input alone.
+func resolve(ew types.EffectiveWorkload) (input, error) {
+	wl := ew.Workload
+
+	bundle, err := images.PullProfileImage(wl.Image)
+	if err != nil {
+		return input{}, err
+	}
+
+	profileDir := files.ProfileDir(ew.Profile.Name)
+
+	userDir, err := files.IsolatedRunUserPath(ew.Profile.Name)
+	if err != nil {
+		return input{}, fmt.Errorf("failed to get isolated <qubesome>/user path: %w", err)
+	}
+
+	shmDir, err := files.WorkloadShmPath(ew.Profile.Name, wl.Name)
+	if err != nil {
+		return input{}, fmt.Errorf("failed to get workload shm path: %w", err)
+	}
+	if err := files.EnsureMappedDir(shmDir + string(filepath.Separator)); err != nil {
+		return input{}, fmt.Errorf("failed to create workload shm dir: %w", err)
+	}
+
+	cookiePath, err := files.ClientCookiePath(ew.Profile.Name)
+	if err != nil {
+		return input{}, err
+	}
+
+	socketPath, err := files.SocketPath(ew.Profile.Name)
+	if err != nil {
+		return input{}, err
+	}
+
+	usbDevices, err := usb.NamedDevices(wl.HostAccess.USBDevices)
+	if err != nil {
+		return input{}, fmt.Errorf("failed to get named devices: %w", err)
+	}
+
+	in := input{
+		Workload:   ew,
+		Bundle:     bundle,
+		ProfileDir: profileDir,
+		UserDir:    userDir,
+		ShmDir:     shmDir,
+		CookiePath: cookiePath,
+		SocketPath: socketPath,
+		Localtime:  localtime(),
+		USBDevices: usbDevices,
+		Paths:      mappedPaths(wl.HostAccess.Paths),
+	}
+
+	if wl.HostAccess.Camera {
+		in.VideoDevices, _ = filepath.Glob("/dev/video*")
+	}
+
+	if wl.HostAccess.Dbus || wl.HostAccess.Bluetooth || wl.HostAccess.VarRunUser {
+		in.HostEnv = hostEnv()
+	}
+
+	if wl.HostAccess.Gpus != "" {
+		nodes, mounts, err := gpu.SandboxEdits("/")
+		if err != nil {
+			// The container runner reported the same thing the same way,
+			// and a workload without hardware rendering is still usable.
+			dbus.NotifyOrLog("qubesome error", "GPU support was not detected, disabling it for qubesome")
+			slog.Warn("failed to resolve GPU devices", "error", err)
+		} else {
+			in.GPUNodes, in.GPUMounts = nodes, mounts
+		}
+	}
+
+	if wl.HostAccess.Mime {
+		if err := resolveMime(&in); err != nil {
+			return input{}, err
+		}
+	}
+
+	return in, nil
+}
+
+// resolveMime writes the mime files the workload reads and fills in the
+// paths and credentials that go with them.
+func resolveMime(in *input) error {
+	homeDir, err := container.HomeDir(in.Bundle)
+	if err != nil {
+		return err
+	}
+	in.HomeDir = homeDir
+
+	if err := os.MkdirAll(in.ProfileDir, files.DirMode); err != nil {
+		return fmt.Errorf("failed to ensure profile dir: %w", err)
+	}
+
+	list := filepath.Join(in.ProfileDir, "mimeapps.list")
+	if err := os.WriteFile(list, []byte(mime.MimesList), files.FileMode); err != nil {
+		return fmt.Errorf("failed to write mimeapps.list: %w", err)
+	}
+
+	handler := filepath.Join(in.ProfileDir, "mime-handler.desktop")
+	if err := os.WriteFile(handler, []byte(mime.DefaultMimeHandler), files.FileMode); err != nil {
+		return fmt.Errorf("failed to write mime-handler.desktop: %w", err)
+	}
+
+	bin, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	in.QubesomeBin = bin
+
+	// A workload without the credentials still starts. It simply cannot
+	// reach the inception server, which is the same thing the container
+	// runner did.
+	if ca, cert, key, ok := mtlsData(in.Workload.Profile.Name); ok {
+		slog.Debug("mime access: enabled")
+		in.MTLSCA, in.MTLSCert, in.MTLSKey = ca, cert, key
+	} else {
+		slog.Debug("mime access: skipped")
+	}
+
+	return nil
+}
+
+// localtime returns /etc/localtime and, when it is a symlink, the file it
+// points at.
+//
+// The link on its own resolves to nothing inside the sandbox, so both are
+// shared.
+func localtime() []string {
+	const file = "/etc/localtime"
+
+	if _, err := os.Stat(file); err != nil {
+		return nil
+	}
+
+	paths := make([]string, 0, 2)
+	paths = append(paths, file)
+
+	target, err := os.Readlink(file)
+	if err != nil {
+		return paths
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(file), target)
+	}
+
+	return append(paths, target)
+}
+
+// mappedPaths expands the workload's mapped directories and creates the
+// host side of each.
+//
+// A directory that does not exist is created here rather than by the
+// sandbox, because bwrap would create it owned by the sandbox user.
+func mappedPaths(paths []string) []sandbox.Mount {
+	mounts := make([]sandbox.Mount, 0, len(paths))
+
+	for _, p := range paths {
+		src, dst, ok := strings.Cut(p, ":")
+		if !ok {
+			slog.Warn("failed to mount path", "path", p)
+			continue
+		}
+
+		src = env.Expand(src)
+		if err := files.EnsureMappedDir(src); err != nil {
+			slog.Warn("failed to mount path", "path", src, "error", err)
+			continue
+		}
+
+		mounts = append(mounts, sandbox.Mount{Src: src, Dst: dst})
+	}
+
+	return mounts
+}
+
+// hostEnv reads the host variables a workload on the host dbus needs.
+//
+// A variable that is not set on the host is left out rather than passed as
+// empty, which is what the container runners did with a bare -e NAME.
+func hostEnv() []string {
+	env := make([]string, 0, len(hostEnvPassthrough))
+
+	for _, name := range hostEnvPassthrough {
+		if v, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+v)
+		}
+	}
+
+	return env
+}
+
+func mtlsData(profile string) (string, string, string, bool) {
+	ks := keyring.New(profile, backend.New())
+
+	ca, err := ks.Get(keyring.MtlsCA)
+	if err != nil {
+		slog.Error("failed to fetch mtls-ca", "error", err)
+		return "", "", "", false
+	}
+
+	cert, err := ks.Get(keyring.MtlsClientCert)
+	if err != nil {
+		slog.Error("failed to fetch mtls-client-cert", "error", err)
+		return "", "", "", false
+	}
+
+	key, err := ks.Get(keyring.MtlsClientKey)
+	if err != nil {
+		slog.Error("failed to fetch mtls-client-key", "error", err)
+		return "", "", "", false
+	}
+
+	return ca, cert, key, true
+}

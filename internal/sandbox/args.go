@@ -51,6 +51,10 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		return addCap(multiplier * v)
 	}
 
+	// Two arguments per capability, "--cap-add" and the name.
+	if err := addMulCap(2, len(s.CapsAdd)); err != nil {
+		return nil, err
+	}
 	if err := addMulCap(3, len(s.Devices)); err != nil {
 		return nil, err
 	}
@@ -117,6 +121,16 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		// /run/user/1000 included.
 		"--tmpfs", "/tmp",
 	)
+
+	// bwrap applies capability arguments in order, so these have to follow
+	// the --cap-drop ALL above. Emitted before it they would be dropped
+	// again, and nothing would report it.
+	for _, c := range s.CapsAdd {
+		if !strings.HasPrefix(c, "CAP_") {
+			return nil, fmt.Errorf("sandbox: capability %q is missing the CAP_ prefix", c)
+		}
+		args = append(args, "--cap-add", c)
+	}
 
 	// The XDG runtime directory has to exist before anything inside looks
 	// for it, and an image is not obliged to ship one. bwrap creates it

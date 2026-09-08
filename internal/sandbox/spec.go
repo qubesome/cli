@@ -72,6 +72,27 @@ type Spec struct {
 
 	Net NetMode
 
+	// CapsAdd are the capabilities the sandbox keeps, named the way bwrap
+	// names them, with the CAP_ prefix. A bare NET_ADMIN is rejected as an
+	// unknown capability.
+	//
+	// bwrap applies capability arguments in the order they appear, and
+	// Args emits --cap-drop ALL in its prologue ahead of everything else,
+	// so a grant rendered here lands after the drop and survives it. That
+	// ordering is the whole mechanism. Moving the drop below these would
+	// empty the set again and leave no trace on the command line that it
+	// had.
+	//
+	// The grant is held in the user namespace bwrap creates, not the
+	// host's. CAP_NET_ADMIN here administers the sandbox's own network
+	// namespace and can do nothing to the host's.
+	//
+	// bwrap --help says these apply "when running as privileged user".
+	// That is misleading. Measured against bubblewrap 0.11.2, an
+	// unprivileged --cap-add CAP_NET_ADMIN leaves CapEff bit 12 set
+	// inside the sandbox.
+	CapsAdd []string
+
 	// Seccomp applies the embedded filter. It is false for
 	// seccompUnconfined.
 	Seccomp bool
