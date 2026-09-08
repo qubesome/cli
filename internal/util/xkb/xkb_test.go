@@ -144,3 +144,29 @@ func TestFirstOfTakesTheFirstThatAnswered(t *testing.T) {
 	require.Equal(t, []string{"b"}, firstOf(nil, []string{"b"}, []string{"c"}))
 	require.Empty(t, firstOf(nil, nil))
 }
+
+// A real X11 host reported gb and microsoftpro from localectl while
+// setxkbmap answered us and pc105. The configured layout is the one its
+// user types on, so it is the one preferred, on any session.
+func TestDefaultsPrefersTheConfiguredLayout(t *testing.T) {
+	got := firstOf(
+		fromLocalectl(func() ([]byte, error) {
+			return []byte("      X11 Layout: gb\n       X11 Model: microsoftpro\n"), nil
+		}),
+		fromSetxkbmap(func() ([]byte, error) {
+			return []byte("layout:     us\nmodel:      pc105\n"), nil
+		}),
+	)
+
+	require.Equal(t, []string{"XKB_DEFAULT_MODEL=microsoftpro", "XKB_DEFAULT_LAYOUT=gb"}, got)
+}
+
+// A host with no localectl still gets the running layout.
+func TestDefaultsFallsBackToTheRunningLayout(t *testing.T) {
+	got := firstOf(
+		fromLocalectl(func() ([]byte, error) { return nil, errors.New("not found") }),
+		fromSetxkbmap(func() ([]byte, error) { return []byte("layout: us\n"), nil }),
+	)
+
+	require.Equal(t, []string{"XKB_DEFAULT_LAYOUT=us"}, got)
+}

@@ -45,28 +45,21 @@ func Defaults() []string {
 		return env
 	}
 
-	// Which of the two to believe depends on the session. setxkbmap asks
-	// the X server, so on an X11 session it is the live answer and beats
-	// anything configured. On a Wayland session it asks Xwayland, which
-	// carries its own default rather than the compositor's keymap, and
-	// reports us on a machine typing gb. That is what happened on the
-	// first host it ran on: setxkbmap said us, the keyboard was gb, and
-	// the profile faithfully reproduced the wrong one.
+	// localectl is asked first, on any session. It reports the configured
+	// layout, which is the one the user chose. setxkbmap reports what the
+	// running X server happens to hold, and the two disagree more often
+	// than they look like they should.
 	//
-	// localectl reads the configured layout, which is what a Wayland
-	// compositor took its own from. Neither is right in both places, so
-	// the session decides, and whichever is asked first wins only if it
-	// answers.
-	if wayland() {
-		return firstOf(fromLocalectl(localectlQuery), fromSetxkbmap(setxkbmapQuery))
-	}
-
-	return firstOf(fromSetxkbmap(setxkbmapQuery), fromLocalectl(localectlQuery))
-}
-
-// wayland reports whether the session is a Wayland one.
-func wayland() bool {
-	return strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland")
+	// Both cases were seen on real hosts. On a Wayland session setxkbmap
+	// asks Xwayland, which carries its own default rather than the
+	// compositor's keymap. On an X11 host whose localectl said gb with a
+	// microsoftpro model, setxkbmap still answered us and pc105, and the
+	// profile faithfully reproduced a layout its user does not type on.
+	// Preferring the configured answer is right in both.
+	//
+	// A session that really does want the live value sets XKB_DEFAULT_
+	// above, which still wins over both.
+	return firstOf(fromLocalectl(localectlQuery), fromSetxkbmap(setxkbmapQuery))
 }
 
 func firstOf(sources ...[]string) []string {
