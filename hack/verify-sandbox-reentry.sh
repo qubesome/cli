@@ -5,6 +5,20 @@
 # used to handle. Run this on the qubesome host, as your normal user.
 # It starts a throwaway sandbox, tries each mechanism against it, then
 # cleans up.
+#
+# Result on the target host, 2026-09-08, bubblewrap 0.11.2 and util-linux
+# 2.42.2, running as an ordinary user with CapEff 0000000000000000:
+#
+#   1. bwrap --userns FD                PASS
+#   2. bwrap --userns FD --pidns FD     FAIL, Operation not permitted
+#   3. nsenter --user --mount --pid     FAIL, stops at ns/pid
+#   4. nsenter --mount alone            FAIL, as expected
+#   5. veth in an owned netns           PASS
+#
+# Check 3 stopping at ns/pid while check 4 stops at ns/mnt is the useful
+# part. nsenter joins the user namespace first, so that join succeeded and
+# carried its capabilities forward. The pid namespace is the wall, not the
+# route to it, and re-entry was designed around it rather than through it.
 set -u
 
 MARK=qubesome-reentry-probe
@@ -84,15 +98,25 @@ else
 fi
 
 printf '== 6. moving a veth end into a sibling namespace\n'
-printf '   This is what a per-workload link to the gateway needs. It wants\n'
-printf '   CAP_NET_ADMIN in both namespaces, which only holds if they share\n'
-printf '   a user namespace. Answering it properly needs the real sandbox\n'
-printf '   layout, so this only reports whether the pieces are present.\n'
+printf '   What a per-workload link to the gateway needs. Both namespaces\n'
+printf '   are created inside one user namespace, which is the arrangement\n'
+printf '   that is supposed to make it permitted.\n'
 if command -v ip >/dev/null 2>&1; then
-    unshare --user --map-root-user --net \
-        sh -c 'ip link add v0 type veth peer name v1 && ip link set v1 netns 1 2>&1 | head -1; true' 2>&1 |
-        sed 's/^/   /'
-    printf '   (moving to netns 1 is expected to fail, it is the host namespace)\n\n'
+    unshare --user --map-root-user --net sh -c '
+        unshare --net sleep 5 &
+        peer=$!
+        sleep 1
+        ip link add v0 type veth peer name v1 || exit 1
+        if ip link set v1 netns "$peer" 2>&1; then
+            echo "   moved v1 into the sibling namespace"
+            rc=0
+        else
+            rc=1
+        fi
+        kill "$peer" 2>/dev/null
+        exit $rc
+    ' 2>&1
+    res $? "veth across two netns in one userns"
 else
     printf '   SKIP  ip is not installed\n\n'
 fi
