@@ -1,8 +1,13 @@
 package types
 
 import (
+	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestProfileValidate(t *testing.T) {
@@ -146,13 +151,22 @@ func TestProfileValidate(t *testing.T) {
 			true,
 		},
 		{
-			"runner: docker",
+			"runner: removed docker",
 			Profile{
 				Name:          "valid",
 				Runner:        "docker",
 				WindowManager: "valid",
 			},
-			false,
+			true,
+		},
+		{
+			"runner: removed podman",
+			Profile{
+				Name:          "valid",
+				Runner:        "podman",
+				WindowManager: "valid",
+			},
+			true,
 		},
 		{
 			"runner: firecracker",
@@ -272,4 +286,77 @@ func TestProfileValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A profile naming a removed runner is told so too, in the same words the
+// workload gets, so the two do not read as different problems.
+func TestProfileValidateReportsARemovedRunner(t *testing.T) {
+	t.Parallel()
+
+	for _, runner := range []string{"docker", "podman"} {
+		p := Profile{Name: "valid", WindowManager: "valid", Runner: runner}
+
+		err := p.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "has been removed")
+		assert.Contains(t, err.Error(), runner)
+	}
+}
+
+// A profile dns is still accepted. Nothing reads it, and it warns at
+// start rather than failing a config that has always loaded.
+func TestProfileValidateAcceptsDNS(t *testing.T) {
+	t.Parallel()
+
+	p := Profile{Name: "valid", WindowManager: "valid", DNS: "1.1.1.1"}
+
+	require.NoError(t, p.Validate())
+}
+
+// captureLogs redirects the default logger for the duration of the test
+// and returns what was written to it. It replaces a package level logger,
+// so a test using it cannot run in parallel.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	buf := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	return buf
+}
+
+// A named network is kept and reported, never refused. The message has to
+// name the field and say the value does nothing yet, since the config
+// looks like it grants a network and the sandbox gets loopback only.
+func TestWarnIgnoredNetwork(t *testing.T) {
+	buf := captureLogs(t)
+
+	for _, network := range []string{"", "none", "host"} {
+		WarnIgnoredNetwork("chrome-work", network)
+	}
+	require.NotContains(t, buf.String(), "hostAccess.network")
+
+	WarnIgnoredNetwork("chrome-work", "qubesome")
+
+	out := buf.String()
+	assert.Contains(t, out, "hostAccess.network")
+	assert.Contains(t, out, "ignored")
+	assert.Contains(t, out, "qubesome")
+	assert.Contains(t, out, "chrome-work")
+}
+
+func TestWarnIgnoredDNS(t *testing.T) {
+	buf := captureLogs(t)
+
+	WarnIgnoredDNS("work", "")
+	require.NotContains(t, buf.String(), "profile dns")
+
+	WarnIgnoredDNS("work", "1.1.1.1")
+
+	out := buf.String()
+	assert.Contains(t, out, "dns")
+	assert.Contains(t, out, "ignored")
+	assert.Contains(t, out, "1.1.1.1")
 }

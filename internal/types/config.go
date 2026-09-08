@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 
 	"github.com/qubesome/cli/internal/files"
 	"go.yaml.in/yaml/v3"
@@ -20,7 +21,7 @@ var (
 	nameRegex         = regexp.MustCompile(`^[a-zA-Z0-9\-]+$`)
 	imageRegex        = regexp.MustCompile(`^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+\/)?(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+(?:[:/][a-z0-9]+(?:[._-][a-z0-9]+)*)+$`)
 	ipRegex           = regexp.MustCompile(`^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
-	runnerRegex       = regexp.MustCompile(`^(docker|podman|firecracker)$`)
+	runnerRegex       = regexp.MustCompile(`^firecracker$`)
 	externalPathRegex = regexp.MustCompile(`^[a-zA-Z0-9\-]+:/[^:]+:/[^:]+$`)
 	pathRegex         = regexp.MustCompile(`^(\${[a-zA-Z0-9\-]+}){0,1}/[^:]+:/[^:]+(:ro){0,1}$`)
 	// Flatpak application IDs are dot-separated elements of alphanumerics,
@@ -186,6 +187,63 @@ type Profile struct {
 	XephyrArgs string `yaml:"xephyrArgs"`
 }
 
+// removedRunners are the runners qubesome used to have. They are named
+// so that a config still asking for one is told it was removed, rather
+// than being handed the format error a typo gets, which reads as if the
+// runner never existed.
+var removedRunners = []string{"docker", "podman"}
+
+// validateRunner checks the runner a profile or a workload asks for.
+//
+// The wording matches what internal/qubesome/run.go refuses a launch with
+// and what internal/doctor reports, so the same config reads the same way
+// whether it is loaded, diagnosed or run.
+func validateRunner(runner string) error {
+	if slices.Contains(removedRunners, runner) {
+		return fmt.Errorf("the %q runner has been removed: workloads run under bwrap", runner)
+	}
+
+	return valid(runner, "runner", 20, true, runnerRegex)
+}
+
+// WarnIgnoredNetwork reports a hostAccess.network value that has no
+// effect.
+//
+// An empty value, none and host all mean something to a sandbox. Any
+// other value names a network that only the qubesome gateway can create,
+// and until that lands the sandbox gets its own namespace with loopback
+// and nothing else. The name is kept rather than refused because the
+// reference configuration is full of them and the gateway gives them
+// meaning again.
+//
+// Callers invoke this once per launch. Validate runs several times for a
+// single launch, so the same config would otherwise warn repeatedly.
+func WarnIgnoredNetwork(name, network string) {
+	switch network {
+	case "", "none", "host":
+		return
+	}
+
+	slog.Warn("hostAccess.network is ignored until the qubesome gateway lands, the sandbox gets loopback only",
+		"name", name, "network", network)
+}
+
+// WarnIgnoredDNS reports a profile dns value that has no effect.
+//
+// The container runners passed it as --dns. A sandbox has no resolver to
+// point anywhere, and no network to resolve against, so the value is read
+// by nothing. It is kept for the same reason a named network is: name
+// resolution is the gateway's, and this is the field that would configure
+// it.
+func WarnIgnoredDNS(name, dns string) {
+	if dns == "" {
+		return
+	}
+
+	slog.Warn("profile dns is ignored until the qubesome gateway lands, the sandbox has no resolver",
+		"name", name, "dns", dns)
+}
+
 func valid(val, field string, maxLen int, allowEmpty bool, format *regexp.Regexp) error {
 	if val == "" {
 		if allowEmpty {
@@ -221,7 +279,7 @@ func (p Profile) Validate() error {
 	if err := valid(p.XephyrArgs, "xephyrArgs", 50, true, nil); err != nil {
 		return err
 	}
-	if err := valid(p.Runner, "runner", 20, true, runnerRegex); err != nil {
+	if err := validateRunner(p.Runner); err != nil {
 		return err
 	}
 	for _, path := range p.Paths {

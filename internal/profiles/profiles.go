@@ -276,6 +276,11 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
+	// Once per start. A profile network name also reaches every workload
+	// it launches, which warns for itself.
+	types.WarnIgnoredNetwork(profile.Name, profile.Network)
+	types.WarnIgnoredDNS(profile.Name, profile.DNS)
+
 	// Both entry paths land here, and docker used to refuse a second
 	// start through the container name. bwrap has no such thing, so a
 	// second start would truncate the running profile's X cookies, race

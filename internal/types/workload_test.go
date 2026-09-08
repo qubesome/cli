@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_ApplyProfile(t *testing.T) {
@@ -1093,13 +1094,22 @@ func TestWorkloadValidate(t *testing.T) {
 			false,
 		},
 		{
-			"runner: valid docker",
+			"runner: removed docker",
 			Workload{
 				Name:   "valid",
 				Image:  "valid/valid",
 				Runner: "docker",
 			},
-			false,
+			true,
+		},
+		{
+			"runner: removed podman",
+			Workload{
+				Name:   "valid",
+				Image:  "valid/valid",
+				Runner: "podman",
+			},
+			true,
 		},
 		{
 			"runner: valid firecracker",
@@ -1175,6 +1185,39 @@ func TestWorkloadValidate(t *testing.T) {
 			},
 			true,
 		},
+		{
+			"devices: valid bare node",
+			Workload{
+				Name:  "valid",
+				Image: "valid/valid",
+				HostAccess: HostAccess{
+					Devices: []string{"/dev/net/tun"},
+				},
+			},
+			false,
+		},
+		{
+			"devices: invalid remap",
+			Workload{
+				Name:  "valid",
+				Image: "valid/valid",
+				HostAccess: HostAccess{
+					Devices: []string{"/dev/net/tun:/dev/tun0"},
+				},
+			},
+			true,
+		},
+		{
+			"devices: invalid permissions",
+			Workload{
+				Name:  "valid",
+				Image: "valid/valid",
+				HostAccess: HostAccess{
+					Devices: []string{"/dev/net/tun:/dev/net/tun:rw"},
+				},
+			},
+			true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -1216,5 +1259,78 @@ func TestApplyProfileSeccompUnconfined(t *testing.T) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A config naming a runner qubesome no longer has is told it was removed.
+// The format error a typo gets reads as if the runner never existed, and
+// it is the one that would have been reported here.
+func TestWorkloadValidateReportsARemovedRunner(t *testing.T) {
+	t.Parallel()
+
+	for _, runner := range []string{"docker", "podman"} {
+		w := Workload{Name: "valid", Image: "valid/valid", Runner: runner}
+
+		err := w.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "has been removed")
+		assert.Contains(t, err.Error(), runner)
+	}
+}
+
+func TestWorkloadValidateReportsAnUnknownRunner(t *testing.T) {
+	t.Parallel()
+
+	w := Workload{Name: "valid", Image: "valid/valid", Runner: "containerd"}
+
+	err := w.Validate()
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "has been removed")
+}
+
+// A bind mount cannot rename a device node and cannot narrow access to
+// one. Both are reported when the config is read, rather than when the
+// workload is opened.
+func TestWorkloadValidateRejectsDeviceRequestsABindCannotHonour(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		device string
+		want   string
+	}{
+		"remapped":   {device: "/dev/kvm:/dev/other", want: "remap"},
+		"restricted": {device: "/dev/kvm:/dev/kvm:r", want: "restrict device permissions"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			w := Workload{
+				Name:       "valid",
+				Image:      "valid/valid",
+				HostAccess: HostAccess{Devices: []string{tc.device}},
+			}
+
+			err := w.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// A named network stays valid. 22 entries of the reference configuration
+// use one, and the gateway gives them meaning again.
+func TestWorkloadValidateAcceptsANamedNetwork(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []string{"", "none", "host", "qubesome"} {
+		w := Workload{
+			Name:       "valid",
+			Image:      "valid/valid",
+			HostAccess: HostAccess{Network: network},
+		}
+
+		require.NoError(t, w.Validate(), network)
 	}
 }

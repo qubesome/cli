@@ -277,12 +277,13 @@ func TestSpecSharesLocaltimeAndItsTarget(t *testing.T) {
 	assert.NotEqual(t, -1, indexOfArg(args, "--ro-bind", "/usr/share/zoneinfo/Europe/London"))
 }
 
-// There is no uplink in this stage, so a workload reaches itself and
-// nothing else, whatever its network grant says.
-func TestSpecAlwaysUnsharesTheNetwork(t *testing.T) {
+// There is no uplink in this stage, so a workload with anything short of
+// the host network reaches itself and nothing else. A named network is
+// one of those: the name only means something once the gateway lands.
+func TestSpecUnsharesTheNetworkWithoutAHostGrant(t *testing.T) {
 	t.Parallel()
 
-	for _, network := range []string{"", "none", "host", "qubesome"} {
+	for _, network := range []string{"", "none", "qubesome"} {
 		in := plainInput()
 		in.Workload.Workload.HostAccess.Network = network
 
@@ -292,6 +293,32 @@ func TestSpecAlwaysUnsharesTheNetwork(t *testing.T) {
 
 		assert.Contains(t, render(t, in), "--unshare-net", network)
 	}
+}
+
+// A workload granted the host network gets it. The grant used to reach a
+// spec that unshared the network regardless, which is a silent downgrade
+// of the one network grant a sandbox can honour, so the golden file below
+// is what stands between it and a repeat.
+func TestSpecHostNetworkIsNotUnshared(t *testing.T) {
+	t.Parallel()
+
+	in := plainInput()
+	in.Workload.Workload.HostAccess.Network = "host"
+
+	spec, err := buildSpec(in)
+	require.NoError(t, err)
+	assert.Equal(t, sandbox.NetHost, spec.Net)
+
+	assert.NotContains(t, render(t, in), "--unshare-net")
+}
+
+func TestSpecHostNetworkWorkload(t *testing.T) {
+	t.Parallel()
+
+	in := plainInput()
+	in.Workload.Workload.HostAccess.Network = "host"
+
+	golden(t, "hostnet", render(t, in))
 }
 
 // Chromium builds a user namespace for its own sandbox, so a workload

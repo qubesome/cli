@@ -191,6 +191,10 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 			"workload", ew.Workload.Name)
 	}
 
+	// The effective value, so a name inherited from the profile is
+	// reported once here rather than at every validation of it.
+	types.WarnIgnoredNetwork(ew.Name, ew.Workload.HostAccess.Network)
+
 	if len(ew.Workload.HostAccess.Gpus) == 0 {
 		ew.Workload.Args = append(ew.Workload.Args, ew.Workload.NoGPUArgs...)
 	}

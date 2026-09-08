@@ -225,7 +225,7 @@ func (w Workload) Validate() error {
 	if err := valid(w.Image, "image", 100, false, imageRegex); err != nil {
 		return err
 	}
-	if err := valid(w.Runner, "runner", 20, true, runnerRegex); err != nil {
+	if err := validateRunner(w.Runner); err != nil {
 		return err
 	}
 	for _, mime := range w.MimeApps {
@@ -255,7 +255,7 @@ func (w Workload) Validate() error {
 		}
 	}
 	for _, device := range w.HostAccess.Devices {
-		if _, _, _, err := ParseDevice(device); err != nil {
+		if err := ValidateDeviceRequest(device); err != nil {
 			return err
 		}
 	}

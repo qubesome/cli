@@ -153,10 +153,7 @@ func buildSpec(in input) (sandbox.Spec, error) {
 		UID: in.Bundle.UID,
 		GID: in.Bundle.GID,
 
-		// Every workload gets an empty network namespace with loopback and
-		// nothing else. The uplink lives in the gateway, which is a later
-		// stage, so there is deliberately no egress here.
-		Net: sandbox.NetNone,
+		Net: workloadNet(wl.HostAccess.Network),
 
 		Seccomp: !wl.HostAccess.SeccompUnconfined,
 
@@ -186,6 +183,24 @@ func buildSpec(in input) (sandbox.Spec, error) {
 	}
 
 	return spec, nil
+}
+
+// workloadNet maps the workload's network grant onto the sandbox.
+//
+// host is the one grant a sandbox can honour today, and it is honoured
+// because the alternative is a workload that was given the host network
+// and silently got an empty namespace instead.
+//
+// Everything else, a named network included, gets an empty namespace with
+// loopback and nothing else. The uplink lives in the gateway, which is a
+// later stage, so there is deliberately no egress for those. The name is
+// not refused here. types.WarnIgnoredNetwork reports it once per launch.
+func workloadNet(network string) sandbox.NetMode {
+	if network == "host" {
+		return sandbox.NetHost
+	}
+
+	return sandbox.NetNone
 }
 
 // workloadArgs is what the sandbox runs.

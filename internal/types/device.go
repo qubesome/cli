@@ -58,6 +58,34 @@ func ParseDevice(device string) (src, dst, perms string, err error) {
 	return src, dst, perms, nil
 }
 
+// ValidateDeviceRequest checks a workload's device request.
+//
+// A workload runs in a bwrap sandbox, which shares a device by bind
+// mounting the host node onto the same path. The bind carries the node's
+// own permissions and nothing else, so a request that renames the node or
+// narrows access to it cannot be honoured, and granting it in full
+// instead would hand out more than was asked for.
+//
+// Both are refused here so a config that asks for either is reported when
+// it is read rather than when the workload is opened. The bwrap runner
+// keeps the same guard, since a device list can reach it without passing
+// through here.
+func ValidateDeviceRequest(device string) error {
+	src, dst, perms, err := ParseDevice(device)
+	if err != nil {
+		return err
+	}
+
+	if dst != src {
+		return fmt.Errorf("invalid device %q: the sandbox cannot remap a device node", device)
+	}
+	if perms != "rwm" {
+		return fmt.Errorf("invalid device %q: the sandbox cannot restrict device permissions", device)
+	}
+
+	return nil
+}
+
 // ValidateDeviceGrant checks an entry of a profile's device allowlist.
 //
 // A grant names a source device, so it is held to the same rules as the
