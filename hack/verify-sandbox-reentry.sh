@@ -16,18 +16,21 @@
 #   5. veth in an owned netns           PASS
 #   6. veth across two netns, one userns PASS
 #   7. veth into a descendant's netns    PASS
-#   8. nsenter --net into a descendant    (run pending)
+#   8. nsenter --net into a descendant    PASS
 #
 # Check 3 stopping at ns/pid while check 4 stops at ns/mnt is the useful
 # part. nsenter joins the user namespace first, so that join succeeded and
 # carried its capabilities forward. The pid namespace is the wall, not the
 # route to it, and re-entry was designed around it rather than through it.
 #
-# Check 7 is the one the gateway is built on. A capability held in an
+# Checks 7 and 8 are the pair the gateway is built on. A capability held in an
 # ancestor user namespace does carry into the namespaces its descendants
 # own, so a session namespace can wire a veth into a sandbox that nested
-# its own inside it. That is what lets each sandbox keep --disable-userns
-# and its own uid mapping instead of sharing one flat namespace.
+# its own inside it, and can enter that namespace to address it. That is
+# what lets each sandbox keep --disable-userns and its own uid mapping
+# instead of sharing one flat namespace. Check 4 fails the same class of
+# call from outside the session, which is the contrast that makes the
+# session namespace the thing doing the work.
 #
 # Check 6 was run separately, after the first version of it was rewritten:
 # the original passed a pid where iproute2 wanted a namespace and so tested
