@@ -89,11 +89,11 @@ kali-vpn-pentest
 /run/user/1000/qubesome/pentest/mime-handler.desktop
 /home/kali/.local/share/applications/qubesome-default-handler.desktop
 --ro-bind
-/usr/bin/qubesome
-/usr/local/bin/qubesome
---ro-bind
 /run/user/1000/qubesome/pentest/qube.sock
 /tmp/qube.sock
+--ro-bind
+/usr/bin/qubesome
+/usr/local/bin/qubesome
 --ro-bind
 /usr/share/vulkan/icd.d/radeon_icd.x86_64.json
 /usr/share/vulkan/icd.d/radeon_icd.x86_64.json

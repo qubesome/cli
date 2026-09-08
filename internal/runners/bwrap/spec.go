@@ -61,9 +61,15 @@ type input struct {
 	// handles mime types so it can call back to the host.
 	SocketPath string
 
-	// QubesomeBin is the qubesome binary on the host, shared with a mime
-	// enabled workload as the handler it runs.
+	// QubesomeBin is the qubesome binary on the host. A mime enabled
+	// workload runs it as the handler, and a single instance workload runs
+	// it as its entrypoint.
 	QubesomeBin string
+
+	// AgentDir is this workload's supervisor socket directory on the host.
+	// It is bound into the sandbox, where the supervisor creates the
+	// socket. Set only for a single instance workload.
+	AgentDir string
 
 	// HomeDir is the home directory of the image's user, which is where a
 	// mime enabled workload's desktop files have to land. Empty when the
@@ -119,6 +125,13 @@ func buildSpec(in input) (sandbox.Spec, error) {
 	if in.Workload.Profile == nil {
 		return sandbox.Spec{}, errors.New("workload has no profile")
 	}
+	if wl.SingleInstance && (in.QubesomeBin == "" || in.AgentDir == "") {
+		// Without both, the sandbox would run the workload directly and
+		// answer nothing, so a second launch would start a second sandbox
+		// against the same data.
+		return sandbox.Spec{}, fmt.Errorf(
+			"workload %q is single instance but has no supervisor binary or socket dir", in.Workload.Name)
+	}
 
 	devices, err := workloadDevices(in)
 	if err != nil {
@@ -160,7 +173,7 @@ func buildSpec(in input) (sandbox.Spec, error) {
 		Devices: devices,
 		Mounts:  workloadMounts(in),
 		Env:     workloadEnv(in),
-		Args:    append([]string{wl.Command}, wl.Args...),
+		Args:    workloadArgs(in),
 		Cwd:     in.Bundle.Cwd,
 	}
 
@@ -173,6 +186,24 @@ func buildSpec(in input) (sandbox.Spec, error) {
 	}
 
 	return spec, nil
+}
+
+// workloadArgs is what the sandbox runs.
+//
+// A single instance workload runs the supervisor, which runs the
+// workload's own command and then answers on a socket. The container
+// runner re-entered a running container with docker exec, and a sandbox
+// cannot be entered at all, so the second launch of one of these is handed
+// to a process that is already inside.
+func workloadArgs(in input) []string {
+	wl := in.Workload.Workload
+
+	args := append([]string{wl.Command}, wl.Args...)
+	if !wl.SingleInstance {
+		return args
+	}
+
+	return append([]string{files.InProfileBinary, sandbox.SuperviseCommand}, args...)
 }
 
 // capsAdd renders the docker spelling the configuration carries into the
@@ -325,9 +356,25 @@ func workloadMounts(in input) []sandbox.Mount {
 				Dst:      filepath.Join(apps, "qubesome-default-handler.desktop"),
 				ReadOnly: true,
 			},
-			sandbox.Mount{Src: in.QubesomeBin, Dst: files.InProfileBinary, ReadOnly: true},
 			sandbox.Mount{Src: in.SocketPath, Dst: files.InProfileSocketPath(), ReadOnly: true},
 		)
+	}
+
+	// Both the mime handler and the supervisor are the qubesome binary, so
+	// a workload that is both still shares it once.
+	if wl.HostAccess.Mime || wl.SingleInstance {
+		mounts = append(mounts, sandbox.Mount{
+			Src: in.QubesomeBin, Dst: files.InProfileBinary, ReadOnly: true,
+		})
+	}
+
+	if wl.SingleInstance {
+		// The directory rather than the socket: the socket does not exist
+		// yet, the supervisor inside creates it. Writable for the same
+		// reason.
+		mounts = append(mounts, sandbox.Mount{
+			Src: in.AgentDir, Dst: files.InWorkloadAgentDir(),
+		})
 	}
 
 	for _, m := range in.GPUMounts {

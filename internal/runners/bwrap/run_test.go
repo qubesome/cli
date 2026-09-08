@@ -3,9 +3,12 @@ package bwrap
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
@@ -437,6 +440,108 @@ func TestHostEnvSkipsUnsetVariables(t *testing.T) {
 	}
 }
 
+// supervisedInput is a plain workload that is single instance, which 26 of
+// the 28 workloads in the reference configuration are. The sandbox runs the
+// supervisor and the supervisor runs the workload.
+func supervisedInput() input {
+	in := plainInput()
+
+	in.Workload.Workload.SingleInstance = true
+	in.QubesomeBin = "/usr/bin/qubesome"
+	in.AgentDir = "/run/user/1000/qubesome/work/agent/chrome"
+
+	return in
+}
+
+func TestSpecSupervisedWorkload(t *testing.T) {
+	t.Parallel()
+
+	golden(t, "supervised", render(t, supervisedInput()))
+}
+
+// A sandbox cannot be entered, so a second launch of a single instance
+// workload is handed to the supervisor already inside it. That only works
+// if the supervisor is what the sandbox runs.
+func TestSpecSingleInstanceRunsTheSupervisor(t *testing.T) {
+	t.Parallel()
+
+	in := supervisedInput()
+	args := render(t, in)
+
+	i := slices.Index(args, "--")
+	require.NotEqual(t, -1, i)
+
+	assert.Equal(t, []string{
+		files.InProfileBinary,
+		sandbox.SuperviseCommand,
+		"/opt/google/chrome/chrome",
+		"--user-data-dir=/home/chrome/data",
+	}, args[i+1:])
+
+	assert.NotEqual(t, -1, indexOfArg(args, "--ro-bind", in.QubesomeBin))
+	assert.NotEqual(t, -1, indexOfArg(args, "--bind", in.AgentDir))
+}
+
+func TestSpecWorkloadThatIsNotSingleInstanceRunsItsCommand(t *testing.T) {
+	t.Parallel()
+
+	args := render(t, plainInput())
+
+	i := slices.Index(args, "--")
+	require.NotEqual(t, -1, i)
+
+	assert.Equal(t, []string{
+		"/opt/google/chrome/chrome",
+		"--user-data-dir=/home/chrome/data",
+	}, args[i+1:])
+
+	assert.NotContains(t, args, files.InWorkloadAgentDir())
+}
+
+// The socket is created by the supervisor inside the sandbox, so what is
+// shared is the directory holding it, and it has to be writable.
+func TestSpecSharesTheAgentDirRatherThanTheSocket(t *testing.T) {
+	t.Parallel()
+
+	in := supervisedInput()
+	args := render(t, in)
+
+	assert.Equal(t, -1, indexOfArg(args, "--ro-bind", in.AgentDir))
+	assert.Equal(t, 1, countArg(args, "--bind", in.AgentDir))
+}
+
+// The mime handler and the supervisor are the same binary.
+func TestSpecSharesTheBinaryOnceForMimeAndTheSupervisor(t *testing.T) {
+	t.Parallel()
+
+	in := grantedInput()
+	in.Workload.Workload.SingleInstance = true
+	in.AgentDir = "/run/user/1000/qubesome/pentest/agent/kali-vpn"
+
+	args := render(t, in)
+
+	assert.Equal(t, 1, countArg(args, "--ro-bind", in.QubesomeBin))
+}
+
+// A single instance workload whose sandbox does not run a supervisor
+// answers nothing, and every later launch of it starts another sandbox
+// against the same data.
+func TestSpecRejectsSingleInstanceWithoutASupervisor(t *testing.T) {
+	t.Parallel()
+
+	in := supervisedInput()
+	in.AgentDir = ""
+
+	_, err := buildSpec(in)
+	require.Error(t, err)
+
+	in = supervisedInput()
+	in.QubesomeBin = ""
+
+	_, err = buildSpec(in)
+	require.Error(t, err)
+}
+
 func TestStatePathRejectsANameThatIsNotOneComponent(t *testing.T) {
 	t.Parallel()
 
@@ -447,6 +552,134 @@ func TestStatePathRejectsANameThatIsNotOneComponent(t *testing.T) {
 
 	_, err := StatePath(ew)
 	require.Error(t, err)
+}
+
+// supervised sets HOME so the profile's run directory is a temporary one,
+// and returns a workload whose command is argv. It cannot run in parallel
+// for the same reason.
+func supervised(t *testing.T, argv []string) types.EffectiveWorkload {
+	t.Helper()
+
+	t.Setenv("HOME", t.TempDir())
+
+	return types.EffectiveWorkload{
+		Name:    "chrome-work",
+		Profile: &types.Profile{Name: "work"},
+		Workload: types.Workload{
+			Name:           "chrome",
+			SingleInstance: true,
+			Command:        argv[0],
+			Args:           argv[1:],
+		},
+	}
+}
+
+// serveWorkload starts a supervisor where the host will look for one, and
+// returns once it is answering.
+func serveWorkload(t *testing.T, ew types.EffectiveWorkload) {
+	t.Helper()
+
+	dir, err := files.WorkloadAgentDir(ew.Profile.Name, ew.Workload.Name)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, files.DirMode))
+
+	socket, err := files.WorkloadAgentSocket(ew.Profile.Name, ew.Workload.Name)
+	require.NoError(t, err)
+
+	// The main command holds the sandbox open and lets go of the standard
+	// streams, which are the test binary's own.
+	go func() {
+		_ = sandbox.Supervise(socket, []string{"/bin/sh", "-c", "exec >/dev/null 2>&1; sleep 5"})
+	}()
+
+	require.Eventually(t, func() bool {
+		return sandbox.Spawn(socket, []string{"/bin/sh", "-c", "exit 0"}) == nil
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func liveState(t *testing.T, ew types.EffectiveWorkload) string {
+	t.Helper()
+
+	require.NoError(t, os.MkdirAll(files.ProfileDir(ew.Profile.Name), files.DirMode))
+
+	statePath, err := StatePath(ew)
+	require.NoError(t, err)
+
+	// This process is the live one. What the state file has to name is a
+	// pid that is running, and nothing here reads any further into it.
+	require.NoError(t, sandbox.WriteState(statePath, os.Getpid()))
+
+	return statePath
+}
+
+func TestHandOverToARunningSandbox(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "out")
+	ew := supervised(t, []string{"/bin/sh", "-c", "printf handed > " + out})
+
+	statePath := liveState(t, ew)
+	serveWorkload(t, ew)
+
+	handled, err := handOver(ew, statePath)
+	require.NoError(t, err)
+	require.True(t, handled)
+
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(out)
+		return err == nil && string(data) == "handed"
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// The interesting case. The sandbox is recorded as running and nothing in
+// it answers, so the launch falls through to a fresh sandbox rather than
+// leaving the user with an application that does not open.
+func TestHandOverWithALiveStateFileAndADeadSocket(t *testing.T) {
+	ew := supervised(t, []string{"/bin/sh"})
+	statePath := liveState(t, ew)
+
+	handled, err := handOver(ew, statePath)
+	require.NoError(t, err)
+	assert.False(t, handled)
+}
+
+func TestHandOverWithNoStateFile(t *testing.T) {
+	ew := supervised(t, []string{"/bin/sh"})
+
+	statePath, err := StatePath(ew)
+	require.NoError(t, err)
+
+	handled, err := handOver(ew, statePath)
+	require.NoError(t, err)
+	assert.False(t, handled)
+}
+
+// A state file naming a pid that is gone is a cache entry, not an error,
+// and it must not cost the launch the startup grace either.
+func TestHandOverWithADeadStateFile(t *testing.T) {
+	ew := supervised(t, []string{"/bin/sh"})
+	statePath := liveState(t, ew)
+
+	require.NoError(t, os.WriteFile(statePath, []byte(`{"pid":2147483646,"startTime":1}`), files.FileMode))
+
+	start := time.Now()
+	handled, err := handOver(ew, statePath)
+	require.NoError(t, err)
+	assert.False(t, handled)
+	assert.Less(t, time.Since(start), startupGrace)
+}
+
+// A supervisor that answers and refuses is running the workload, so the
+// launch reports the refusal. A second sandbox would put two of a single
+// instance workload on one profile directory.
+func TestHandOverReportsARefusal(t *testing.T) {
+	ew := supervised(t, []string{filepath.Join(t.TempDir(), "not-there")})
+
+	statePath := liveState(t, ew)
+	serveWorkload(t, ew)
+
+	handled, err := handOver(ew, statePath)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, sandbox.ErrNoSupervisor)
+	assert.True(t, handled)
 }
 
 func indexOfArg(args []string, flag, value string) int {

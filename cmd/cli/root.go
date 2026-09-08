@@ -46,6 +46,7 @@ func RootCommand() *cli.Command {
 			headlessCommand(),
 			usbCommand(),
 			gpuCommand(),
+			superviseCommand(),
 		},
 	}
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
@@ -66,17 +67,26 @@ func Run(ew types.EffectiveWorkload) error {
 		return err
 	}
 
+	statePath, err := StatePath(ew)
+	if err != nil {
+		return err
+	}
+
+	// Before anything is pulled or unpacked, as the container runner
+	// checked for a running container before building its argument list.
+	if ew.Workload.SingleInstance {
+		handled, err := handOver(ew, statePath)
+		if handled || err != nil {
+			return err
+		}
+	}
+
 	in, err := resolve(ew)
 	if err != nil {
 		return err
 	}
 
 	spec, err := buildSpec(in)
-	if err != nil {
-		return err
-	}
-
-	statePath, err := StatePath(ew)
 	if err != nil {
 		return err
 	}
@@ -165,6 +175,88 @@ func reap(cmd *execabs.Cmd, statePath string) {
 	}
 }
 
+// handOver gives a running sandbox the command of a second launch, and
+// reports whether the launch was dealt with.
+//
+// Two things have to hold. The state file has to name a live process, and
+// the supervisor in that sandbox has to answer. Neither is enough on its
+// own: the state file is a cache of a pid, and a pid that is alive says
+// nothing about whether anything inside can still be reached.
+//
+// A live state file with a socket that does not answer is the case worth
+// stating. It starts a fresh sandbox. The state file is a cache and not
+// the truth, which is what a dead recorded pid already means here, and a
+// sandbox nothing can be handed to is no more useful to this launch than
+// one that is gone: refusing would leave the user with an application that
+// does not open and a file they should not have to know about to fix it.
+// The single instance guarantee is what a live supervisor gives, not a
+// lock, and the trade is deliberate.
+//
+// A supervisor that answers and refuses is the opposite case, and it is
+// reported. Something is running in there, and a second sandbox would put
+// two of a single instance workload on one profile directory, which is the
+// outcome the supervisor exists to prevent.
+func handOver(ew types.EffectiveWorkload, statePath string) (bool, error) {
+	if !sandbox.Alive(statePath) {
+		return false, nil
+	}
+
+	socket, err := files.WorkloadAgentSocket(ew.Profile.Name, ew.Workload.Name)
+	if err != nil {
+		return false, err
+	}
+
+	argv := append([]string{ew.Workload.Command}, ew.Workload.Args...)
+
+	err = spawn(socket, argv, statePath)
+	if err == nil {
+		slog.Debug("handed the workload to a running sandbox", "workload", ew.Name)
+		return true, nil
+	}
+
+	if errors.Is(err, sandbox.ErrNoSupervisor) {
+		slog.Warn("the recorded sandbox is not answering, starting a fresh one",
+			"workload", ew.Name, "error", err)
+
+		return false, nil
+	}
+
+	return true, fmt.Errorf("failed to hand %q to its running sandbox: %w", ew.Name, err)
+}
+
+const (
+	// startupGrace bounds the wait for a sandbox that was recorded a
+	// moment ago to reach the point of listening. Between the host
+	// recording the sandbox and the supervisor binding its socket there is
+	// a bwrap setup and an exec, and a launch that gave up inside that
+	// window would start a second sandbox because the first was not quite
+	// up yet.
+	startupGrace = 2 * time.Second
+
+	startupPoll = 50 * time.Millisecond
+)
+
+// spawn hands argv over, waiting for a sandbox that is still starting.
+//
+// Only a sandbox the state file still calls alive is waited for, so a
+// sandbox that goes away during the wait ends it rather than running it
+// out.
+func spawn(socket string, argv []string, statePath string) error {
+	deadline := time.Now().Add(startupGrace)
+
+	for {
+		err := sandbox.Spawn(socket, argv)
+		if !errors.Is(err, sandbox.ErrNoSupervisor) {
+			return err
+		}
+		if time.Now().After(deadline) || !sandbox.Alive(statePath) {
+			return err
+		}
+
+		time.Sleep(startupPoll)
+	}
+}
+
 // resolve gathers everything the sandbox needs from the host.
 //
 // Every filesystem lookup, image pull and keyring read happens here, so
@@ -240,6 +332,29 @@ func resolve(ew types.EffectiveWorkload) (input, error) {
 		}
 	}
 
+	if wl.HostAccess.Mime || wl.SingleInstance {
+		// The mime handler and the supervisor are both this binary.
+		bin, err := os.Executable()
+		if err != nil {
+			return input{}, err
+		}
+		in.QubesomeBin = bin
+	}
+
+	if wl.SingleInstance {
+		agentDir, err := files.WorkloadAgentDir(ew.Profile.Name, wl.Name)
+		if err != nil {
+			return input{}, err
+		}
+		// MkdirAll rather than EnsureMappedDir: the parent is the
+		// profile's agent directory, and a workload launch is the only
+		// thing that creates either of them.
+		if err := os.MkdirAll(agentDir, files.DirMode); err != nil {
+			return input{}, fmt.Errorf("failed to create workload agent dir: %w", err)
+		}
+		in.AgentDir = agentDir
+	}
+
 	if wl.HostAccess.Mime {
 		if err := resolveMime(&in); err != nil {
 			return input{}, err
@@ -271,12 +386,6 @@ func resolveMime(in *input) error {
 	if err := os.WriteFile(handler, []byte(mime.DefaultMimeHandler), files.FileMode); err != nil {
 		return fmt.Errorf("failed to write mime-handler.desktop: %w", err)
 	}
-
-	bin, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	in.QubesomeBin = bin
 
 	// A workload without the credentials still starts. It simply cannot
 	// reach the inception server, which is the same thing the container

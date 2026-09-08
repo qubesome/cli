@@ -142,6 +142,62 @@ func TestWorkloadShmPathIsPerWorkload(t *testing.T) {
 	require.NotEqual(t, a, b)
 }
 
+func TestWorkloadAgentDirIsOutsideTheSharedRuntimeDir(t *testing.T) {
+	t.Parallel()
+
+	shared, err := IsolatedRunUserPath("prof")
+	require.NoError(t, err)
+
+	dir, err := WorkloadAgentDir("prof", "work")
+	require.NoError(t, err)
+
+	// The shared runtime dir is mounted into every workload of a profile,
+	// and the supervisor socket takes no credential, so a socket inside it
+	// would let any workload of the profile start processes in any of its
+	// siblings. Where it sits is the whole of what separates them.
+	require.False(t, strings.HasPrefix(dir, shared+string(filepath.Separator)),
+		"workload agent dir %q must not be inside the shared runtime dir %q", dir, shared)
+}
+
+func TestWorkloadAgentDirIsPerWorkload(t *testing.T) {
+	t.Parallel()
+
+	a, err := WorkloadAgentDir("prof", "alpha")
+	require.NoError(t, err)
+
+	b, err := WorkloadAgentDir("prof", "beta")
+	require.NoError(t, err)
+
+	require.NotEqual(t, a, b)
+}
+
+func TestWorkloadAgentSocketRejectsANameThatIsNotOneComponent(t *testing.T) {
+	t.Parallel()
+
+	_, err := WorkloadAgentSocket("prof", "../other")
+	require.ErrorIs(t, err, ErrUnsafePath)
+
+	_, err = WorkloadAgentSocket("../other", "work")
+	require.ErrorIs(t, err, ErrUnsafePath)
+}
+
+// The host builds the socket path from its directory and the supervisor
+// inside the sandbox builds it from the path that directory is bound at.
+// They have to agree on the name at the end of it.
+func TestWorkloadAgentSocketMatchesTheSandboxSide(t *testing.T) {
+	t.Parallel()
+
+	dir, err := WorkloadAgentDir("prof", "work")
+	require.NoError(t, err)
+
+	socket, err := WorkloadAgentSocket("prof", "work")
+	require.NoError(t, err)
+
+	require.Equal(t, dir, filepath.Dir(socket))
+	require.Equal(t, InWorkloadAgentDir(), filepath.Dir(InWorkloadAgentSocket()))
+	require.Equal(t, filepath.Base(socket), filepath.Base(InWorkloadAgentSocket()))
+}
+
 func TestValidateName(t *testing.T) {
 	t.Parallel()
 

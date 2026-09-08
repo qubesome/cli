@@ -204,6 +204,53 @@ func WorkloadShmPath(profile, workload string) (string, error) {
 	return filepath.Join(dir, "shm", workload), nil
 }
 
+// agentSocketName is the supervisor's socket, inside the directory a
+// workload's sandbox has it bound at. The host and the sandbox build the
+// same path from opposite ends, so they share the name.
+const agentSocketName = "agent.sock"
+
+// WorkloadAgentDir returns the host directory holding the supervisor
+// socket of one workload of a profile.
+//
+// Like WorkloadShmPath it sits beside the profile's runtime directory
+// rather than inside it, and for the same reason: IsolatedRunUserPath is
+// mounted into every workload of the profile, so a socket under it would
+// be reachable from every sibling, and every workload runs as the same
+// uid, so permissions would not separate them. A directory per workload
+// is what keeps a supervisor reachable only from its own sandbox.
+func WorkloadAgentDir(profile, workload string) (string, error) {
+	dir, err := profileRunDir(profile)
+	if err != nil {
+		return "", err
+	}
+	if err := ValidateName("workload name", workload); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "agent", workload), nil
+}
+
+// WorkloadAgentSocket returns the host path of a workload supervisor's
+// socket.
+func WorkloadAgentSocket(profile, workload string) (string, error) {
+	dir, err := WorkloadAgentDir(profile, workload)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, agentSocketName), nil
+}
+
+// InWorkloadAgentDir returns the path WorkloadAgentDir is bound at inside
+// the workload's sandbox.
+func InWorkloadAgentDir() string {
+	return "/run/qubesome"
+}
+
+// InWorkloadAgentSocket returns the path the supervisor listens on inside
+// the workload's sandbox.
+func InWorkloadAgentSocket() string {
+	return filepath.Join(InWorkloadAgentDir(), agentSocketName)
+}
+
 // ServerCookiePath returns the path to the server cookie file for the given profile.
 func ServerCookiePath(profile string) (string, error) {
 	dir, err := profileRunDir(profile)
