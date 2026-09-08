@@ -15,9 +15,8 @@ import (
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/inception"
-	"github.com/qubesome/cli/internal/runners/docker"
+	"github.com/qubesome/cli/internal/runners/bwrap"
 	"github.com/qubesome/cli/internal/runners/firecracker"
-	"github.com/qubesome/cli/internal/runners/podman"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/drive"
@@ -207,14 +206,21 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 		ew.Workload.HostAccess.Mime = false
 	}
 
+	// Every branch is named. Workloads run under bwrap, and the only
+	// alternative left is firecracker, which keeps its own path. A runner
+	// this does not know about is refused rather than sent to bwrap: a
+	// configuration that asked for a different runtime and silently got
+	// this one is the failure worth avoiding.
 	switch ew.Workload.Runner {
+	case "":
+		return bwrap.Run(ew)
 	case "firecracker":
 		return firecracker.Run(ew)
-	case "podman":
-		return podman.Run(ew)
-
+	case "docker", "podman":
+		return fmt.Errorf("workload %q asks for the %q runner, which has been removed: workloads run under bwrap",
+			in.Name, ew.Workload.Runner)
 	default:
-		return docker.Run(ew)
+		return fmt.Errorf("workload %q asks for an unknown runner %q", in.Name, ew.Workload.Runner)
 	}
 }
 
