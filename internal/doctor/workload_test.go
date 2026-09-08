@@ -139,29 +139,31 @@ func TestCheckWorkloadRunner(t *testing.T) {
 		require.Contains(t, c.Detail, "bwrap")
 	})
 
-	t.Run("firecracker with both binaries is ok", func(t *testing.T) {
+	t.Run("firecracker with every tool is ok", func(t *testing.T) {
 		t.Parallel()
 
-		docker := files.ContainerRunnerBinary("docker")
 		env := &fakeEnv{paths: map[string]string{
 			files.FireCrackerBinary: files.FireCrackerBinary,
-			docker:                  docker,
+			files.BwrapBinary:       files.BwrapBinary,
+			files.MkfsExt4Binary:    files.MkfsExt4Binary,
 		}}
 		c := checkWorkloadRunner(env, "firecracker")
 		require.Equal(t, OK, c.Status)
 		require.Empty(t, c.Fix)
+		require.Contains(t, c.Detail, files.MkfsExt4Binary)
 	})
 
-	t.Run("firecracker without docker fails, since it runs docker for the rootfs", func(t *testing.T) {
+	t.Run("firecracker without mkfs fails, since it builds the rootfs", func(t *testing.T) {
 		t.Parallel()
 
 		env := &fakeEnv{paths: map[string]string{
 			files.FireCrackerBinary: files.FireCrackerBinary,
+			files.BwrapBinary:       files.BwrapBinary,
 		}}
 		c := checkWorkloadRunner(env, "firecracker")
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
-		require.Contains(t, c.Detail, "docker")
+		require.Contains(t, c.Detail, files.MkfsExt4Binary)
 		require.NotContains(t, c.Detail, files.FireCrackerBinary)
 	})
 

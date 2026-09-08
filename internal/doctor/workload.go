@@ -208,11 +208,12 @@ func loadWorkload(src source, profile types.Profile, workloadName string) (types
 //
 // A workload runs under bwrap, which needs nothing beyond the tools the
 // environment section already reports on. Firecracker is the one other
-// runner qubesome still has, and it needs both its own binary and
-// docker, which it runs to build a root filesystem and to set up its
-// network taps. A runner qubesome no longer has is a workload that
-// cannot start at all, and a config naming one still validates, so this
-// is the only place it is visible before a launch refuses it.
+// runner qubesome still has. It boots a machine on a root filesystem
+// built out of the workload's own image bundle, so it needs its own
+// binary, mkfs.ext4 to write that filesystem and bwrap to compose the
+// tree it is written from. A runner qubesome no longer has is a workload
+// that cannot start at all, and a config naming one still validates, so
+// this is the only place it is visible before a launch refuses it.
 func checkWorkloadRunner(env Env, runner string) Check {
 	const name = "workload runner"
 
@@ -224,12 +225,10 @@ func checkWorkloadRunner(env Env, runner string) Check {
 			Detail: "runs in a bwrap sandbox",
 		}
 	case "firecracker":
-		// The path docker is really invoked from, since firecracker
-		// resolves it rather than running whatever is on PATH.
-		docker := files.ContainerRunnerBinary("docker")
+		tools := []string{files.FireCrackerBinary, files.BwrapBinary, files.MkfsExt4Binary}
 
 		var missing []string
-		for _, bin := range []string{files.FireCrackerBinary, docker} {
+		for _, bin := range tools {
 			if _, err := env.LookPath(bin); err != nil {
 				missing = append(missing, bin)
 			}
@@ -240,16 +239,17 @@ func checkWorkloadRunner(env Env, runner string) Check {
 				Name:   name,
 				Status: Fail,
 				Detail: fmt.Sprintf("the firecracker runner is missing %s", strings.Join(missing, ", ")),
-				Fix: "firecracker builds its root filesystem and its network taps by running docker, so it " +
-					"needs both. Install the missing ones, or drop the runner from the workload so it runs " +
-					"under bwrap.",
+				Fix: "a microVM boots a root filesystem built from the workload's own image: bwrap composes " +
+					"the unpacked bundle and mkfs.ext4 writes it out, and firecracker boots the result. " +
+					"Install the missing ones, or drop the runner from the workload so it runs under bwrap.",
 			}
 		}
 
 		return Check{
 			Name:   name,
 			Status: OK,
-			Detail: fmt.Sprintf("firecracker is installed, with %s for its root filesystem and taps", docker),
+			Detail: fmt.Sprintf("firecracker is installed, with %s and %s to build a root filesystem",
+				files.BwrapBinary, files.MkfsExt4Binary),
 		}
 	case "docker", "podman":
 		return Check{

@@ -61,22 +61,28 @@ var deps map[string][]string = map[string][]string{
 // reported in amber, so a host that does not use the feature does not
 // read the table as broken.
 //
-// firecracker is the one runner left besides bwrap, and it builds its
-// root filesystem and sets up its network taps by running docker, so it
-// needs both. That is the only reason docker is still named anywhere in
-// this file.
+// firecracker is the one runner left besides bwrap. It boots a machine
+// on a root filesystem built by mkfs.ext4 out of the same bundle a
+// sandbox is built on, so it needs its own binary and e2fsprogs. bwrap
+// is not listed beside them because it is already required above: the
+// rootfs build is a bwrap invocation too, and a host without bwrap
+// cannot run a workload at all.
 //
-// Only run and xdg-open list it. A profile is always a bwrap sandbox and
-// takes no runner, and firecracker never reads the OCI store that images
-// fills, since it pulls its own image through docker.
+// Only run and xdg-open list them. A profile is always a bwrap sandbox
+// and never a machine. images is the interesting omission, since a
+// machine's rootfs is now built from a bundle that store unpacked, so
+// the two are no longer unrelated. It stays out all the same: filling
+// the store is a fetch and an unpack, which is what imageTools does, and
+// none of it is a rootfs build. A host that only ever runs qubesome
+// images would be told to install a VMM it has no use for.
 var optionalDeps map[string][]string = map[string][]string{
 	"run": {
 		files.FireCrackerBinary,
-		files.DockerBinary,
+		files.MkfsExt4Binary,
 	},
 	"xdg-open": {
 		files.FireCrackerBinary,
-		files.DockerBinary,
+		files.MkfsExt4Binary,
 	},
 	// The profile compositor decides the keymap for everything inside it,
 	// and without this its layout is whatever libxkbcommon defaults to

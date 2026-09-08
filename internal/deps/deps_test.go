@@ -70,30 +70,39 @@ func TestSandboxCommandsRequireTheSandboxTools(t *testing.T) {
 	assert.NotContains(t, deps["images"], files.BwrapBinary)
 }
 
-// docker is left in exactly one place: firecracker runs it to build a
-// root filesystem and to set up its network taps, and it is optional
-// because firecracker is. Anything else naming a container runner is a
-// leftover, and a required entry would report a host as broken for
-// missing a binary nothing runs.
-func TestOnlyFirecrackerStillNeedsAContainerRunner(t *testing.T) {
+// mkfs.ext4 travels with firecracker and nowhere else. It is what
+// builds a machine's root filesystem, so a table listing one without
+// the other would either report a host as short of a tool nothing there
+// runs, or let a machine fail at launch over one the table said nothing
+// about.
+func TestMkfsTravelsWithFirecracker(t *testing.T) {
 	t.Parallel()
 
 	for name, list := range deps {
-		assert.NotContains(t, list, files.DockerBinary, name)
-		assert.NotContains(t, list, files.PodmanBinary, name)
+		assert.NotContains(t, list, files.FireCrackerBinary, name)
+		assert.NotContains(t, list, files.MkfsExt4Binary, name)
 	}
 
-	// docker travels with firecracker and nowhere else. Optional entries
-	// exist for other reasons too, so the rule is about which company
-	// docker keeps rather than about every optional entry.
 	for name, list := range optionalDeps {
-		assert.NotContains(t, list, files.PodmanBinary, name)
-
-		if slices.Contains(list, files.DockerBinary) {
+		if slices.Contains(list, files.MkfsExt4Binary) {
 			assert.Contains(t, list, files.FireCrackerBinary, name)
+		}
+		if slices.Contains(list, files.FireCrackerBinary) {
+			assert.Contains(t, list, files.MkfsExt4Binary, name)
 		}
 	}
 
-	assert.Contains(t, optionalDeps["run"], files.DockerBinary)
-	assert.Contains(t, optionalDeps["xdg-open"], files.DockerBinary)
+	assert.Contains(t, optionalDeps["run"], files.FireCrackerBinary)
+	assert.Contains(t, optionalDeps["xdg-open"], files.FireCrackerBinary)
+}
+
+// Filling the store is a fetch and an unpack. A machine's rootfs is
+// built from what it unpacked, which is new, but building one is not
+// filling the store and a host that only ever runs qubesome images has
+// no use for a VMM.
+func TestImagesDoesNotAskForTheMachineTools(t *testing.T) {
+	t.Parallel()
+
+	assert.NotContains(t, optionalDeps["images"], files.FireCrackerBinary)
+	assert.NotContains(t, optionalDeps["images"], files.MkfsExt4Binary)
 }
