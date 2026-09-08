@@ -149,7 +149,7 @@ func TestSpawnVMRejectsAnEmptyArgv(t *testing.T) {
 func TestSuperviseVMRejectsAnEmptyArgv(t *testing.T) {
 	t.Parallel()
 
-	require.Error(t, SuperviseVM(1234, nil))
+	require.Error(t, SuperviseVM(1234, 1235, nil))
 }
 
 func TestReadLine(t *testing.T) {

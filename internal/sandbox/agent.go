@@ -145,6 +145,17 @@ func Spawn(socket string, argv []string) error {
 func spawn(conn net.Conn, argv []string) error {
 	defer conn.Close()
 
+	return exchange(conn, argv)
+}
+
+// exchange asks the supervisor at the other end of conn to start argv and
+// reads its answer.
+//
+// It is every connection's opening, not only a spawn's. A console says
+// the same thing to start with, and then keeps the connection to carry
+// the terminal, which is why the close is the caller's and not this
+// function's. See ConsoleVM.
+func exchange(conn net.Conn, argv []string) error {
 	if err := conn.SetDeadline(time.Now().Add(exchangeTimeout)); err != nil {
 		return fmt.Errorf("%w: %w", ErrNoSupervisor, err)
 	}

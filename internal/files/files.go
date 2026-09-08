@@ -292,6 +292,89 @@ func InWorkloadAgentSocket() string {
 	return filepath.Join(InWorkloadAgentDir(), agentSocketName)
 }
 
+const (
+	// vmVsockSocketName is firecracker's host side vsock socket, the one
+	// file a console reaches a guest through.
+	vmVsockSocketName = "vsock.sock"
+
+	// vmAPISocketName is firecracker's control socket. See VMAPISocket.
+	vmAPISocketName = "api.sock"
+)
+
+// VMRuntimeDir returns the host directory holding everything one microVM
+// of a profile needs while it is up.
+//
+// It sits beside the profile's runtime directory for the reason
+// WorkloadAgentDir gives: IsolatedRunUserPath is bound into every
+// workload of the profile, so anything under it is reachable from all of
+// them, and a machine's control socket is the last thing that should be.
+func VMRuntimeDir(profile, workload string) (string, error) {
+	dir, err := profileRunDir(profile)
+	if err != nil {
+		return "", err
+	}
+	if err := ValidateName("workload name", workload); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "vm", workload), nil
+}
+
+// VMVsockDir returns the directory holding a microVM's vsock socket.
+//
+// It is a directory of its own rather than the runtime directory itself
+// because it is the only part of a machine that is bound into another
+// workload's sandbox. A console attaching to the machine is given this
+// and nothing else.
+func VMVsockDir(profile, workload string) (string, error) {
+	dir, err := VMRuntimeDir(profile, workload)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "vsock"), nil
+}
+
+// VMVsockSocket returns the host path of a microVM's vsock socket.
+//
+// Everything a guest is reached on crosses here. Firecracker multiplexes
+// every guest port over this one file, so who may open it is the whole of
+// the access control on a machine's supervisor and on the consoles
+// attached to it.
+func VMVsockSocket(profile, workload string) (string, error) {
+	dir, err := VMVsockDir(profile, workload)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, vmVsockSocketName), nil
+}
+
+// VMAPISocket returns the host path of a microVM's firecracker API
+// socket.
+//
+// It is deliberately not under VMVsockDir, and the two must not be tidied
+// together. The API socket takes requests to attach drives, to read and
+// write guest memory and to stop the machine, so whoever can open it owns
+// the VM and everything in it. VMVsockDir is bound into the sandbox of
+// every workload that attaches a console, which is an ordinary workload
+// running an ordinary terminal. Keeping the API socket one level up is
+// what makes that bind safe to give away.
+func VMAPISocket(profile, workload string) (string, error) {
+	dir, err := VMRuntimeDir(profile, workload)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, vmAPISocketName), nil
+}
+
+// InVMConsoleSocket returns the path VMVsockSocket has inside the sandbox
+// of a workload that attaches to the machine.
+//
+// It is not under InWorkloadAgentDir, because that directory holds the
+// attaching workload's own supervisor socket and the two are different
+// machines answering different protocols.
+func InVMConsoleSocket() string {
+	return filepath.Join("/run/qubesome-vm", vmVsockSocketName)
+}
+
 // ServerCookiePath returns the path to the server cookie file for the given profile.
 func ServerCookiePath(profile string) (string, error) {
 	dir, err := profileRunDir(profile)

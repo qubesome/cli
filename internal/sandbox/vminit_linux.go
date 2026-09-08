@@ -9,7 +9,9 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 
+	"golang.org/x/sys/execabs"
 	"golang.org/x/sys/unix"
 )
 
@@ -471,8 +473,41 @@ func (r *guestReaper) deliver(pid int, ws unix.WaitStatus) {
 }
 
 func (r *guestReaper) start(argv []string) (waiter, error) {
-	cmd := command(argv)
+	status, err := r.startTracked(consoleNameOf(argv), command(argv))
+	if err != nil {
+		return nil, err
+	}
 
+	return &guestChild{name: argv[0], status: status}, nil
+}
+
+// startConsole starts a console's command with a pty of its own, and
+// hands back the numeric status the user's shell will report.
+//
+// It is the same tracking as start, differing only in what is waited for
+// and what the answer looks like. See consoleStarter.
+func (r *guestReaper) startConsole(argv []string, tty *os.File) (statusWaiter, error) {
+	status, err := r.startTracked(consoleNameOf(argv), consoleCommand(argv, tty))
+	if err != nil {
+		return nil, err
+	}
+
+	return &consoleChild{status: status}, nil
+}
+
+// consoleNameOf is the command's name, for the error a failed start
+// reports.
+func consoleNameOf(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+
+	return argv[0]
+}
+
+// startTracked starts cmd and registers it, so that the status the reaper
+// collects is delivered rather than dropped as an orphan's.
+func (r *guestReaper) startTracked(name string, cmd *execabs.Cmd) (<-chan unix.WaitStatus, error) {
 	// Starting the process and registering its pid are one step. The
 	// loop can collect a process that exits immediately before Start has
 	// even returned, and a status collected for a pid that is not
@@ -483,7 +518,7 @@ func (r *guestReaper) start(argv []string) (waiter, error) {
 	defer r.mu.Unlock()
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("sandbox: failed to start %q: %w", argv[0], err)
+		return nil, fmt.Errorf("sandbox: failed to start %q: %w", name, err)
 	}
 
 	// The buffer is what keeps the loop from blocking on a caller that
@@ -492,7 +527,19 @@ func (r *guestReaper) start(argv []string) (waiter, error) {
 	status := make(chan unix.WaitStatus, 1)
 	r.children[cmd.Process.Pid] = status
 
-	return &guestChild{name: argv[0], status: status}, nil
+	return status, nil
+}
+
+// consoleChild waits for one console's command the reaper started.
+type consoleChild struct {
+	status <-chan unix.WaitStatus
+}
+
+// WaitStatus blocks until the reaper delivers the status, and reports what
+// a shell would, so a console in a machine and one in a sandbox answer
+// the same way.
+func (c *consoleChild) WaitStatus() int {
+	return exitStatus(syscall.WaitStatus(<-c.status))
 }
 
 // guestChild waits for one process the reaper started.
@@ -563,7 +610,7 @@ func vmInit() error {
 
 	handleSignals()
 
-	return SuperviseVM(VMSupervisorPort, cfg.Argv)
+	return SuperviseVM(VMSupervisorPort, VMConsolePort, cfg.Argv)
 }
 
 // shutdown brings the machine down, and does not come back.

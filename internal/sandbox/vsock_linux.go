@@ -27,29 +27,40 @@ const (
 	maxConnectLine = 64
 )
 
-// SuperviseVM runs argv inside a VM and spawns siblings into it on
-// request, until argv exits.
+// SuperviseVM runs argv inside a VM, spawns siblings into it and opens
+// consoles on it on request, until argv exits.
 //
 // It is Supervise reached over vsock rather than over a unix socket,
 // because a guest has no filesystem in common with the host to put a
 // socket file on. It also waits for what it starts differently, because
 // it is pid 1 of the machine. See guestReaper.
-func SuperviseVM(port uint32, argv []string) error {
+func SuperviseVM(port, consolePort uint32, argv []string) error {
 	if len(argv) == 0 {
 		return errors.New("sandbox: supervise needs a command to run")
 	}
 
-	// The listener comes before the command for the same reason it does in
-	// Supervise. A workload started before anything can reach it is a
+	// Both listeners come before the command for the same reason one does
+	// in Supervise. A workload started before anything can reach it is a
 	// workload that can be started twice.
 	ln, err := listenVSOCK(port)
 	if err != nil {
 		return err
 	}
 
+	cln, err := listenVSOCK(consolePort)
+	if err != nil {
+		_ = ln.Close()
+
+		return err
+	}
+
 	// The reaper is collecting before the first process is started, or
 	// something could exit into a loop that is not running yet.
 	reaper := startReaping()
+
+	// Consoles are served on a port and an accept loop of their own. See
+	// VMConsolePort for why they are not requests on the supervisor's.
+	go serveConsoles(cln, reaper)
 
 	return superviseWith(ln, argv, reaper)
 }

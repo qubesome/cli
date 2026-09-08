@@ -198,6 +198,85 @@ func TestWorkloadAgentSocketMatchesTheSandboxSide(t *testing.T) {
 	require.Equal(t, filepath.Base(socket), filepath.Base(InWorkloadAgentSocket()))
 }
 
+// The API socket takes requests that own the machine, and only the vsock
+// dir is bound into the sandbox of a workload that attaches a console.
+// The two sitting apart is what makes that bind safe to give away.
+func TestVMAPISocketIsOutsideTheBoundVsockDir(t *testing.T) {
+	t.Parallel()
+
+	vsock, err := VMVsockDir("prof", "vm")
+	require.NoError(t, err)
+
+	api, err := VMAPISocket("prof", "vm")
+	require.NoError(t, err)
+
+	require.False(t, strings.HasPrefix(api, vsock+string(filepath.Separator)),
+		"the firecracker api socket %q must not be inside the bound vsock dir %q", api, vsock)
+}
+
+func TestVMRuntimeDirIsOutsideTheSharedRuntimeDir(t *testing.T) {
+	t.Parallel()
+
+	shared, err := IsolatedRunUserPath("prof")
+	require.NoError(t, err)
+
+	dir, err := VMRuntimeDir("prof", "vm")
+	require.NoError(t, err)
+
+	require.False(t, strings.HasPrefix(dir, shared+string(filepath.Separator)),
+		"vm runtime dir %q must not be inside the shared runtime dir %q", dir, shared)
+}
+
+func TestVMPathsAreUnderTheRuntimeDirAndPerWorkload(t *testing.T) {
+	t.Parallel()
+
+	dir, err := VMRuntimeDir("prof", "vm")
+	require.NoError(t, err)
+
+	vsock, err := VMVsockDir("prof", "vm")
+	require.NoError(t, err)
+	require.Equal(t, dir, filepath.Dir(vsock))
+
+	socket, err := VMVsockSocket("prof", "vm")
+	require.NoError(t, err)
+	require.Equal(t, vsock, filepath.Dir(socket))
+
+	api, err := VMAPISocket("prof", "vm")
+	require.NoError(t, err)
+	require.Equal(t, dir, filepath.Dir(api))
+
+	other, err := VMRuntimeDir("prof", "another")
+	require.NoError(t, err)
+	require.NotEqual(t, dir, other)
+}
+
+// The host builds the socket path from its directory and the console
+// inside the attaching sandbox builds it from the path that directory is
+// bound at. They have to agree on the name at the end of it.
+func TestVMVsockSocketMatchesTheSandboxSide(t *testing.T) {
+	t.Parallel()
+
+	socket, err := VMVsockSocket("prof", "vm")
+	require.NoError(t, err)
+
+	require.Equal(t, filepath.Base(socket), filepath.Base(InVMConsoleSocket()))
+	require.NotEqual(t, InWorkloadAgentDir(), filepath.Dir(InVMConsoleSocket()))
+}
+
+func TestVMPathsRejectANameThatIsNotOneComponent(t *testing.T) {
+	t.Parallel()
+
+	for _, fn := range []func(string, string) (string, error){
+		VMRuntimeDir, VMVsockDir, VMVsockSocket, VMAPISocket,
+	} {
+		_, err := fn("prof", "../other")
+		require.ErrorIs(t, err, ErrUnsafePath)
+
+		_, err = fn("../other", "vm")
+		require.ErrorIs(t, err, ErrUnsafePath)
+	}
+}
+
 func TestValidateName(t *testing.T) {
 	t.Parallel()
 
