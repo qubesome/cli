@@ -573,6 +573,12 @@ func sandboxEnv(bundle images.Bundle, ca, cert, key []byte) []string {
 	// leaves libxkbcommon's default rather than failing a profile over a
 	// layout.
 	keymap := xkb.Defaults()
+	if len(keymap) == 0 {
+		slog.Warn("no host keyboard layout found, the profile will use the default one",
+			"hint", "set XKB_DEFAULT_LAYOUT, or install "+files.SetxkbmapBinary)
+	} else {
+		slog.Info("profile keyboard layout", "keymap", keymap)
+	}
 
 	env := make([]string, 0, len(bundle.Env)+extra+len(keymap))
 	env = append(env, bundle.Env...)

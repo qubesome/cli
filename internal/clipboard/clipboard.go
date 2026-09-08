@@ -1,12 +1,14 @@
 package clipboard
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
@@ -140,6 +142,24 @@ func pipe(out, in *execabs.Cmd) error {
 	out.Stdout = w
 	in.Stdin = r
 
+	// xclip says why on stderr and says nothing through its exit status,
+	// which is 1 for a display it cannot open, a display it cannot
+	// authenticate to and a selection that is empty alike. Without this
+	// the caller is told "exit status 1" and has no way to tell those
+	// apart.
+	var outLog, inLog bytes.Buffer
+	out.Stderr = &outLog
+	in.Stderr = &inLog
+
+	defer func() {
+		if s := strings.TrimSpace(outLog.String()); s != "" {
+			slog.Error("clipboard read", "display", displayOf(out), "error", s)
+		}
+		if s := strings.TrimSpace(inLog.String()); s != "" {
+			slog.Error("clipboard write", "display", displayOf(in), "error", s)
+		}
+	}()
+
 	if err := in.Start(); err != nil {
 		// Nothing is going to read or write these ends now. Left open,
 		// anything already blocked on them would stay blocked.
@@ -161,7 +181,32 @@ func pipe(out, in *execabs.Cmd) error {
 	// Both are reported. When the reading command fails, the writer sees
 	// a broken pipe, and returning only that would hide the failure that
 	// caused it behind its own symptom.
-	return errors.Join(inErr, outErr)
+	return errors.Join(withStderr(inErr, &inLog), withStderr(outErr, &outLog))
+}
+
+// withStderr attaches what a command said to why it failed.
+func withStderr(err error, log *bytes.Buffer) error {
+	if err == nil {
+		return nil
+	}
+
+	if s := strings.TrimSpace(log.String()); s != "" {
+		return fmt.Errorf("%w: %s", err, s)
+	}
+
+	return err
+}
+
+// displayOf returns the display a command was pointed at, for a message
+// that says which of the two ends is being reported.
+func displayOf(cmd *execabs.Cmd) string {
+	for i, a := range cmd.Args {
+		if a == "-display" && i+1 < len(cmd.Args) {
+			return cmd.Args[i+1]
+		}
+	}
+
+	return ""
 }
 
 func validTarget(target string) bool {
