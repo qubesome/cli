@@ -176,6 +176,20 @@ func refreshImage(s *Store, ref string) (Bundle, error) {
 	return s.Unpack(ref)
 }
 
+// HasImage reports whether the store can already provide ref.
+//
+// It is the single reference form of MissingImages, for a caller that
+// holds one image and no config.
+func HasImage(ref string) bool {
+	return hasImage(NewStore(), ref)
+}
+
+func hasImage(s *Store, ref string) bool {
+	_, err := s.Resolve(ref)
+
+	return err == nil
+}
+
 // MissingImages returns the config images the store cannot resolve.
 func MissingImages(cfg *types.Config) ([]string, error) {
 	return missingImages(NewStore(), cfg)
@@ -189,7 +203,7 @@ func missingImages(s *Store, cfg *types.Config) ([]string, error) {
 
 	missing := make([]string, 0, len(imgs))
 	for _, img := range imgs {
-		if _, err := s.Resolve(img); err == nil {
+		if hasImage(s, img) {
 			continue
 		}
 

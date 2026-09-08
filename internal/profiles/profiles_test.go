@@ -34,7 +34,7 @@ func TestStartRefusesARunningProfile(t *testing.T) {
 	cookie := filepath.Join(dir, ".Xserver-cookie")
 	require.NoError(t, os.WriteFile(cookie, []byte("cookie"), files.FileMode))
 
-	require.NoError(t, sandbox.WriteState(sandboxStatePath(name), os.Getpid()))
+	require.NoError(t, sandbox.WriteState(SandboxStatePath(name), os.Getpid()))
 
 	err := Start("", &types.Profile{Name: name, WindowManager: "i3"}, &types.Config{}, false)
 	require.Error(t, err)

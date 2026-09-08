@@ -147,8 +147,13 @@ func loadConfigUnder(dir, rel string) (*types.Config, error) {
 	return types.DecodeConfig(f, filepath.Join(dir, rel))
 }
 
-// sandboxStatePath returns where a running profile sandbox is recorded.
-func sandboxStatePath(profile string) string {
+// SandboxStatePath returns where a running profile sandbox is recorded.
+//
+// It is exported because it is the only way to tell from outside whether
+// a profile is up: doctor pairs it with sandbox.Alive rather than
+// building the path itself, so the two cannot disagree about where a
+// profile records itself.
+func SandboxStatePath(profile string) string {
 	return filepath.Join(files.ProfileDir(profile), "sandbox.json")
 }
 
@@ -165,7 +170,7 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 		// without a symlink. The check stays here as well so a running
 		// profile does not lose its config symlink on the way to that
 		// error.
-		if sandbox.Alive(sandboxStatePath(name)) {
+		if sandbox.Alive(SandboxStatePath(name)) {
 			return errAlreadyStarted(name)
 		}
 
@@ -276,7 +281,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 	// second start would truncate the running profile's X cookies, race
 	// for its display, and on the way out delete its socket, shm backing
 	// and runtime dir.
-	if sandbox.Alive(sandboxStatePath(profile.Name)) {
+	if sandbox.Alive(SandboxStatePath(profile.Name)) {
 		return errAlreadyStarted(profile.Name)
 	}
 
@@ -419,7 +424,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
-	if err := sandbox.WriteState(sandboxStatePath(profile.Name), cmd.Process.Pid); err != nil {
+	if err := sandbox.WriteState(SandboxStatePath(profile.Name), cmd.Process.Pid); err != nil {
 		// The state file is the gate that stops a second start from
 		// trampling this one, so a sandbox that cannot be recorded must
 		// not keep running. Recording also fails when the sandbox is
