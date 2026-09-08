@@ -30,12 +30,23 @@ type Credentials struct {
 }
 
 func NewCredentials() (*Credentials, error) {
+	return NewCredentialsFor(HostServerName)
+}
+
+// NewCredentialsFor mints a CA and a client and server pair whose server
+// certificate is issued for serverName.
+//
+// The channels these secure all run over unix sockets, so there is no
+// hostname to derive the name from and both ends agree on a constant instead.
+// Each channel has its own, so a certificate minted for one of them does not
+// verify against another.
+func NewCredentialsFor(serverName string) (*Credentials, error) {
 	caCert, caKey, caBytes, err := generateCA()
 	if err != nil {
 		return nil, err
 	}
 
-	serverCertBytes, serverKey, err := generateCert(caCert, caKey, true)
+	serverCertBytes, serverKey, err := generateCert(caCert, caKey, serverName)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +60,7 @@ func NewCredentials() (*Credentials, error) {
 		return nil, err
 	}
 
-	clientCertBytes, clientKey, err := generateCert(caCert, caKey, false)
+	clientCertBytes, clientKey, err := generateCert(caCert, caKey, "")
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +122,10 @@ func generateCA() (*x509.Certificate, *ecdsa.PrivateKey, []byte, error) {
 	return cert, priv, certBytes, nil
 }
 
-// generateCert generates a certificate signed by caCert.
-func generateCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, isServer bool) ([]byte, *ecdsa.PrivateKey, error) {
+// generateCert generates a certificate signed by caCert. An empty serverName
+// asks for a client certificate, which is verified by chain alone and so needs
+// no name of its own.
+func generateCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, serverName string) ([]byte, *ecdsa.PrivateKey, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate private key: %w", err)
@@ -130,9 +143,9 @@ func generateCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, isServer bo
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
 	}
 
-	if isServer {
+	if serverName != "" {
 		template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-		template.DNSNames = []string{HostServerName}
+		template.DNSNames = []string{serverName}
 	} else {
 		template.DNSNames = []string{ProfileServerName}
 	}
