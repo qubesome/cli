@@ -73,6 +73,16 @@ func Supervise(socket string, argv []string) error {
 	if err != nil {
 		return err
 	}
+
+	return supervise(ln, argv)
+}
+
+// supervise runs argv and serves spawn requests on ln until argv exits.
+//
+// It is the half of Supervise that does not know what it is listening on.
+// A sandbox in a VM has no unix socket to be reached on and reuses this
+// with a vsock listener instead. See SuperviseVM.
+func supervise(ln net.Listener, argv []string) error {
 	defer ln.Close()
 
 	main, err := start(argv)
@@ -109,6 +119,16 @@ func Spawn(socket string, argv []string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrNoSupervisor, err)
 	}
+
+	return spawn(conn, argv)
+}
+
+// spawn asks the supervisor at the other end of conn to start argv.
+//
+// It takes a connection rather than an address because the two transports
+// reach a supervisor in different ways and say the same thing once they
+// have. See SpawnVM for the other way.
+func spawn(conn net.Conn, argv []string) error {
 	defer conn.Close()
 
 	if err := conn.SetDeadline(time.Now().Add(exchangeTimeout)); err != nil {
