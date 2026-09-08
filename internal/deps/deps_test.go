@@ -3,6 +3,7 @@ package deps
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/qubesome/cli/internal/files"
@@ -82,9 +83,15 @@ func TestOnlyFirecrackerStillNeedsAContainerRunner(t *testing.T) {
 		assert.NotContains(t, list, files.PodmanBinary, name)
 	}
 
+	// docker travels with firecracker and nowhere else. Optional entries
+	// exist for other reasons too, so the rule is about which company
+	// docker keeps rather than about every optional entry.
 	for name, list := range optionalDeps {
-		assert.Contains(t, list, files.FireCrackerBinary, name)
 		assert.NotContains(t, list, files.PodmanBinary, name)
+
+		if slices.Contains(list, files.DockerBinary) {
+			assert.Contains(t, list, files.FireCrackerBinary, name)
+		}
 	}
 
 	assert.Contains(t, optionalDeps["run"], files.DockerBinary)

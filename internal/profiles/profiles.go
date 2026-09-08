@@ -35,6 +35,7 @@ import (
 	"github.com/qubesome/cli/internal/util/mtls"
 	"github.com/qubesome/cli/internal/util/resolution"
 	"github.com/qubesome/cli/internal/util/xauth"
+	"github.com/qubesome/cli/internal/util/xkb"
 	"github.com/qubesome/cli/pkg/inception"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/sys/execabs"
@@ -566,8 +567,16 @@ func createMagicCookie(profile *types.Profile) error {
 func sandboxEnv(bundle images.Bundle, ca, cert, key []byte) []string {
 	const extra = 6
 
-	env := make([]string, 0, len(bundle.Env)+extra)
+	// The compositor decides the keymap for everything in the profile, so
+	// the host's layout is carried in here rather than anywhere nearer
+	// the keyboard. Nothing is added when the host cannot be asked, which
+	// leaves libxkbcommon's default rather than failing a profile over a
+	// layout.
+	keymap := xkb.Defaults()
+
+	env := make([]string, 0, len(bundle.Env)+extra+len(keymap))
 	env = append(env, bundle.Env...)
+	env = append(env, keymap...)
 
 	return append(env,
 		"HOME="+profileHome,

@@ -78,6 +78,13 @@ var optionalDeps map[string][]string = map[string][]string{
 		files.FireCrackerBinary,
 		files.DockerBinary,
 	},
+	// The profile compositor decides the keymap for everything inside it,
+	// and without this its layout is whatever libxkbcommon defaults to
+	// rather than the one being typed on. Optional because a profile
+	// still starts, on the wrong layout.
+	"start": {
+		files.SetxkbmapBinary,
+	},
 }
 
 func Run(opts ...command.Option[Options]) error {

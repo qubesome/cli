@@ -14,6 +14,7 @@ const (
 	FireCrackerBinary = "/usr/bin/firecracker"
 	XrandrBinary      = "/usr/bin/xrandr"
 	WlrRandrBinary    = "/usr/bin/wlr-randr"
+	SetxkbmapBinary   = "/usr/bin/setxkbmap"
 	PodmanBinary      = "/usr/bin/podman"
 	DockerBinary      = "/usr/bin/docker"
 
