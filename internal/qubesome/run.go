@@ -194,6 +194,13 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	// The effective value, so a name inherited from the profile is
 	// reported once here rather than at every validation of it.
 	types.WarnIgnoredNetwork(ew.Name, ew.Workload.HostAccess.Network)
+	types.WarnIgnoredMicroVMFields(ew.Name, ew.Workload)
+
+	if ew.Workload.AttachVM != "" {
+		if err := checkAttachVM(root, ew.Workload.AttachVM); err != nil {
+			return err
+		}
+	}
 
 	if len(ew.Workload.HostAccess.Gpus) == 0 {
 		ew.Workload.Args = append(ew.Workload.Args, ew.Workload.NoGPUArgs...)
@@ -226,6 +233,39 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	default:
 		return fmt.Errorf("workload %q asks for an unknown runner %q", in.Name, ew.Workload.Runner)
 	}
+}
+
+// checkAttachVM reports whether attachVM names a workload that can be
+// attached to.
+//
+// This is the one refusal in the microVM configuration that cannot happen
+// at config load. types.ValidateMicroVM sees a single workload file, and
+// what attachVM names lives in another one, so whether the target exists
+// and whether it is a firecracker workload can only be answered where the
+// other file can be read. That is here.
+//
+// root is the profile's workloads directory, already opened, so the kernel
+// refuses a name that walks out of it. The name has been through
+// files.ValidateName by the time it arrives, which is what makes it safe
+// to build a filename from.
+func checkAttachVM(root *os.Root, name string) error {
+	data, err := root.ReadFile(fmt.Sprintf("%s.%s", name, configExtension))
+	if err != nil {
+		return fmt.Errorf("attachVM names %q, which is not a workload of this profile: %w", name, err)
+	}
+
+	target := types.Workload{}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
+	if err := decoder.Decode(&target); err != nil {
+		return fmt.Errorf("attachVM names %q, whose config cannot be read: %w", name, err)
+	}
+
+	if target.Runner != "firecracker" {
+		return fmt.Errorf("attachVM names %q, which is not a firecracker workload: there is no machine to attach to", name)
+	}
+
+	return nil
 }
 
 func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {

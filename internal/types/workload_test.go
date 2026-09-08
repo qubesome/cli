@@ -1114,9 +1114,10 @@ func TestWorkloadValidate(t *testing.T) {
 		{
 			"runner: valid firecracker",
 			Workload{
-				Name:   "valid",
-				Image:  "valid/valid",
-				Runner: "firecracker",
+				Name:           "valid",
+				Image:          "valid/valid",
+				Runner:         "firecracker",
+				SingleInstance: true,
 			},
 			false,
 		},
@@ -1333,4 +1334,28 @@ func TestWorkloadValidateAcceptsANamedNetwork(t *testing.T) {
 
 		require.NoError(t, w.Validate(), network)
 	}
+}
+
+// Every other field of a workload is narrowed against the profile's
+// allowlist, so the next reader will assume these are too. They are not
+// grants: a microVM is a machine shape and attachVM names a sibling
+// workload, and neither is something a profile has an opinion on.
+func TestApplyProfileLeavesTheMicroVMAlone(t *testing.T) {
+	t.Parallel()
+
+	w := Workload{
+		Name:           "dev",
+		Runner:         "firecracker",
+		SingleInstance: true,
+		MicroVM: &MicroVM{
+			VCPUs:     4,
+			MemoryMiB: 8192,
+			Data:      &MicroVMData{Path: "/data/dev.ext4", Mount: "/home/dev"},
+		},
+	}
+	console := Workload{Name: "dev-console", AttachVM: "dev"}
+	p := &Profile{Name: "personal"}
+
+	assert.Equal(t, w.MicroVM, w.ApplyProfile(p).Workload.MicroVM)
+	assert.Equal(t, "dev", console.ApplyProfile(p).Workload.AttachVM)
 }

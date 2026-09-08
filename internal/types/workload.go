@@ -37,6 +37,20 @@ type Workload struct {
 
 	Runner string `yaml:"runner"`
 	User   *int   `yaml:"user"`
+
+	// MicroVM configures the machine a firecracker workload boots.
+	//
+	// It is a pointer so that an absent block is distinguishable from an
+	// empty one, which is what lets the defaults be applied in one place
+	// rather than being guessed at from a zero value.
+	MicroVM *MicroVM `yaml:"microvm"`
+
+	// AttachVM names the firecracker workload, in the same profile, whose
+	// machine this workload attaches to. It is a plain name because it
+	// becomes a filename.
+	//
+	//nolint:tagliatelle // VM is an initialism tagliatelle does not know, and the key is user facing.
+	AttachVM string `yaml:"attachVM"`
 }
 
 type HostAccess struct {
@@ -259,7 +273,7 @@ func (w Workload) Validate() error {
 			return err
 		}
 	}
-	return nil
+	return ValidateMicroVM(w)
 }
 
 func (w EffectiveWorkload) Validate() error {

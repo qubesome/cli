@@ -100,3 +100,54 @@ func TestRunnerSelection(t *testing.T) {
 		})
 	}
 }
+
+// Whether attachVM names a workload that exists, and one that is a
+// firecracker workload, cannot be answered by types.ValidateMicroVM: a
+// workload file is validated on its own and the target lives in another
+// file. It is the one microVM refusal that happens at launch.
+//
+// runner registers the config root with the expandable env vars, which is
+// package level state, so this test does not run in parallel.
+func TestRunnerRefusesAnAttachVMThatNamesNoMachine(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "work", "workloads")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "missing-console.yaml"),
+		[]byte("image: example.com/console\nattachVM: absent\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app.yaml"),
+		[]byte("image: example.com/app\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app-console.yaml"),
+		[]byte("image: example.com/console\nattachVM: app\n"), 0o600))
+
+	cfg := &types.Config{
+		RootDir: root,
+		Profiles: map[string]types.Profile{
+			"work": {Name: "work", Path: "work", WindowManager: "exec awesome"},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		workload string
+		wantErr  string
+	}{
+		{
+			name:     "no such workload",
+			workload: "missing-console",
+			wantErr:  `attachVM names "absent", which is not a workload of this profile`,
+		},
+		{
+			name:     "not a firecracker workload",
+			workload: "app-console",
+			wantErr:  `attachVM names "app", which is not a firecracker workload`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}

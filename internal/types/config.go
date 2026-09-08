@@ -25,6 +25,11 @@ var (
 	runnerRegex       = regexp.MustCompile(`^firecracker$`)
 	externalPathRegex = regexp.MustCompile(`^[a-zA-Z0-9\-]+:/[^:]+:/[^:]+$`)
 	pathRegex         = regexp.MustCompile(`^(\${[a-zA-Z0-9\-]+}){0,1}/[^:]+:/[^:]+(:ro){0,1}$`)
+	// A microVM data disk names one host path rather than a mapping, so
+	// it is pathRegex without the destination half. The optional leading
+	// variable is kept, because that is how the reference configuration
+	// writes a path into the qubesome data directory.
+	microvmPathRegex = regexp.MustCompile(`^(\${[a-zA-Z0-9\-]+}){0,1}/[^:]+$`)
 	// Flatpak application IDs are dot-separated elements of alphanumerics,
 	// underscores and hyphens, where no element starts with a digit.
 	// Uppercase is common (e.g. org.freedesktop.Bustle).
