@@ -91,6 +91,47 @@ func JoinRel(base, rel string) (string, error) {
 	return filepath.Join(base, rel), nil
 }
 
+// JoinProfilePath joins a profile's configured path below base.
+//
+// An absolute profile path means one of two things, and both appear in
+// real use. A path under base is a full path to a directory of the
+// config tree, and is taken relative to it. A path that is not under
+// base is one written rooted at the configuration, so "/personal" names
+// the personal directory of that tree rather than a directory at the
+// root of the disk. Every profile in a real configuration is written
+// the second way.
+//
+// Neither convention was ever stated. SecureJoin clamped a path that
+// left its base back into it, which covered the rooted form, and
+// callers ran filepath.Rel against the config root first, which covered
+// the under-base form. Removing the clamp removed half of it and left
+// the other half looking like dead code, so both are spelled out here.
+//
+// Either way the result is under base, which is the property that
+// matters. A rooted path naming something outside the tree, "/etc" for
+// instance, resolves to base/etc and then fails to exist, rather than
+// reaching /etc.
+func JoinProfilePath(base, p string) (string, error) {
+	if filepath.IsAbs(p) {
+		rel, err := filepath.Rel(base, p)
+		if err != nil || escapes(rel) {
+			// Not under base, so the leading separator names the config
+			// tree. Drop it and treat the rest as relative.
+			rel = strings.TrimPrefix(p, string(filepath.Separator))
+		}
+		p = rel
+	}
+
+	return JoinRel(base, p)
+}
+
+// escapes reports whether a relative path starts by leaving its base. A
+// leading ".." component is the only way it can, and it is compared as a
+// component so that a directory named "..cache" is not mistaken for one.
+func escapes(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 // EnsureMappedDir prepares the host side of a bind mount source.
 //
 // Existing paths are left untouched, whatever their type. A missing src
@@ -319,7 +360,7 @@ func GitDirPath(url string) (string, error) {
 // WorkloadsDir returns the workloads directory path for a given Qubesome
 // profile. An empty path is a profile whose files sit at root itself.
 func WorkloadsDir(root, path string) (string, error) {
-	dir, err := JoinRel(root, path)
+	dir, err := JoinProfilePath(root, path)
 	if err != nil {
 		return "", err
 	}

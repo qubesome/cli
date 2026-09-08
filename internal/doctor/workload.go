@@ -141,14 +141,7 @@ func checkWorkloadConfig(cfg *types.Config, src source, profileName, workloadNam
 // its name, so deriving the directory from the profile name finds nothing
 // for any profile whose path differs from it.
 func workloadsDir(src source, profile types.Profile) (string, error) {
-	rel, err := filepath.Rel(src.root, profile.Path)
-	if err != nil {
-		// Rel fails when exactly one side is absolute, which is the case
-		// for the relative profile path a config normally carries.
-		return files.WorkloadsDir(src.root, profile.Path)
-	}
-
-	return files.WorkloadsDir(src.root, rel)
+	return files.WorkloadsDir(src.root, profile.Path)
 }
 
 // workloadNames lists the workloads defined in dir. A workload's name is

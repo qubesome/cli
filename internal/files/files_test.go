@@ -314,7 +314,11 @@ func TestWorkloadsDir(t *testing.T) {
 		{name: "under the profile path", path: "work", want: "/root/work/workloads"},
 		{name: "profile at the config root", path: "", want: "/root/workloads"},
 		{name: "traversal", path: "../escape"},
-		{name: "absolute", path: "/etc"},
+		// A profile path is written rooted at the config, so a leading
+		// separator names that tree rather than the disk.
+		{name: "rooted at the config", path: "/work", want: "/root/work/workloads"},
+		{name: "rooted at the config, naming nothing in it", path: "/etc", want: "/root/etc/workloads"},
+		{name: "absolute and under the root", path: "/root/work", want: "/root/work/workloads"},
 	}
 
 	for _, tc := range tests {
@@ -356,4 +360,63 @@ func TestGitDirPath(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "/srv/dotfiles", got)
 	})
+}
+
+// A profile path is written rooted at the config, which is how every
+// profile in a real configuration is written, and it briefly stopped
+// working: replacing SecureJoin with a validating join refused the
+// leading separator, and starting a profile failed with
+// `unsafe path: "/personal" is absolute`.
+func TestJoinProfilePath(t *testing.T) {
+	t.Parallel()
+
+	const base = "/home/user/git/dotfiles/qubesome"
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "rooted at the config",
+			path: "/personal",
+			want: base + "/personal",
+		},
+		{
+			name: "rooted at the config, naming nothing within it",
+			path: "/etc/shadow",
+			want: base + "/etc/shadow",
+		},
+		{
+			name: "absolute and under the base",
+			path: base + "/work",
+			want: base + "/work",
+		},
+		{
+			name: "plainly relative",
+			path: "work",
+			want: base + "/work",
+		},
+		{
+			name: "empty is the base itself",
+			path: "",
+			want: base,
+		},
+		{name: "traversal", path: "../../etc"},
+		{name: "traversal below a rooted path", path: "/../../etc"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := JoinProfilePath(base, tc.path)
+			if tc.want == "" {
+				require.ErrorIs(t, err, ErrUnsafePath)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
 }

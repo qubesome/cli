@@ -115,13 +115,7 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 		}
 	}
 
-	var workloadsDir string
-	rel, err := filepath.Rel(in.Config.RootDir, profile.Path)
-	if err != nil {
-		workloadsDir, err = files.WorkloadsDir(in.Config.RootDir, profile.Path)
-	} else {
-		workloadsDir, err = files.WorkloadsDir(in.Config.RootDir, rel)
-	}
+	workloadsDir, err := files.WorkloadsDir(in.Config.RootDir, profile.Path)
 	if err != nil {
 		return err
 	}
@@ -159,14 +153,7 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 		return fmt.Errorf("cannot unmarshal workload config %q: %w", cfg, err)
 	}
 
-	if filepath.IsAbs(profile.Path) {
-		profile.Path, err = filepath.Rel(in.Config.RootDir, profile.Path)
-		if err != nil {
-			return fmt.Errorf("profile path must be relative to config rootdir: %w", err)
-		}
-	}
-
-	pp, err := files.JoinRel(in.Config.RootDir, profile.Path)
+	pp, err := files.JoinProfilePath(in.Config.RootDir, profile.Path)
 	if err != nil {
 		return err
 	}

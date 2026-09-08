@@ -246,7 +246,7 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 	}
 
 	// When sourcing from git, ensure profile path is relative to the git repository.
-	pp, err := files.JoinRel(filepath.Dir(cfgPath), p.Path)
+	pp, err := files.JoinProfilePath(filepath.Dir(cfgPath), p.Path)
 	if err != nil {
 		return err
 	}
