@@ -90,6 +90,7 @@ var optionalDeps map[string][]string = map[string][]string{
 	// still starts, on the wrong layout.
 	"start": {
 		files.SetxkbmapBinary,
+		files.LocalectlBinary,
 	},
 }
 

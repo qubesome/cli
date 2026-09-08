@@ -7,6 +7,7 @@ const (
 	XrandrBinary      = "/usr/bin/xrandr"
 	WlrRandrBinary    = "/usr/bin/wlr-randr"
 	SetxkbmapBinary   = "/usr/bin/setxkbmap"
+	LocalectlBinary   = "/usr/bin/localectl"
 
 	// WestonBinary is the Wayland compositor that hosts the profile's
 	// Xwayland. It runs inside the profile container, not on the host.

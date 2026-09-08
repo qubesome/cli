@@ -97,3 +97,50 @@ func TestFromEnv(t *testing.T) {
 		require.Empty(t, fromEnv())
 	})
 }
+
+// setxkbmap asks the X server. On a Wayland session that is Xwayland,
+// which carries its own default rather than the compositor's keymap, and
+// the first host this ran on reported us while typing gb.
+func TestFromLocalectl(t *testing.T) {
+	t.Parallel()
+
+	const status = `   System Locale: LANG=en_GB.UTF-8
+       VC Keymap: uk
+      X11 Layout: gb
+       X11 Model: pc105
+     X11 Options: terminate:ctrl_alt_bksp
+`
+
+	got := fromLocalectl(func() ([]byte, error) { return []byte(status), nil })
+
+	require.Equal(t, []string{
+		"XKB_DEFAULT_MODEL=pc105",
+		"XKB_DEFAULT_LAYOUT=gb",
+		"XKB_DEFAULT_OPTIONS=terminate:ctrl_alt_bksp",
+	}, got)
+}
+
+// The VC keymap names a console keymap and not an XKB layout, so a
+// status carrying only that one is not a keymap this can use.
+func TestFromLocalectlIgnoresTheConsoleKeymap(t *testing.T) {
+	t.Parallel()
+
+	require.Empty(t, fromLocalectl(func() ([]byte, error) {
+		return []byte("       VC Keymap: uk\n"), nil
+	}))
+}
+
+func TestFromLocalectlFailingLeavesTheDefaultAlone(t *testing.T) {
+	t.Parallel()
+
+	require.Empty(t, fromLocalectl(func() ([]byte, error) {
+		return nil, errors.New("not found")
+	}))
+}
+
+func TestFirstOfTakesTheFirstThatAnswered(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, []string{"b"}, firstOf(nil, []string{"b"}, []string{"c"}))
+	require.Empty(t, firstOf(nil, nil))
+}

@@ -215,6 +215,20 @@ func mountAll(table []mount) error {
 			continue
 		}
 
+		// EBUSY on a target means something is already mounted there, not
+		// that the filesystem is unavailable. A kernel built with
+		// CONFIG_DEVTMPFS_MOUNT mounts devtmpfs on /dev before it runs
+		// init, so this is what a working kernel looks like from here.
+		//
+		// Reading it as a missing devtmpfs is what the first version did,
+		// and it replaced a populated /dev with a tmpfs holding the seven
+		// nodes below. The guest kernel had said "devtmpfs: mounted" four
+		// lines earlier.
+		if errors.Is(err, unix.EBUSY) {
+			slog.Debug("already mounted", "target", m.Target)
+			continue
+		}
+
 		if m.Target != devDir {
 			return err
 		}
@@ -609,6 +623,19 @@ func vmInit() error {
 	}
 
 	handleSignals()
+
+	// A machine with no command of its own serves consoles and nothing
+	// else, and it says so. It is otherwise silent from here until one
+	// attaches, and silence on a console is indistinguishable from an
+	// init that died: the first run of this looked exactly like a hang,
+	// and the kernel's last word was that it had handed over.
+	if len(cfg.Argv) == 0 {
+		slog.Info("guest is up, waiting for a console to attach",
+			"supervisorPort", VMSupervisorPort, "consolePort", VMConsolePort,
+			"grace", consoleGrace)
+	} else {
+		slog.Info("guest is up", "argv", cfg.Argv)
+	}
 
 	return SuperviseVM(VMSupervisorPort, VMConsolePort, cfg.Argv)
 }

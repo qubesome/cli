@@ -45,7 +45,38 @@ func Defaults() []string {
 		return env
 	}
 
-	return fromSetxkbmap(query)
+	// Which of the two to believe depends on the session. setxkbmap asks
+	// the X server, so on an X11 session it is the live answer and beats
+	// anything configured. On a Wayland session it asks Xwayland, which
+	// carries its own default rather than the compositor's keymap, and
+	// reports us on a machine typing gb. That is what happened on the
+	// first host it ran on: setxkbmap said us, the keyboard was gb, and
+	// the profile faithfully reproduced the wrong one.
+	//
+	// localectl reads the configured layout, which is what a Wayland
+	// compositor took its own from. Neither is right in both places, so
+	// the session decides, and whichever is asked first wins only if it
+	// answers.
+	if wayland() {
+		return firstOf(fromLocalectl(localectlQuery), fromSetxkbmap(setxkbmapQuery))
+	}
+
+	return firstOf(fromSetxkbmap(setxkbmapQuery), fromLocalectl(localectlQuery))
+}
+
+// wayland reports whether the session is a Wayland one.
+func wayland() bool {
+	return strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland")
+}
+
+func firstOf(sources ...[]string) []string {
+	for _, s := range sources {
+		if len(s) > 0 {
+			return s
+		}
+	}
+
+	return nil
 }
 
 // fromEnv reads the variables a session may already have set. A Wayland
@@ -78,9 +109,49 @@ func fromEnv() []string {
 	return nil
 }
 
-func query() ([]byte, error) {
+func setxkbmapQuery() ([]byte, error) {
 	//nolint:gosec // G204: the binary is a fixed path and the argument is a literal.
 	return execabs.Command(files.SetxkbmapBinary, "-query").Output()
+}
+
+func localectlQuery() ([]byte, error) {
+	//nolint:gosec // G204: the binary is a fixed path and the argument is a literal.
+	return execabs.Command(files.LocalectlBinary, "status").Output()
+}
+
+// localectlFields map localectl status labels onto the setxkbmap keys
+// fromSetxkbmap already understands, so the two share one parser. The VC
+// keymap is deliberately not read: it names a console keymap rather than
+// an XKB layout, and the two namespaces only coincide by luck.
+var localectlFields = map[string]string{
+	"X11 Layout":  "layout",
+	"X11 Model":   "model",
+	"X11 Variant": "variant",
+	"X11 Options": "options",
+}
+
+// fromLocalectl reads the configured layout, which is what a Wayland
+// compositor builds its keymap from and what Xwayland does not report.
+func fromLocalectl(q func() ([]byte, error)) []string {
+	out, err := q()
+	if err != nil {
+		slog.Debug("cannot read the configured keyboard layout", "error", err)
+		return nil
+	}
+
+	var b strings.Builder
+	for line := range strings.SplitSeq(string(out), "\n") {
+		k, v, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+
+		if field, mapped := localectlFields[strings.TrimSpace(k)]; mapped {
+			b.WriteString(field + ": " + strings.TrimSpace(v) + "\n")
+		}
+	}
+
+	return fromSetxkbmap(func() ([]byte, error) { return []byte(b.String()), nil })
 }
 
 // fromSetxkbmap parses setxkbmap -query, which prints one "key: value"
