@@ -106,3 +106,40 @@ func TestImagesDoesNotAskForTheMachineTools(t *testing.T) {
 	assert.NotContains(t, optionalDeps["images"], files.FireCrackerBinary)
 	assert.NotContains(t, optionalDeps["images"], files.MkfsExt4Binary)
 }
+
+// networkTools are the binaries that would touch the wire if the gateway
+// were wired from the host. Every one of them comes out of the gateway
+// image instead: the veth is created and addressed by a helper that runs
+// on the gateway's own root filesystem, and the uplink and the ruleset are
+// the gateway's own processes. iproute2, util-linux and passt are
+// therefore requirements of an image and not of a host.
+var networkTools = []string{
+	"ip",
+	"nsenter",
+	"pasta",
+	"passt",
+	"nft",
+	"iptables",
+	"iptables-nft",
+	"slirp4netns",
+	"dnsmasq",
+	"resolvectl",
+	"socat",
+}
+
+// The gateway added egress to qubesome and added nothing to what a host
+// has to have installed. This is the guard on that: a change that quietly
+// puts ip on the host has to delete a line here and say why, rather than
+// growing the requirement unnoticed.
+func TestNoNetworkToolIsAHostDependency(t *testing.T) {
+	t.Parallel()
+
+	for _, table := range []map[string][]string{deps, optionalDeps} {
+		for name, list := range table {
+			for _, dep := range list {
+				assert.NotContains(t, networkTools, filepath.Base(dep),
+					"%s must not require %s on the host, the gateway image carries it", name, dep)
+			}
+		}
+	}
+}

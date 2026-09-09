@@ -21,6 +21,11 @@ func Run(env Env, o Options) *Report {
 
 	report.Add("Environment", Environment(env))
 
+	// The session sits between the host and a profile. It is one per user
+	// rather than one per profile, so it is reported whether or not a
+	// profile was named.
+	report.Add("Session", Session(env, o.Config))
+
 	if o.Profile == "" {
 		return report
 	}

@@ -24,6 +24,11 @@ type fakeEnv struct {
 	images map[string]bool
 	alive  map[string]bool
 	uid    string
+
+	// gatewayReady is what the control client would have answered. A nil
+	// error is a ready gateway, which is also the zero value, so only a
+	// test that wants a failure has to set it.
+	gatewayReady error
 }
 
 type fakeOutput struct {
@@ -117,6 +122,10 @@ func (f *fakeEnv) ImageInStore(ref string) bool {
 // that wants a profile up records the path that profile writes.
 func (f *fakeEnv) SandboxAlive(path string) bool {
 	return f.alive[path]
+}
+
+func (f *fakeEnv) GatewayReady() error {
+	return f.gatewayReady
 }
 
 type fakeFileInfo struct {

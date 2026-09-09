@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/qubesome/cli/internal/gateway"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/runners/util/usb"
 	"github.com/qubesome/cli/internal/sandbox"
@@ -74,6 +75,16 @@ type Env interface {
 	// at path is still running. It is how doctor asks whether a profile
 	// is up, since a sandbox has no name to look up and nothing to ask.
 	SandboxAlive(path string) bool
+
+	// GatewayReady asks the session's gateway over its control socket
+	// whether its resolver, proxy and netfilter ruleset are all up.
+	//
+	// The question is asked of the gateway rather than of the filesystem.
+	// A socket file exists as soon as a listener binds, which is before
+	// the ruleset is programmed, so a check that stopped at the file
+	// would call a gateway ready while a workload started against it
+	// would still have egress with no rules on it.
+	GatewayReady() error
 }
 
 // OSEnv is the real host.
@@ -141,6 +152,27 @@ func (e *OSEnv) ImageInStore(ref string) bool {
 
 func (e *OSEnv) SandboxAlive(path string) bool {
 	return sandbox.Alive(path)
+}
+
+// GatewayReady reaches the running gateway over the control channel the
+// launches use, presenting the credentials the launch that started it left
+// behind.
+//
+// Under doctor's own timeout rather than the client's. A launch waits ten
+// minutes because behind Ready there may be an image still being pulled,
+// and waiting is what it is there to do. doctor is there to report, and a
+// gateway that has stopped answering has to become a line in the report
+// rather than a command that never returns.
+func (e *OSEnv) GatewayReady() error {
+	ctx, cancel := contextWithTimeout(e.Timeout)
+	defer cancel()
+
+	c, err := gateway.Current().Client()
+	if err != nil {
+		return err
+	}
+
+	return c.Ready(ctx)
 }
 
 func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
