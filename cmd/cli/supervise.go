@@ -27,16 +27,28 @@ func superviseCommand() *cli.Command {
 		Hidden: true,
 		Usage:  "Runs a workload inside its sandbox and spawns siblings into it on request",
 		Description: `Not intended to be called directly. qubesome uses it as the
-entrypoint of a single instance workload's sandbox:
+entrypoint of a single instance workload's sandbox, and of any workload
+that is given an address on the session gateway:
 
-qubesome supervise <command> [args...]
+qubesome supervise [--gated] <command> [args...]
+
+With --gated the workload is not started until the host has wired the
+sandbox to the gateway and said so on the supervisor's socket.
 `,
 		// Everything after the command name belongs to the workload, and
 		// most workloads pass flags of their own. Parsing them here would
-		// consume them or fail on them.
+		// consume them or fail on them, so --gated is read by hand from
+		// the position qubesome writes it in.
 		SkipFlagParsing: true,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return sandbox.Supervise(files.InWorkloadAgentSocket(), cmd.Args().Slice())
+			argv := cmd.Args().Slice()
+
+			gated := len(argv) > 0 && argv[0] == sandbox.GatedFlag
+			if gated {
+				argv = argv[1:]
+			}
+
+			return sandbox.Supervise(files.InWorkloadAgentSocket(), argv, gated)
 		},
 	}
 	return cmd

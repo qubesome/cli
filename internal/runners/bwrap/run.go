@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/gateway"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/keyring"
 	"github.com/qubesome/cli/internal/keyring/backend"
@@ -17,7 +18,6 @@ import (
 	"github.com/qubesome/cli/internal/runners/util/mime"
 	"github.com/qubesome/cli/internal/runners/util/usb"
 	"github.com/qubesome/cli/internal/sandbox"
-	"github.com/qubesome/cli/internal/seccomp"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/env"
@@ -62,7 +62,11 @@ func StatePath(ew types.EffectiveWorkload) (string, error) {
 // answers the caller rather than holding the request open for the life of
 // an application. The sandbox is left running behind it, which is why the
 // workload spec does not set Spec.DieWithParent.
-func Run(ew types.EffectiveWorkload) error {
+//
+// cfg is the qubesome config the workload was read from, which is what
+// says whether there is a gateway and what subnet it hands addresses out
+// of. It may be nil, which is a launch with no gateway and no egress.
+func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 	if err := ew.Validate(); err != nil {
 		return err
 	}
@@ -74,6 +78,12 @@ func Run(ew types.EffectiveWorkload) error {
 
 	// Before anything is pulled or unpacked, as the container runner
 	// checked for a running container before building its argument list.
+	//
+	// It is also before any gateway work, and that is the whole answer to
+	// what a second launch of a single instance workload costs. It is
+	// handed to the supervisor already inside the running sandbox, which
+	// keeps the address it was given when it started. Nothing below here
+	// runs for it, so nothing allocates.
 	if ew.Workload.SingleInstance {
 		handled, err := handOver(ew, statePath)
 		if handled || err != nil {
@@ -81,7 +91,15 @@ func Run(ew types.EffectiveWorkload) error {
 		}
 	}
 
-	in, err := resolve(ew)
+	// The gateway is up and ready and the address is allocated before the
+	// sandbox exists, because everything after this point either needs a
+	// sandbox to act on or has to be undone by killing one.
+	att, err := gateway.Attached(cfg, ew.Workload.HostAccess.Network)
+	if err != nil {
+		return err
+	}
+
+	in, err := resolve(ew, att != nil)
 	if err != nil {
 		return err
 	}
@@ -91,71 +109,90 @@ func Run(ew types.EffectiveWorkload) error {
 		return err
 	}
 
-	var extra []*os.File
-	seccompFD := -1
+	l, err := launch(spec, att != nil)
+	if err != nil {
+		return err
+	}
+	defer l.close()
 
-	if spec.Seccomp {
-		filter, err := seccomp.MemFD()
-		if err != nil {
-			return err
+	if err := l.start(); err != nil {
+		return err
+	}
+
+	if att != nil {
+		if err := attach(l, att, ew); err != nil {
+			// Fail closed. The workload has not run yet, because a gated
+			// supervisor is still holding it, so a sandbox taken down here
+			// takes an application that never started with it. Letting it
+			// run instead would be a workload with a policy that is not
+			// being applied to it, which is the one outcome this stage
+			// exists to prevent.
+			return l.stop(err)
 		}
-		defer filter.Close()
-
-		seccompFD = firstExtraFD + len(extra)
-		extra = append(extra, filter)
 	}
 
-	args, err := sandbox.Args(spec, seccompFD)
-	if err != nil {
-		return err
-	}
-
-	slog.Debug("exec", "binary", files.BwrapBinary, "args", container.RedactEnvArgs(args))
-
-	// A mime enabled workload carries the profile's mTLS private key in
-	// its environment, and a command line is world readable through
-	// /proc. Only the descriptor holding the options, and the command,
-	// stay on it.
-	outer, packed, err := sandbox.PackArgs(spec, args, firstExtraFD+len(extra))
-	if err != nil {
-		return err
-	}
-	defer packed.Close()
-
-	extra = append(extra, packed)
-
-	cmd := execabs.Command(files.BwrapBinary, outer...) //nolint:gosec // the arguments are built from the workload config.
-	cmd.ExtraFiles = extra
-	// The launch returns while the workload keeps running, so stdin stays
-	// closed rather than leaving a detached application reading the
-	// terminal the shell has taken back. Its output is still worth
-	// showing: a workload that fails to start says why there.
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start workload sandbox: %w", err)
-	}
-
-	if err := sandbox.WriteState(statePath, cmd.Process.Pid); err != nil {
+	if err := sandbox.WriteState(statePath, l.cmd.Process.Pid); err != nil {
 		// The state file is how a second launch of a single instance
 		// workload finds this one, so a sandbox that cannot be recorded
 		// must not keep running under a name nothing can reach.
-		if kerr := cmd.Process.Kill(); kerr != nil {
-			slog.Warn("failed to kill the unrecorded sandbox", "error", kerr)
-		}
-		_ = cmd.Wait()
-
-		return fmt.Errorf("failed to record sandbox state: %w", err)
+		return l.stop(fmt.Errorf("failed to record sandbox state: %w", err))
 	}
 
-	go reap(cmd, statePath)
+	go reap(l.cmd, statePath, att, ew.Name)
 
 	return nil
 }
 
-// reap waits for a workload sandbox to exit and clears the state file it
-// was recorded in.
+// attacher is the gateway side of one launch. The only implementation is
+// *gateway.Attach, and it is an interface here so that the order below can
+// be driven without a gateway to talk to.
+type attacher interface {
+	Wire(pid int) error
+	Register(name string) error
+}
+
+// attach wires the started sandbox to the gateway and lets its workload
+// run.
+//
+// The order is the point of it. The sandbox exists, so its pid can be read
+// from bwrap and its namespace named. The veth is built and addressed from
+// outside. The gateway is told which workload holds the address, which it
+// refuses if it has no policy for that name. Only then is the gate opened
+// and the workload started, so its first name lookup cannot precede the
+// resolver it is meant to reach.
+//
+// Every step before the release stops the launch when it fails, and the
+// caller kills the sandbox. Nothing has run inside it yet.
+func attach(l *launcher, att attacher, ew types.EffectiveWorkload) error {
+	pid, err := l.childPID()
+	if err != nil {
+		return err
+	}
+
+	if err := att.Wire(pid); err != nil {
+		return err
+	}
+
+	if err := att.Register(ew.Name); err != nil {
+		return err
+	}
+
+	socket, err := files.WorkloadAgentSocket(ew.Profile.Name, ew.Workload.Name)
+	if err != nil {
+		return err
+	}
+
+	if err := release(socket); err != nil {
+		return fmt.Errorf("failed to release workload %q into its sandbox: %w", ew.Name, err)
+	}
+
+	slog.Debug("gave a workload its gateway address", "workload", ew.Name, "pid", pid)
+
+	return nil
+}
+
+// reap waits for a workload sandbox to exit, clears the state file it was
+// recorded in and tells the gateway the address is gone.
 //
 // It runs in a goroutine because Run has already returned. A launch that
 // arrived over the profile's socket is served by a process that stays up,
@@ -165,13 +202,40 @@ func Run(ew types.EffectiveWorkload) error {
 // to init, which reaps it, and the state file outlives the pid it names.
 // That is what sandbox.Alive is for, since it records the start time as
 // well and so reads a stale file as not running.
-func reap(cmd *execabs.Cmd, statePath string) {
+//
+// The unregister is best effort for the same reason. See Attach.Unregister
+// for why a message that never arrives leaks nothing worth chasing.
+func reap(cmd *execabs.Cmd, statePath string, att *gateway.Attach, name string) {
 	if err := cmd.Wait(); err != nil {
 		slog.Debug("workload sandbox exited", "path", statePath, "error", err)
 	}
 
 	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("failed to remove sandbox state", "path", statePath, "error", err)
+	}
+
+	if att != nil {
+		att.Unregister(name)
+	}
+}
+
+// release opens a gated supervisor's gate, waiting for a sandbox that is
+// still starting.
+//
+// The wait is spawn's, and for the same reason: between the sandbox
+// existing and the supervisor binding its socket there is a bwrap setup
+// and an exec. Here the sandbox is known to exist, since its pid was read
+// from bwrap, so what is being waited for is only the socket.
+func release(socket string) error {
+	deadline := time.Now().Add(startupGrace)
+
+	for {
+		err := sandbox.Release(socket)
+		if !errors.Is(err, sandbox.ErrNoSupervisor) || time.Now().After(deadline) {
+			return err
+		}
+
+		time.Sleep(startupPoll)
 	}
 }
 
@@ -261,7 +325,7 @@ func spawn(socket string, argv []string, statePath string) error {
 //
 // Every filesystem lookup, image pull and keyring read happens here, so
 // that buildSpec is a function of its input alone.
-func resolve(ew types.EffectiveWorkload) (input, error) {
+func resolve(ew types.EffectiveWorkload, gw bool) (input, error) {
 	wl := ew.Workload
 
 	bundle, err := images.PullProfileImage(wl.Image)
@@ -301,6 +365,7 @@ func resolve(ew types.EffectiveWorkload) (input, error) {
 
 	in := input{
 		Workload:   ew,
+		Gateway:    gw,
 		Bundle:     bundle,
 		ProfileDir: profileDir,
 		UserDir:    userDir,
@@ -332,7 +397,7 @@ func resolve(ew types.EffectiveWorkload) (input, error) {
 		}
 	}
 
-	if needsQubesomeBin(wl) {
+	if needsQubesomeBin(wl, gw) {
 		// The mime handler, the supervisor and the console are all this
 		// binary.
 		bin, err := os.Executable()
@@ -342,7 +407,7 @@ func resolve(ew types.EffectiveWorkload) (input, error) {
 		in.QubesomeBin = bin
 	}
 
-	if wl.SingleInstance {
+	if wl.SingleInstance || gw {
 		agentDir, err := files.WorkloadAgentDir(ew.Profile.Name, wl.Name)
 		if err != nil {
 			return input{}, err

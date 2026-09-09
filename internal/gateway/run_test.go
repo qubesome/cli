@@ -21,7 +21,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
@@ -31,30 +30,25 @@ import (
 
 const testSubnet = "10.111.0.0/24"
 
-func TestServesOnlyANamedNetwork(t *testing.T) {
-	t.Parallel()
-
-	for _, network := range []string{"", "none", "host"} {
-		assert.False(t, Serves(network), "network %q", network)
-	}
-
-	assert.True(t, Serves("qubesome"))
-}
-
 // The absence of a gateway block is a supported configuration and not a
 // missing one. It means no gateway and no egress, which is what a sandbox
 // without one already had.
-func TestEnsureDoesNothingWithoutAGatewayBlock(t *testing.T) {
+func TestAttachedDoesNothingWithoutAGatewayBlock(t *testing.T) {
 	t.Parallel()
 
-	require.NoError(t, Ensure(nil, "qubesome"))
-	require.NoError(t, Ensure(&types.Config{}, "qubesome"))
+	att, err := Attached(nil, "qubesome")
+	require.NoError(t, err)
+	assert.Nil(t, att)
+
+	att, err = Attached(&types.Config{}, "qubesome")
+	require.NoError(t, err)
+	assert.Nil(t, att)
 }
 
 // A workload that asks for no network is given none, which is the outcome the
 // fail-closed rule protects rather than one it has to prevent. Starting a
 // gateway for it would be a process nothing talks to.
-func TestEnsureDoesNothingForAWorkloadWithNoNetwork(t *testing.T) {
+func TestAttachedDoesNothingForAWorkloadWithNoNetwork(t *testing.T) {
 	t.Parallel()
 
 	cfg := &types.Config{
@@ -67,14 +61,16 @@ func TestEnsureDoesNothingForAWorkloadWithNoNetwork(t *testing.T) {
 	}
 
 	for _, network := range []string{"", "none", "host"} {
-		require.NoError(t, Ensure(cfg, network), "network %q", network)
+		att, err := Attached(cfg, network)
+		require.NoError(t, err, "network %q", network)
+		assert.Nil(t, att, "network %q", network)
 	}
 }
 
 // The rule the whole stage rests on. The gateway here cannot start, because
 // the policy file it names is not there, and the launch has to stop rather
 // than carry on with no policy applied to it.
-func TestEnsureStopsTheLaunchWhenTheGatewayWillNotStart(t *testing.T) {
+func TestAttachedStopsTheLaunchWhenTheGatewayWillNotStart(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	cfg := &types.Config{
@@ -86,7 +82,7 @@ func TestEnsureStopsTheLaunchWhenTheGatewayWillNotStart(t *testing.T) {
 		},
 	}
 
-	err := Ensure(cfg, "qubesome")
+	_, err := Attached(cfg, "qubesome")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "gateway.yml")
@@ -267,83 +263,6 @@ func TestTheSandboxDescriptorsAreNumberedInOrder(t *testing.T) {
 	assert.Equal(t, []int{3, 4, 5, 6}, []int{seccompFD, packedFD, usernsFD, infoFD})
 }
 
-func TestNetnsPathNamesTheSandboxNamespace(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "/proc/4242/ns/net", NetnsPath(4242))
-}
-
-// The pid is bwrap's to report. Between this process and the gateway sit two
-// bwraps and a sandbox init, so which pid a veth has to be put next to is
-// not something to infer from parentage.
-func TestChildPIDIsWhatBwrapReported(t *testing.T) {
-	t.Parallel()
-
-	pid, err := childPID(reported(t, `{"child-pid": 4242}`), testTimeout)
-
-	require.NoError(t, err)
-	assert.Equal(t, 4242, pid)
-}
-
-// bwrap writes more than one field and the object it writes is what ends the
-// read, not the end of the descriptor.
-func TestChildPIDReadsOneObjectAndStops(t *testing.T) {
-	t.Parallel()
-
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-
-	// The write end stays open, the way the outer bwrap keeps its copy for
-	// as long as the sandbox runs. Nothing here ends the read but the
-	// object itself.
-	t.Cleanup(func() {
-		r.Close()
-		w.Close()
-	})
-
-	_, err = w.WriteString(`{"child-pid": 4242, "unexpected": "field"}`)
-	require.NoError(t, err)
-
-	pid, err := childPID(r, testTimeout)
-
-	require.NoError(t, err)
-	assert.Equal(t, 4242, pid)
-}
-
-func TestChildPIDFailsWhenNoPidWasReported(t *testing.T) {
-	t.Parallel()
-
-	_, err := childPID(reported(t, `{}`), testTimeout)
-
-	require.ErrorContains(t, err, "no pid")
-}
-
-func TestChildPIDFailsOnSomethingThatIsNotAnInfoObject(t *testing.T) {
-	t.Parallel()
-
-	_, err := childPID(reported(t, "bwrap: execvp gateway: No such file\n"), testTimeout)
-
-	require.ErrorContains(t, err, "failed to read the gateway sandbox pid")
-}
-
-// A sandbox that dies before it reports anything leaves a descriptor the
-// outer bwrap still holds open, so the read has to give up on its own rather
-// than wait for an end of file that is not coming.
-func TestChildPIDGivesUpWhenNothingIsReported(t *testing.T) {
-	t.Parallel()
-
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		r.Close()
-		w.Close()
-	})
-
-	_, err = childPID(r, time.Millisecond)
-
-	require.ErrorContains(t, err, "failed to read the gateway sandbox pid")
-}
-
 // The info descriptor is prefixed to the sandbox's own options, where it
 // travels in the packed file and cannot disturb the split PackArgs makes by
 // counting back from the end of the list.
@@ -355,7 +274,7 @@ func TestTheInfoDescriptorIsPackedWithTheOtherOptions(t *testing.T) {
 	args, err := sandbox.Args(spec, -1)
 	require.NoError(t, err)
 
-	outer, packed, err := sandbox.PackArgs(spec, infoFDArgs(args), packedFD)
+	outer, packed, err := sandbox.PackArgs(spec, sandbox.InfoFDArgs(args, infoFD), packedFD)
 	require.NoError(t, err)
 	defer packed.Close()
 
@@ -489,20 +408,6 @@ func indexOf(args []string, want string) int {
 
 // reported returns the read end of a pipe carrying what bwrap wrote to its
 // info descriptor, with the write end already closed.
-func reported(t *testing.T, out string) *os.File {
-	t.Helper()
-
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	t.Cleanup(func() { r.Close() })
-
-	_, err = w.WriteString(out)
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
-
-	return r
-}
-
 // newSessionGateway returns a gateway whose files are all in the test's own
 // directory, so nothing here reads or writes the user's session.
 func newSessionGateway(t *testing.T) Gateway {

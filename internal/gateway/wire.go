@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/qubesome/cli/internal/images"
+	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 )
 
@@ -197,7 +198,7 @@ func linkArgs(w wiring) []string {
 // half-configured end a failure rather than a silence.
 func nsenterArgs(pid int) []string {
 	return []string{
-		nsenterCommand, "--net=" + NetnsPath(pid),
+		nsenterCommand, "--net=" + sandbox.NetnsPath(pid),
 		ipCommand, "-batch", "-",
 	}
 }
@@ -306,7 +307,7 @@ func writeResolvConf(pid int, addr netip.Addr) error {
 // resolvConfIn names a workload's resolver configuration from outside the
 // workload.
 func resolvConfIn(pid int) string {
-	return "/proc/" + strconv.Itoa(pid) + "/root" + resolvConfPath
+	return sandbox.RootPath(pid) + resolvConfPath
 }
 
 // replace writes content at path, whatever was there before.

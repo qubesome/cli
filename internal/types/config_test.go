@@ -327,6 +327,16 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return buf
 }
 
+func TestGatewayNetworkIsOnlyANamedOne(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []string{"", "none", "host"} {
+		assert.False(t, GatewayNetwork(network), "network %q", network)
+	}
+
+	assert.True(t, GatewayNetwork("qubesome"))
+}
+
 // A named network is kept and reported, never refused. The message has to
 // name the field and say the value does nothing yet, since the config
 // looks like it grants a network and the sandbox gets loopback only.

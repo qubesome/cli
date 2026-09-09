@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
@@ -81,44 +80,6 @@ const (
 // helperUsernsFD is the session namespace's descriptor in a helper. A helper
 // is handed nothing else, so it is the first one os/exec numbers.
 const helperUsernsFD = 3
-
-// Serves reports whether network names a network the gateway provides.
-//
-// An empty value, none and host all mean something to a sandbox with no
-// gateway, and none of them is a request for one. Anything else names a
-// network only the gateway can create.
-func Serves(network string) bool {
-	switch network {
-	case "", "none", "host":
-		return false
-	default:
-		return true
-	}
-}
-
-// Ensure starts the session's gateway when the launch needs one, and returns
-// once it reports itself ready.
-//
-// It fails closed, and that is the one behaviour here worth being rigid
-// about. A configured gateway that will not start is an error that stops the
-// workload. Not a warning, not a degraded launch, not egress without rules on
-// it. A workload whose policy says which hosts it may reach must never run in
-// a state where that policy is not being applied.
-//
-// An absent gateway block is not a failure. It means no gateway and no egress
-// for anything, which is a supported configuration, so the rule binds only
-// those who asked for a gateway. A workload that asks for no network is not a
-// failure either: it gets nothing, which is the same thing the rule protects.
-func Ensure(cfg *types.Config, network string) error {
-	if cfg == nil || cfg.Gateway == nil {
-		return nil
-	}
-	if !Serves(network) {
-		return nil
-	}
-
-	return Current().Up(*cfg.Gateway, cfg.RootDir)
-}
 
 // Gateway names the files one session's gateway is kept in.
 //
@@ -338,7 +299,7 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 	// The server half of the control credentials is in the environment, and
 	// a command line is world readable through /proc. Only the descriptor
 	// holding the options, and the command, stay on it.
-	outer, packed, err := sandbox.PackArgs(spec, infoFDArgs(args), packedFD)
+	outer, packed, err := sandbox.PackArgs(spec, sandbox.InfoFDArgs(args, infoFD), packedFD)
 	if err != nil {
 		return err
 	}
@@ -386,7 +347,7 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 
 	gw := running{cmd: cmd}
 
-	gw.pid, err = childPID(info, infoGrace)
+	gw.pid, err = sandbox.ChildPID(info, sandbox.InfoGrace)
 	if err != nil {
 		return gw.stop(err)
 	}
@@ -474,64 +435,6 @@ func kill(cmd *execabs.Cmd) {
 	_ = cmd.Wait()
 }
 
-// infoGrace bounds the wait for bwrap to report the sandbox's pid.
-//
-// bwrap writes it as soon as it has cloned the sandbox, before anything from
-// the image runs, so this is not sized for the work behind a launch the way
-// the readiness deadline is. It is a ceiling for a sandbox that fails before
-// it reports anything, which would otherwise leave the read waiting on a
-// descriptor the outer bwrap holds open for the whole life of the sandbox.
-const infoGrace = 30 * time.Second
-
-// info is the object bwrap writes to its --info-fd. It carries more than
-// this and everything else is ignored.
-type info struct {
-	// ChildPID is the sandbox's init process in the pid namespace bwrap was
-	// started in. Nothing above the gateway unshares one, so it is the
-	// host's, which is what makes /proc/<pid>/ns/net nameable from here.
-	ChildPID int `json:"child-pid"` //nolint:tagliatelle // bwrap chose the name and this end only reads it.
-}
-
-// infoFDArgs prefixes bwrap options with the descriptor the sandbox pid is
-// to be reported on.
-//
-// It is put in front of what sandbox.Args rendered rather than added to
-// sandbox.Spec, because it describes this launch and not the sandbox. The
-// position is deliberate: sandbox.PackArgs finds the command by counting
-// back from the end of the list, so options added in front of it change
-// nothing about where that split falls.
-func infoFDArgs(args []string) []string {
-	return append([]string{"--info-fd", strconv.Itoa(infoFD)}, args...)
-}
-
-// childPID reads the sandbox's pid from the descriptor bwrap reports it on.
-//
-// The pid is taken from bwrap rather than guessed from the process tree.
-// There are two bwrap processes and a sandbox init between this process and
-// the gateway, and which pid a workload's veth has to be put next to is not
-// something to infer from parentage.
-//
-// The read ends at the end of the JSON object rather than at the end of the
-// file, which matters because the outer bwrap keeps a copy of the write end
-// for as long as the sandbox runs and no end of file arrives while the
-// gateway is up.
-func childPID(r *os.File, grace time.Duration) (int, error) {
-	if err := r.SetReadDeadline(time.Now().Add(grace)); err != nil {
-		return 0, fmt.Errorf("failed to bound the wait for the gateway sandbox pid: %w", err)
-	}
-
-	var i info
-	if err := json.NewDecoder(r).Decode(&i); err != nil {
-		return 0, fmt.Errorf("failed to read the gateway sandbox pid: %w", err)
-	}
-
-	if i.ChildPID <= 0 {
-		return 0, errors.New("bwrap reported no pid for the gateway sandbox")
-	}
-
-	return i.ChildPID, nil
-}
-
 // uplink gives the gateway its egress and returns the process that is it.
 //
 // pasta does not run inside the gateway's network namespace, and the natural
@@ -558,7 +461,7 @@ func uplink(rootfs string, pid int) (*execabs.Cmd, error) {
 		return nil, fmt.Errorf("failed to start the gateway uplink: %w", err)
 	}
 
-	slog.Debug("[gateway] started the gateway uplink", "pid", cmd.Process.Pid, "netns", NetnsPath(pid))
+	slog.Debug("[gateway] started the gateway uplink", "pid", cmd.Process.Pid, "netns", sandbox.NetnsPath(pid))
 
 	return cmd, nil
 }
@@ -589,7 +492,7 @@ func pastaArgs(pid int) []string {
 		"-T", "none",
 		"-U", "none",
 
-		"--netns", NetnsPath(pid),
+		"--netns", sandbox.NetnsPath(pid),
 	}
 }
 
@@ -606,14 +509,6 @@ func watchUplink(cmd *execabs.Cmd) {
 
 	slog.Warn("the session gateway has lost its uplink and has no egress; "+
 		"restart the session to give it one", "error", err)
-}
-
-// NetnsPath names a process's network namespace.
-//
-// The pid is in the host's pid namespace, which is the only namespace every
-// caller of this shares, and the one bwrap reports on its info descriptor.
-func NetnsPath(pid int) string {
-	return "/proc/" + strconv.Itoa(pid) + "/ns/net"
 }
 
 // helper is a short-lived command run from the gateway image's rootfs inside

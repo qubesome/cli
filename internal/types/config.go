@@ -20,8 +20,8 @@ var (
 	timezoneRegex     = regexp.MustCompile(`^[A-Za-z]+/[A-Za-z_]+$`)
 	gpusRegex         = regexp.MustCompile(`^all$`)
 	nameRegex         = regexp.MustCompile(`^[a-zA-Z0-9\-]+$`)
-	imageRegex        = regexp.MustCompile(`^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+\/)?(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+(?:[:/][a-z0-9]+(?:[._-][a-z0-9]+)*)+$`)
 	ipRegex           = regexp.MustCompile(`^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
+	imageRegex        = regexp.MustCompile(`^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+\/)?(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+(?:[:/][a-z0-9]+(?:[._-][a-z0-9]+)*)+$`)
 	runnerRegex       = regexp.MustCompile(`^firecracker$`)
 	externalPathRegex = regexp.MustCompile(`^[a-zA-Z0-9\-]+:/[^:]+:/[^:]+$`)
 	pathRegex         = regexp.MustCompile(`^(\${[a-zA-Z0-9\-]+}){0,1}/[^:]+:/[^:]+(:ro){0,1}$`)
@@ -302,6 +302,21 @@ func validateRunner(runner string) error {
 	return valid(runner, "runner", 20, true, runnerRegex)
 }
 
+// GatewayNetwork reports whether network names a network only the qubesome
+// gateway can provide.
+//
+// An empty value, none and host all mean something to a sandbox with no
+// gateway, and none of them is a request for one. Anything else names a
+// network nothing but the gateway creates.
+func GatewayNetwork(network string) bool {
+	switch network {
+	case "", "none", "host":
+		return false
+	default:
+		return true
+	}
+}
+
 // WarnIgnoredNetwork reports a hostAccess.network value that has no
 // effect.
 //
@@ -315,8 +330,7 @@ func validateRunner(runner string) error {
 // Callers invoke this once per launch. Validate runs several times for a
 // single launch, so the same config would otherwise warn repeatedly.
 func WarnIgnoredNetwork(name, network string) {
-	switch network {
-	case "", "none", "host":
+	if !GatewayNetwork(network) {
 		return
 	}
 

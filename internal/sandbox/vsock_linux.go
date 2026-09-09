@@ -68,7 +68,10 @@ func SuperviseVM(port, consolePort uint32, argv []string) error {
 		return superviseConsoles(ln, reaper, gate)
 	}
 
-	return superviseWith(ln, argv, reaper)
+	// No gate. A microVM has a network stack of its own and takes no
+	// address from the session gateway, so there is nothing for the host
+	// to tell it before its command runs.
+	return superviseWith(ln, argv, reaper, nil)
 }
 
 // SpawnVM asks the supervisor listening on a guest port to start argv

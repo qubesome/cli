@@ -616,7 +616,7 @@ func serveWorkload(t *testing.T, ew types.EffectiveWorkload) {
 	// The main command holds the sandbox open and lets go of the standard
 	// streams, which are the test binary's own.
 	go func() {
-		_ = sandbox.Supervise(socket, []string{"/bin/sh", "-c", "exec >/dev/null 2>&1; sleep 5"})
+		_ = sandbox.Supervise(socket, []string{"/bin/sh", "-c", "exec >/dev/null 2>&1; sleep 5"}, false)
 	}()
 
 	require.Eventually(t, func() bool {

@@ -138,7 +138,7 @@ func TestSuperviseEndsWithTheMainCommand(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "agent.sock")
 	done := make(chan error, 1)
 
-	go func() { done <- Supervise(socket, []string{"/bin/sh", "-c", "sleep 0.3"}) }()
+	go func() { done <- Supervise(socket, []string{"/bin/sh", "-c", "sleep 0.3"}, false) }()
 
 	require.Eventually(t, func() bool {
 		return Spawn(socket, []string{"/bin/sh", "-c", "exit 0"}) == nil
@@ -155,7 +155,7 @@ func TestSuperviseReportsTheMainCommandExit(t *testing.T) {
 
 	socket := filepath.Join(t.TempDir(), "agent.sock")
 
-	err := Supervise(socket, []string{"/bin/sh", "-c", "exit 3"})
+	err := Supervise(socket, []string{"/bin/sh", "-c", "exit 3"}, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "3")
 }
@@ -163,7 +163,7 @@ func TestSuperviseReportsTheMainCommandExit(t *testing.T) {
 func TestSuperviseRejectsAnEmptyArgv(t *testing.T) {
 	t.Parallel()
 
-	require.Error(t, Supervise(filepath.Join(t.TempDir(), "agent.sock"), nil))
+	require.Error(t, Supervise(filepath.Join(t.TempDir(), "agent.sock"), nil, false))
 }
 
 // The socket is what tells a second launch that this workload is already
@@ -174,7 +174,7 @@ func TestSuperviseDoesNotRunWithoutASocket(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
 	socket := filepath.Join(t.TempDir(), "missing", "agent.sock")
 
-	require.Error(t, Supervise(socket, []string{"/bin/sh", "-c", "touch " + marker}))
+	require.Error(t, Supervise(socket, []string{"/bin/sh", "-c", "touch " + marker}, false))
 
 	_, err := os.Stat(marker)
 	assert.ErrorIs(t, err, os.ErrNotExist)

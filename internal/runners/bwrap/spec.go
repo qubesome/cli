@@ -68,8 +68,13 @@ type input struct {
 
 	// AgentDir is this workload's supervisor socket directory on the host.
 	// It is bound into the sandbox, where the supervisor creates the
-	// socket. Set only for a single instance workload.
+	// socket. Set for any workload that runs a supervisor.
 	AgentDir string
+
+	// Gateway says this workload is to be given an address on the session
+	// gateway. It decides the sandbox's network mode and whether the
+	// supervisor holds the workload back until that address exists.
+	Gateway bool
 
 	// VMVsockDir is the vsock directory of the machine this workload
 	// attaches to. Set only for a workload that declares attachVM, and
@@ -132,12 +137,14 @@ func buildSpec(in input) (sandbox.Spec, error) {
 	if in.Workload.Profile == nil {
 		return sandbox.Spec{}, errors.New("workload has no profile")
 	}
-	if wl.SingleInstance && (in.QubesomeBin == "" || in.AgentDir == "") {
+	if needsSupervisor(in) && (in.QubesomeBin == "" || in.AgentDir == "") {
 		// Without both, the sandbox would run the workload directly and
-		// answer nothing, so a second launch would start a second sandbox
-		// against the same data.
+		// answer nothing. For a single instance workload that means a
+		// second launch starting a second sandbox against the same data,
+		// and for a workload on the gateway it means one that starts
+		// before it has an address to be classified by.
 		return sandbox.Spec{}, fmt.Errorf(
-			"workload %q is single instance but has no supervisor binary or socket dir", in.Workload.Name)
+			"workload %q needs a supervisor but has no supervisor binary or socket dir", in.Workload.Name)
 	}
 
 	devices, err := workloadDevices(in)
@@ -160,7 +167,7 @@ func buildSpec(in input) (sandbox.Spec, error) {
 		UID: in.Bundle.UID,
 		GID: in.Bundle.GID,
 
-		Net: workloadNet(wl.HostAccess.Network),
+		Net: workloadNet(wl.HostAccess.Network, in.Gateway),
 
 		Seccomp: !wl.HostAccess.SeccompUnconfined,
 
@@ -194,38 +201,61 @@ func buildSpec(in input) (sandbox.Spec, error) {
 
 // workloadNet maps the workload's network grant onto the sandbox.
 //
-// host is the one grant a sandbox can honour today, and it is honoured
-// because the alternative is a workload that was given the host network
-// and silently got an empty namespace instead.
+// host is honoured because the alternative is a workload that was given the
+// host network and silently got an empty namespace instead.
 //
-// Everything else, a named network included, gets an empty namespace with
-// loopback and nothing else. The uplink lives in the gateway, which is a
-// later stage, so there is deliberately no egress for those. The name is
-// not refused here. types.WarnIgnoredNetwork reports it once per launch.
-func workloadNet(network string) sandbox.NetMode {
-	if network == "host" {
+// A named network is a gateway address when the config has a gateway block
+// and gateway says this launch is taking one. Without a gateway there is
+// nothing to create that network, so the name falls through to an empty
+// namespace with loopback and nothing else, and types.WarnIgnoredNetwork
+// reports it once per launch.
+func workloadNet(network string, gateway bool) sandbox.NetMode {
+	switch {
+	case network == "host":
 		return sandbox.NetHost
+	case gateway && types.GatewayNetwork(network):
+		return sandbox.NetGateway
+	default:
+		return sandbox.NetNone
 	}
-
-	return sandbox.NetNone
 }
 
 // workloadArgs is what the sandbox runs.
 //
-// A single instance workload runs the supervisor, which runs the
-// workload's own command and then answers on a socket. The container
-// runner re-entered a running container with docker exec, and a sandbox
-// cannot be entered at all, so the second launch of one of these is handed
-// to a process that is already inside.
+// A supervised workload runs the supervisor, which runs the workload's own
+// command and then answers on a socket. Two things ask for one and they
+// are unrelated.
+//
+// A single instance workload needs it because the container runner
+// re-entered a running container with docker exec and a sandbox cannot be
+// entered at all, so the second launch of one of these is handed to a
+// process that is already inside.
+//
+// A workload on the gateway needs it because the sandbox has to exist
+// before its veth can be built, and the workload must not run in the
+// window between the two. The supervisor holds it there until the host
+// says the address is wired and registered.
 func workloadArgs(in input) []string {
 	wl := in.Workload.Workload
 
 	args := append([]string{wl.Command}, wl.Args...)
-	if !wl.SingleInstance {
+	if !needsSupervisor(in) {
 		return args
 	}
 
-	return append([]string{files.InProfileBinary, sandbox.SuperviseCommand}, args...)
+	supervise := []string{files.InProfileBinary, sandbox.SuperviseCommand}
+	if in.Gateway {
+		supervise = append(supervise, sandbox.GatedFlag)
+	}
+
+	return append(supervise, args...)
+}
+
+// needsSupervisor reports whether the sandbox runs the supervisor rather
+// than the workload's command directly. See workloadArgs for the two
+// reasons it does.
+func needsSupervisor(in input) bool {
+	return in.Workload.Workload.SingleInstance || in.Gateway
 }
 
 // capsAdd renders the docker spelling the configuration carries into the
@@ -385,13 +415,13 @@ func workloadMounts(in input) []sandbox.Mount {
 	// The mime handler, the supervisor and the console are all the
 	// qubesome binary, so a workload that is more than one of them still
 	// shares it once.
-	if needsQubesomeBin(wl) {
+	if needsQubesomeBin(wl, in.Gateway) {
 		mounts = append(mounts, sandbox.Mount{
 			Src: in.QubesomeBin, Dst: files.InProfileBinary, ReadOnly: true,
 		})
 	}
 
-	if wl.SingleInstance {
+	if needsSupervisor(in) {
 		// The directory rather than the socket: the socket does not exist
 		// yet, the supervisor inside creates it. Writable for the same
 		// reason.
@@ -426,11 +456,10 @@ func workloadMounts(in input) []sandbox.Mount {
 // qubesome binary.
 //
 // Three things run it from inside a sandbox and none of them can be
-// shipped by the workload's image: the mime handler, the supervisor of a
-// single instance workload, and the console of a workload that attaches
-// to a machine.
-func needsQubesomeBin(wl types.Workload) bool {
-	return wl.HostAccess.Mime || wl.SingleInstance || wl.AttachVM != ""
+// shipped by the workload's image: the mime handler, the supervisor, and
+// the console of a workload that attaches to a machine.
+func needsQubesomeBin(wl types.Workload, gateway bool) bool {
+	return wl.HostAccess.Mime || wl.SingleInstance || gateway || wl.AttachVM != ""
 }
 
 // workloadEnv builds the whole environment of the workload process.

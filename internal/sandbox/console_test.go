@@ -208,7 +208,7 @@ func TestConsoleSessionRunsACommandAndReportsHowItEnded(t *testing.T) {
 
 	go serveConsole(guest, procStarter{})
 
-	require.NoError(t, exchange(host, []string{"/bin/sh", "-c", "echo hello; exit 7"}))
+	require.NoError(t, openRequest(host, []string{"/bin/sh", "-c", "echo hello; exit 7"}))
 
 	var out bytes.Buffer
 
@@ -227,7 +227,7 @@ func TestConsoleSessionCarriesWhatIsTyped(t *testing.T) {
 
 	go serveConsole(guest, procStarter{})
 
-	require.NoError(t, exchange(host, []string{"/bin/cat"}))
+	require.NoError(t, openRequest(host, []string{"/bin/cat"}))
 
 	var out bytes.Buffer
 
@@ -250,7 +250,7 @@ func TestConsoleReportsACommandThatCannotStart(t *testing.T) {
 
 	go serveConsole(guest, procStarter{})
 
-	err := exchange(host, []string{filepath.Join(t.TempDir(), "not-there")})
+	err := openRequest(host, []string{filepath.Join(t.TempDir(), "not-there")})
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrNoSupervisor,
 		"a supervisor that answers is there, so the failure is the command's and not the machine's")
@@ -438,7 +438,7 @@ func TestSuperviseConsolesEndsWhenAServedConsoleCloses(t *testing.T) {
 	host, err := d.DialContext(t.Context(), "unix", ln.Addr().String())
 	require.NoError(t, err)
 
-	require.NoError(t, exchange(host, []string{"/bin/sh", "-c", "exit 3"}))
+	require.NoError(t, openRequest(host, []string{"/bin/sh", "-c", "exit 3"}))
 
 	var out bytes.Buffer
 

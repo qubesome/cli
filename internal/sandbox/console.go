@@ -342,7 +342,7 @@ func ConsoleVM(uds string, port uint32, argv []string) (int, error) {
 
 	// The opening is a spawn's, exactly. What makes this a console is
 	// the port it was asked for and what crosses the connection next.
-	if err := exchange(conn, argv); err != nil {
+	if err := openRequest(conn, argv); err != nil {
 		return 0, err
 	}
 
@@ -646,7 +646,19 @@ func serveConsole(conn net.Conn, st consoleStarter) {
 		return
 	}
 
-	argv, err := decodeArgv(req)
+	kind, body, err := splitRequest(req)
+	if err != nil {
+		reply(conn, err)
+
+		return
+	}
+	if kind != requestSpawn {
+		reply(conn, fmt.Errorf("sandbox: a console cannot serve request kind %d", kind))
+
+		return
+	}
+
+	argv, err := decodeArgv(body)
 	if err != nil {
 		reply(conn, err)
 

@@ -16,6 +16,16 @@ const (
 
 	// NetHost leaves the sandbox in the host network namespace.
 	NetHost
+
+	// NetGateway gives the sandbox its own empty network namespace and
+	// says that qubesome will put a link to the session's gateway in it.
+	//
+	// bwrap is handed exactly what NetNone hands it. The veth is created
+	// and addressed by a helper in the session's user namespace once the
+	// sandbox exists, and nothing inside the sandbox holds anything over
+	// its own network namespace, which is what keeps a workload's address
+	// its identity rather than its choice.
+	NetGateway
 )
 
 // Mount is a bind mount from the host into the sandbox.

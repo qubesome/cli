@@ -22,6 +22,16 @@ import (
 // registers a command under it.
 const SuperviseCommand = "supervise"
 
+// GatedFlag is the first argument of a supervisor that must wait for the
+// host before it starts the workload.
+//
+// It is a positional token rather than a parsed flag because the supervise
+// subcommand skips flag parsing: everything after the command name belongs
+// to the workload, and most workloads pass flags of their own. qubesome
+// writes this argument list itself, so nothing else can arrive in that
+// position.
+const GatedFlag = "--gated"
+
 // ErrNoSupervisor reports that nothing answered on a supervisor's socket.
 //
 // It separates the two failures a caller has to tell apart. A sandbox that
@@ -45,6 +55,34 @@ const (
 	// kernel rather than refused, which would leave a supervisor listening
 	// somewhere near where the host is looking.
 	maxSocketPath = 108
+
+	// gateGrace bounds how long a gated supervisor waits to be released.
+	//
+	// Behind the release are a pid read, three short helper processes that
+	// build and address the sandbox's veth, and one call to the gateway.
+	// None of them pulls anything, because the gateway was up and ready
+	// before the sandbox was started, so this is a ceiling rather than an
+	// estimate. What it really bounds is the host going away between
+	// starting the sandbox and releasing it, which leaves nothing else to
+	// end the wait.
+	gateGrace = 60 * time.Second
+)
+
+// Supervisor requests begin with a kind byte, as a console frame's payload
+// does:
+//
+//	0 spawn    the rest is the argv, each element NUL terminated
+//	1 release  the rest is empty, and it opens a gated supervisor's gate
+//
+// One kind on the connection the supervisor already listens on, rather than
+// a second channel: the release says the same thing to the same process at
+// the same socket, and a second socket would be a second thing to place,
+// bind and bind into the sandbox.
+type requestKind byte
+
+const (
+	requestSpawn requestKind = iota
+	requestRelease
 )
 
 // Supervise runs argv inside the sandbox and spawns siblings into it on
@@ -57,7 +95,11 @@ const (
 // from another pid namespace a live process is not there. So the second
 // launch of a single instance workload is handed to a process already
 // inside the sandbox rather than entering it.
-func Supervise(socket string, argv []string) error {
+//
+// gated says the workload must not start until the host says so. A
+// workload given a gateway address is launched that way, so its first name
+// lookup cannot precede the resolver it is meant to reach.
+func Supervise(socket string, argv []string, gated bool) error {
 	if len(argv) == 0 {
 		return errors.New("sandbox: supervise needs a command to run")
 	}
@@ -74,18 +116,18 @@ func Supervise(socket string, argv []string) error {
 		return err
 	}
 
-	return supervise(ln, argv)
+	return supervise(ln, argv, gated)
 }
 
-// supervise runs argv and serves spawn requests on ln until argv exits,
-// with the processes waited for as ordinary children of this one.
+// supervise runs argv and serves requests on ln until argv exits, with the
+// processes waited for as ordinary children of this one.
 //
 // It is the half of Supervise that does not know what it is listening on.
 // A sandbox in a VM has no unix socket to be reached on and reuses
 // superviseWith with a vsock listener and a starter of its own. See
 // SuperviseVM.
-func supervise(ln net.Listener, argv []string) error {
-	return superviseWith(ln, argv, procStarter{})
+func supervise(ln net.Listener, argv []string, gated bool) error {
+	return superviseWith(ln, argv, procStarter{}, newGate(gated))
 }
 
 // superviseWith is supervise with the transport and the way processes are
@@ -94,16 +136,28 @@ func supervise(ln net.Listener, argv []string) error {
 // The two are separate questions and the VM answers both differently: it
 // is reached over vsock rather than over a unix socket, and it is pid 1,
 // so it cannot wait for a process by pid. See guestReaper.
-func superviseWith(ln net.Listener, argv []string, st starter) error {
+func superviseWith(ln net.Listener, argv []string, st starter, g *gate) error {
 	defer ln.Close()
+
+	s := &supervisor{starter: st, gate: g}
+
+	// Serving comes before the main command, because on a gated supervisor
+	// the release that starts that command arrives here.
+	go s.serve(ln)
+
+	// An open gate returns at once, which is every supervisor that was not
+	// asked to wait. A gate that expires returns an error and the main
+	// command is never started: the sandbox ends instead of running a
+	// workload the gateway was never told about, which is the same
+	// fail-closed rule the gateway's own lifecycle follows.
+	if err := g.wait(); err != nil {
+		return err
+	}
 
 	main, err := st.start(argv)
 	if err != nil {
 		return err
 	}
-
-	s := &supervisor{starter: st}
-	go s.serve(ln)
 
 	// The sandbox's lifetime is the main command's, exactly as the
 	// container's was. Returning ends the sandbox: under bwrap this
@@ -117,6 +171,66 @@ func superviseWith(ln net.Listener, argv []string, st starter) error {
 	return main.Wait()
 }
 
+// gate holds a workload back until the host has given it its address.
+type gate struct {
+	// released is closed by the release request. A nil gate is an open one
+	// and is the ordinary case, so the zero value of the field on
+	// supervisor is a supervisor that waits for nothing.
+	released chan struct{}
+
+	// once keeps a second release from closing a closed channel. Nothing
+	// sends two, and a supervisor that panicked on one would take the
+	// sandbox with it.
+	once sync.Once
+
+	grace time.Duration
+}
+
+// newGate returns the gate a supervisor waits on, or nil when it waits for
+// nothing.
+func newGate(gated bool) *gate {
+	if !gated {
+		return nil
+	}
+
+	return &gate{released: make(chan struct{}), grace: gateGrace}
+}
+
+// wait blocks until the gate is opened or its grace runs out. A nil gate
+// was never closed, so it returns at once.
+func (g *gate) wait() error {
+	if g == nil {
+		return nil
+	}
+
+	t := time.NewTimer(g.grace)
+	defer t.Stop()
+
+	select {
+	case <-g.released:
+		return nil
+	case <-t.C:
+		return fmt.Errorf(
+			"sandbox: the workload was not given its gateway address within %s, so it was not started", g.grace)
+	}
+}
+
+// open releases the gate, and reports whether there was one to release.
+//
+// A release arriving at a supervisor that was not gated is refused rather
+// than ignored. It means the host thinks this workload has an address and
+// this sandbox was never told to wait for one, and the two disagreeing is
+// worth reporting where it happens.
+func (g *gate) open() error {
+	if g == nil {
+		return errors.New("sandbox: this supervisor has no gate to release")
+	}
+
+	g.once.Do(func() { close(g.released) })
+
+	return nil
+}
+
 // Spawn asks the supervisor listening on socket to start argv inside its
 // sandbox.
 //
@@ -127,14 +241,39 @@ func Spawn(socket string, argv []string) error {
 		return errors.New("sandbox: spawn needs a command to run")
 	}
 
+	conn, err := dial(socket)
+	if err != nil {
+		return err
+	}
+
+	return spawn(conn, argv)
+}
+
+// Release tells the gated supervisor listening on socket that its workload
+// has its gateway address and may start.
+//
+// It is the last step of a launch that gives a workload egress, and until
+// it arrives the sandbox holds an application that has never run. Every
+// failure before it stops the launch and kills the sandbox instead.
+func Release(socket string) error {
+	conn, err := dial(socket)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	return exchange(conn, requestRelease, nil, "release")
+}
+
+func dial(socket string) (net.Conn, error) {
 	d := net.Dialer{Timeout: exchangeTimeout}
 
 	conn, err := d.DialContext(context.Background(), "unix", socket)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrNoSupervisor, err)
+		return nil, fmt.Errorf("%w: %w", ErrNoSupervisor, err)
 	}
 
-	return spawn(conn, argv)
+	return conn, nil
 }
 
 // spawn asks the supervisor at the other end of conn to start argv.
@@ -145,22 +284,30 @@ func Spawn(socket string, argv []string) error {
 func spawn(conn net.Conn, argv []string) error {
 	defer conn.Close()
 
-	return exchange(conn, argv)
+	return openRequest(conn, argv)
 }
 
-// exchange asks the supervisor at the other end of conn to start argv and
-// reads its answer.
+// openRequest asks the supervisor at the other end of conn to start argv.
 //
-// It is every connection's opening, not only a spawn's. A console says
-// the same thing to start with, and then keeps the connection to carry
-// the terminal, which is why the close is the caller's and not this
-// function's. See ConsoleVM.
-func exchange(conn net.Conn, argv []string) error {
+// It is every connection's opening, a console's included: a console says
+// exactly this and then keeps the connection to carry the terminal, which
+// is why it does not close conn. See ConsoleVM.
+func openRequest(conn net.Conn, argv []string) error {
+	return exchange(conn, requestSpawn, encodeArgv(argv), argv[0])
+}
+
+// exchange sends one request to the supervisor at the other end of conn
+// and reads its answer. The close is the caller's, since a console keeps
+// the connection it opened.
+//
+// what names the request in a refusal, since the payload of one is not
+// always something to put in a message.
+func exchange(conn net.Conn, kind requestKind, body []byte, what string) error {
 	if err := conn.SetDeadline(time.Now().Add(exchangeTimeout)); err != nil {
 		return fmt.Errorf("%w: %w", ErrNoSupervisor, err)
 	}
 
-	if err := writeFrame(conn, encodeArgv(argv)); err != nil {
+	if err := writeFrame(conn, request(kind, body)); err != nil {
 		return fmt.Errorf("%w: %w", ErrNoSupervisor, err)
 	}
 
@@ -174,7 +321,7 @@ func exchange(conn net.Conn, argv []string) error {
 	}
 
 	if len(res) > 0 {
-		return fmt.Errorf("supervisor refused to spawn %q: %s", argv[0], res)
+		return fmt.Errorf("supervisor refused %q: %s", what, res)
 	}
 
 	return nil
@@ -242,11 +389,15 @@ func (procStarter) start(argv []string) (waiter, error) {
 	return start(argv)
 }
 
-// supervisor serves spawn requests for one sandbox.
+// supervisor serves requests for one sandbox.
 type supervisor struct {
 	// starter runs the siblings. See the interface for why it is not
 	// always os/exec.
 	starter starter
+
+	// gate is what a release request opens, or nil for a supervisor that
+	// was not asked to wait for one.
+	gate *gate
 
 	// spawned counts the siblings still being waited for. Nothing outside
 	// the tests reads it. See reap for why the waiting matters.
@@ -267,28 +418,46 @@ func (s *supervisor) serve(ln net.Listener) {
 	}
 }
 
-// handle reads one spawn request and answers it.
+// handle reads one request and answers it.
 //
-// Requests are served one at a time. Each is a fork and an exec, the only
-// caller is the host and it makes one call per launch, so there is nothing
-// to gain from overlapping them and one less thing to get wrong. The
-// deadline is what keeps a caller that stops talking from holding the
-// queue.
+// Requests are served one at a time. A spawn is a fork and an exec and a
+// release is closing a channel, the only caller is the host and it makes
+// one call per launch, so there is nothing to gain from overlapping them
+// and one less thing to get wrong. The deadline is what keeps a caller
+// that stops talking from holding the queue.
 func (s *supervisor) handle(conn net.Conn) {
 	defer conn.Close()
 
 	if err := conn.SetDeadline(time.Now().Add(exchangeTimeout)); err != nil {
-		slog.Warn("failed to set a deadline on a spawn request", "error", err)
+		slog.Warn("failed to set a deadline on a supervisor request", "error", err)
 		return
 	}
 
 	req, err := readFrame(conn)
 	if err != nil {
-		slog.Warn("failed to read a spawn request", "error", err)
+		slog.Warn("failed to read a supervisor request", "error", err)
 		return
 	}
 
-	argv, err := decodeArgv(req)
+	kind, body, err := splitRequest(req)
+	if err != nil {
+		reply(conn, err)
+		return
+	}
+
+	switch kind {
+	case requestSpawn:
+		s.handleSpawn(conn, body)
+	case requestRelease:
+		slog.Debug("releasing the workload")
+		reply(conn, s.gate.open())
+	default:
+		reply(conn, fmt.Errorf("sandbox: unknown request kind %d", kind))
+	}
+}
+
+func (s *supervisor) handleSpawn(conn net.Conn, body []byte) {
+	argv, err := decodeArgv(body)
 	if err != nil {
 		reply(conn, err)
 		return
@@ -357,8 +526,26 @@ func start(argv []string) (*execabs.Cmd, error) {
 	return cmd, nil
 }
 
-// reply answers a spawn request. An empty payload is a process that
-// started, and anything else is the reason it did not.
+// request builds the payload of one supervisor request: the kind byte and
+// whatever that kind carries.
+func request(kind requestKind, body []byte) []byte {
+	payload := make([]byte, 0, 1+len(body))
+	payload = append(payload, byte(kind))
+
+	return append(payload, body...)
+}
+
+// splitRequest reads the kind off a request's payload.
+func splitRequest(payload []byte) (requestKind, []byte, error) {
+	if len(payload) == 0 {
+		return 0, nil, errors.New("sandbox: a supervisor request carries no kind")
+	}
+
+	return requestKind(payload[0]), payload[1:], nil
+}
+
+// reply answers a request. An empty payload is a request that was carried
+// out, and anything else is the reason it was not.
 func reply(conn net.Conn, cause error) {
 	var payload []byte
 	if cause != nil {
@@ -371,11 +558,12 @@ func reply(conn net.Conn, cause error) {
 }
 
 // The protocol is one frame each way: a 32 bit big endian length followed
-// by that many bytes. The request carries the argv, each element NUL
-// terminated, which is how bwrap's own --args descriptor carries an
-// argument list and what keeps an argument that is not valid UTF-8 intact,
-// where JSON would silently rewrite it. Nothing else is exchanged, so
-// neither end needs a schema to agree on.
+// by that many bytes. The request begins with a kind byte, and a spawn's
+// carries the argv after it, each element NUL terminated, which is how
+// bwrap's own --args descriptor carries an argument list and what keeps an
+// argument that is not valid UTF-8 intact, where JSON would silently
+// rewrite it. Nothing else is exchanged, so neither end needs a schema to
+// agree on.
 
 func writeFrame(w io.Writer, payload []byte) error {
 	if len(payload) > maxFrame {

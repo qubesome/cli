@@ -15,7 +15,6 @@ import (
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
-	"github.com/qubesome/cli/internal/gateway"
 	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/runners/bwrap"
 	"github.com/qubesome/cli/internal/runners/firecracker"
@@ -212,20 +211,16 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	// this one is the failure worth avoiding.
 	switch ew.Workload.Runner {
 	case "":
-		// A configured gateway that will not start stops the workload. The
-		// alternative is a workload whose policy says which hosts it may
-		// reach running with none of it applied, which is the one outcome
-		// this stage exists to prevent. A configuration with no gateway
+		// The config comes with the workload because this is the branch
+		// that can be given a gateway address. A configured gateway that
+		// will not start stops the launch, which is the one outcome this
+		// stage exists to guarantee, and a configuration with no gateway
 		// block asks for no egress and is unaffected.
 		//
-		// Only this branch. A microVM has its own network stack and takes
-		// no address from the gateway, so starting one for it would be a
-		// process nothing was going to talk to.
-		if err := gateway.Ensure(in.Config, ew.Workload.HostAccess.Network); err != nil {
-			return err
-		}
-
-		return bwrap.Run(ew)
+		// A microVM is handed none of it. It has a network stack of its
+		// own and takes no address from the gateway, so starting one for
+		// it would be a process nothing was going to talk to.
+		return bwrap.Run(ew, in.Config)
 	case firecrackerRunner:
 		return firecracker.Run(ew)
 	case "docker", "podman":

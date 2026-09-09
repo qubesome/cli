@@ -149,7 +149,10 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		args = append(args, "--perms", "0700", "--dir", s.RuntimeDir)
 	}
 
-	if s.Net == NetNone {
+	// Every mode but NetHost gets a namespace of its own. NetGateway
+	// differs from NetNone in what qubesome does next rather than in what
+	// bwrap is asked for.
+	if s.Net != NetHost {
 		args = append(args, "--unshare-net")
 	}
 
