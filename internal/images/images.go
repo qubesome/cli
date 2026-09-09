@@ -256,6 +256,15 @@ func ConfigImages(cfg *types.Config) ([]string, error) {
 		add(p.Image)
 	}
 
+	// The gateway's image is one the configuration names, so it belongs
+	// in the same list as every other. It was missing, which made
+	// refresh fetch everything except the one image a workload with a
+	// gateway network cannot start without, and left MissingImages
+	// reporting a complete store that was not.
+	if cfg.Gateway != nil {
+		add(cfg.Gateway.Image)
+	}
+
 	wf, err := cfg.WorkloadFiles()
 	if err != nil {
 		return nil, fmt.Errorf("cannot get workloads files: %w", err)

@@ -164,3 +164,41 @@ func TestRefreshExpiredDoesNothingOnDemand(t *testing.T) {
 
 	refreshExpired(s, &types.Config{WorkloadPullMode: types.OnDemand})
 }
+
+// The gateway's image is one the configuration names. Leaving it out
+// made refresh fetch everything except the one image a workload with a
+// gateway network cannot start without, and left MissingImages calling a
+// store complete when it was not.
+func TestConfigImagesIncludesTheGateway(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeWorkloads(t, root, "personal", map[string]string{
+		"term.yaml": "name: term\nimage: " + termRef + "\n",
+	})
+
+	cfg := &types.Config{
+		RootDir:  root,
+		Profiles: map[string]types.Profile{"personal": {Name: "personal", Image: xorgRef}},
+		Gateway:  &types.GatewayConfig{Image: "ghcr.io/example/gateway:v1"},
+	}
+
+	imgs, err := ConfigImages(cfg)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{xorgRef, termRef, "ghcr.io/example/gateway:v1"}, imgs)
+}
+
+// A config with no gateway names no gateway image, and must not grow an
+// empty entry the store would then try to resolve.
+func TestConfigImagesWithoutAGateway(t *testing.T) {
+	t.Parallel()
+
+	cfg := &types.Config{
+		RootDir:  t.TempDir(),
+		Profiles: map[string]types.Profile{"personal": {Name: "personal", Image: xorgRef}},
+	}
+
+	imgs, err := ConfigImages(cfg)
+	require.NoError(t, err)
+	assert.Equal(t, []string{xorgRef}, imgs)
+}
