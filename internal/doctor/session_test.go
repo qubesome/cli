@@ -35,20 +35,26 @@ func runningSession() *fakeEnv {
 func TestSessionWithoutAGatewayBlock(t *testing.T) {
 	t.Parallel()
 
-	for name, cfg := range map[string]*types.Config{
-		"no block":  {},
-		"no config": nil,
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+	checks := Session(&fakeEnv{}, &types.Config{})
 
-			checks := Session(&fakeEnv{}, cfg)
+	require.Len(t, checks, 1)
+	assert.Equal(t, OK, checks[0].Status)
+	assert.Contains(t, checks[0].Detail, "no gateway is configured")
+}
 
-			require.Len(t, checks, 1)
-			assert.Equal(t, OK, checks[0].Status)
-			assert.Contains(t, checks[0].Detail, "no gateway is configured")
-		})
-	}
+// A config that could not be read is not a config with no gateway in it.
+// A bare qubesome doctor finds one only through a running profile, and it
+// reported "no gateway is configured" on a host whose config configures
+// one, which is a diagnostic saying something untrue.
+func TestSessionWithNoConfigDoesNotClaimThereIsNoGateway(t *testing.T) {
+	t.Parallel()
+
+	checks := Session(&fakeEnv{}, nil)
+
+	require.Len(t, checks, 1)
+	assert.Equal(t, Warn, checks[0].Status)
+	assert.Contains(t, checks[0].Detail, "no qubesome config was loaded")
+	assert.NotContains(t, checks[0].Detail, "no gateway is configured")
 }
 
 // The holder is not asked about at all without a gateway block, because

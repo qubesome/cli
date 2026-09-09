@@ -15,7 +15,16 @@ import (
 // A user whose config did not load is told so by the profile section, and
 // repeating it here would say nothing new.
 func Session(env Env, cfg *types.Config) []Check {
-	if cfg == nil || cfg.Gateway == nil {
+	// No config and no gateway block are different answers. A bare
+	// qubesome doctor loads a config only through a running profile, so
+	// without one it knows nothing about a gateway rather than knowing
+	// there is none. Reporting the second for the first is how this said
+	// "no gateway is configured" on a host whose config configures one.
+	if cfg == nil {
+		return []Check{checkNoConfig()}
+	}
+
+	if cfg.Gateway == nil {
 		return []Check{checkNoGateway()}
 	}
 
@@ -31,6 +40,21 @@ func Session(env Env, cfg *types.Config) []Check {
 	}
 
 	return checks
+}
+
+// checkNoConfig reports that nothing could be read about the session.
+//
+// It is a warning and not a failure. The session may be perfectly well,
+// and this says only that the question was not answerable, which is a
+// different thing from an answer.
+func checkNoConfig() Check {
+	return Check{
+		Name:   "session gateway",
+		Status: Warn,
+		Detail: "no qubesome config was loaded, so whether a gateway is configured is unknown",
+		Fix: "Name a profile, as in `qubesome doctor <profile>`, or run this from a directory " +
+			"whose config qubesome can find.",
+	}
 }
 
 // checkNoGateway reports a configuration with no gateway block.
