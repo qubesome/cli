@@ -1,11 +1,13 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/netip"
@@ -175,6 +177,27 @@ func (g Gateway) Client() (*Client, error) {
 	}
 
 	return NewClientWithCreds(g.Socket, c.CA, c.Cert, c.Key), nil
+}
+
+// SandboxPID returns this session's gateway sandbox, in the host's pid
+// namespace.
+//
+// It is the pid a veth's gateway end is put next to and the one pasta is
+// pointed at, so it is read from the record the launch wrote rather than
+// worked out again. A state file outlives the process it names, which is why
+// this reports no gateway rather than a pid whenever the record has been
+// left behind by one that crashed.
+func (g Gateway) SandboxPID() (int, error) {
+	if !sandbox.Alive(g.StatePath) {
+		return 0, ErrNoGateway
+	}
+
+	st, err := sandbox.ReadState(g.StatePath)
+	if err != nil {
+		return 0, err
+	}
+
+	return st.PID, nil
 }
 
 // startOnce starts the gateway unless one is already running.
@@ -373,7 +396,13 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 		return gw.stop(err)
 	}
 
-	if err := sandbox.WriteState(g.StatePath, cmd.Process.Pid); err != nil {
+	// The sandbox's own init is recorded and not the bwrap that started it.
+	// It is the pid every namespace path is built from, so a later launch
+	// with a workload to wire has to be able to read it back. It is also the
+	// truer answer to whether the gateway is running: killing the outer
+	// bwrap does not signal the sandbox below it, and a sandbox that has
+	// gone is a gateway that has gone whatever is left above it.
+	if err := sandbox.WriteState(g.StatePath, gw.pid); err != nil {
 		return gw.stop(fmt.Errorf("failed to record the gateway state: %w", err))
 	}
 
@@ -608,27 +637,45 @@ type helper struct {
 
 	// Args is the command, argv[0] first.
 	Args []string
+
+	// Stdin is what the command reads, or nil for nothing. It is how a
+	// helper is given work to do without any of it appearing on a command
+	// line or passing through a shell.
+	Stdin io.Reader
+}
+
+// command builds the helper's process without starting it, and returns the
+// session namespace handle the caller has to keep open until it has.
+func (h helper) command() (*execabs.Cmd, *session.Namespace, error) {
+	args, err := h.bwrapArgs(helperUsernsFD)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ns, err := session.Current().Open(helperUsernsFD)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cmd := execabs.Command(files.BwrapBinary, args...) //nolint:gosec // the arguments are built from the gateway config and this process's own pids.
+	cmd.ExtraFiles = []*os.File{ns.File()}
+	cmd.Stdin = h.Stdin
+
+	return cmd, ns, nil
 }
 
 // start runs the helper and returns the process without waiting for it.
 func (h helper) start() (*execabs.Cmd, error) {
-	args, err := h.bwrapArgs(helperUsernsFD)
-	if err != nil {
-		return nil, err
-	}
-
-	ns, err := session.Current().Open(helperUsernsFD)
+	cmd, ns, err := h.command()
 	if err != nil {
 		return nil, err
 	}
 	defer ns.Close()
 
-	cmd := execabs.Command(files.BwrapBinary, args...) //nolint:gosec // the arguments are built from the gateway config and this process's own pids.
-	cmd.ExtraFiles = []*os.File{ns.File()}
-
-	// A helper outlives the launch that started it for the same reason the
-	// gateway does. pasta is the session's egress and a Ctrl-C at the
-	// terminal that started a workload is not a request to take it away.
+	// A helper started this way outlives the launch that started it, for the
+	// same reason the gateway does. pasta is the session's egress and a
+	// Ctrl-C at the terminal that started a workload is not a request to
+	// take it away.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -638,6 +685,34 @@ func (h helper) start() (*execabs.Cmd, error) {
 	}
 
 	return cmd, nil
+}
+
+// run runs the helper to completion and reports what it said if it failed.
+//
+// The output is collected rather than passed through, because a helper that
+// works says nothing and a helper that does not is the only explanation
+// there will be of why a launch stopped.
+func (h helper) run() error {
+	cmd, ns, err := h.command()
+	if err != nil {
+		return err
+	}
+	defer ns.Close()
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	if err := cmd.Run(); err != nil {
+		said := strings.TrimSpace(out.String())
+		if said == "" {
+			return fmt.Errorf("%s: %w", h.Args[0], err)
+		}
+
+		return fmt.Errorf("%s: %w: %s", h.Args[0], err, said)
+	}
+
+	return nil
 }
 
 // bwrapArgs renders the helper into bwrap arguments.
