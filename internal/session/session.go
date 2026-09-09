@@ -141,8 +141,15 @@ func (s Session) Hold() error {
 //
 // LOCK_NB is what makes a second holder fail at once rather than queue
 // behind the first for the length of a session.
+//
+// O_RDONLY because nothing is ever written here. The lock lives on the
+// open file description and flock takes any descriptor, unlike an fcntl
+// lock, which would need the access mode to match. Opening it writable
+// made static analysis read a discarded Close as a lost write, which it
+// could never be, and least privilege is the honest answer to that rather
+// than handling an error that cannot happen.
 func acquire(path string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, files.FileMode)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, files.FileMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open the session lock %q: %w", path, err)
 	}

@@ -258,8 +258,15 @@ func (g Gateway) startOnce(cfg types.GatewayConfig, root string) (bool, error) {
 // a refusal would stop a workload that has nothing wrong with it. The wait
 // is an image pull at worst, which is what the launch was going to cost
 // anyway.
+//
+// O_RDONLY because nothing is ever written here. The lock lives on the
+// open file description and flock takes any descriptor, unlike an fcntl
+// lock, which would need the access mode to match. Opening it writable
+// made static analysis read a discarded Close as a lost write, which it
+// could never be, and least privilege is the honest answer to that rather
+// than handling an error that cannot happen.
 func acquire(path string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, files.FileMode)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, files.FileMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open the gateway lock %q: %w", path, err)
 	}

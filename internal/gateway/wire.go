@@ -333,11 +333,17 @@ func replace(path, content string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
 
-	_, err = f.WriteString(content)
+		return err
+	}
 
-	return err
+	// Returned rather than deferred away. The last of a write reaches the
+	// filesystem at close, so a failure there is a resolv.conf that is
+	// not what it says it is, and a workload would come up pointed at
+	// nothing with nobody told.
+	return f.Close()
 }
 
 // resolvConf is the whole of a workload's resolver configuration.

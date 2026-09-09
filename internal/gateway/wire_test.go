@@ -287,3 +287,30 @@ func TestHelpersThatMustNotOwnANetworkNamespace(t *testing.T) {
 		})
 	}
 }
+
+// The last of a write reaches the filesystem at close, so a close that
+// fails is a resolv.conf that is not what it says it is. The error used
+// to be deferred away and a workload would have come up pointed at
+// nothing with nobody told.
+func TestReplaceReportsAFailureToClose(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "resolv.conf")
+
+	require.NoError(t, replace(path, "nameserver 10.111.0.1\n"))
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "nameserver 10.111.0.1\n", string(got))
+
+	// Overwriting is the ordinary case, since a sandbox root carries the
+	// image's own resolv.conf.
+	require.NoError(t, replace(path, "nameserver 10.111.0.9\n"))
+	got, err = os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "nameserver 10.111.0.9\n", string(got))
+
+	// A path whose parent is not there cannot be written and must say so.
+	require.Error(t, replace(filepath.Join(dir, "absent", "resolv.conf"), "nameserver 10.111.0.1\n"))
+}
