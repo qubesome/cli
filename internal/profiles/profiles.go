@@ -279,8 +279,7 @@ func Start(profile *types.Profile, cfg *types.Config, interactive bool) (err err
 
 	// Once per start. A profile network name also reaches every workload
 	// it launches, which warns for itself.
-	types.WarnIgnoredNetwork(profile.Name, profile.Network)
-	types.WarnIgnoredDNS(profile.Name, profile.DNS)
+	types.WarnIgnoredNetwork(profile.Name, profile.Network, cfg.Gateway != nil)
 
 	// Both entry paths land here, and docker used to refuse a second
 	// start through the container name. bwrap has no such thing, so a

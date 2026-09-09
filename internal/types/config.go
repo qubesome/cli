@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/qubesome/cli/internal/files"
 	"go.yaml.in/yaml/v3"
@@ -20,7 +21,6 @@ var (
 	timezoneRegex     = regexp.MustCompile(`^[A-Za-z]+/[A-Za-z_]+$`)
 	gpusRegex         = regexp.MustCompile(`^all$`)
 	nameRegex         = regexp.MustCompile(`^[a-zA-Z0-9\-]+$`)
-	ipRegex           = regexp.MustCompile(`^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
 	imageRegex        = regexp.MustCompile(`^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+\/)?(?:[a-z0-9]+(?:[._-][a-z0-9]+)*)+(?:[:/][a-z0-9]+(?:[._-][a-z0-9]+)*)+$`)
 	runnerRegex       = regexp.MustCompile(`^firecracker$`)
 	externalPathRegex = regexp.MustCompile(`^[a-zA-Z0-9\-]+:/[^:]+:/[^:]+$`)
@@ -255,8 +255,6 @@ type Profile struct {
 
 	Timezone string `yaml:"timezone"`
 
-	DNS string `yaml:"dns"`
-
 	// WindowManager holds the command to run the Window Manager once
 	// the X server is running. It runs as the X server's only client, and
 	// is split into arguments without a shell, so shell syntax in it is
@@ -317,41 +315,75 @@ func GatewayNetwork(network string) bool {
 	}
 }
 
-// WarnIgnoredNetwork reports a hostAccess.network value that has no
-// effect.
+// WarnIgnoredNetwork reports a hostAccess.network value that has no effect.
 //
-// An empty value, none and host all mean something to a sandbox. Any
-// other value names a network that only the qubesome gateway can create,
-// and until that lands the sandbox gets its own namespace with loopback
-// and nothing else. The name is kept rather than refused because the
-// reference configuration is full of them and the gateway gives them
-// meaning again.
+// It has one job left. With a gateway block in the config a named network
+// is honoured: the workload is given an address on the gateway's subnet and
+// reaches the network through it. Without one there is no gateway to create
+// that network, so the sandbox gets its own namespace with loopback and
+// nothing else. The name is kept rather than refused because a
+// configuration with no gateway is a supported one and the same
+// configuration gains egress the moment a gateway block is added to it.
 //
 // Callers invoke this once per launch. Validate runs several times for a
 // single launch, so the same config would otherwise warn repeatedly.
-func WarnIgnoredNetwork(name, network string) {
-	if !GatewayNetwork(network) {
+func WarnIgnoredNetwork(name, network string, gateway bool) {
+	if gateway || !GatewayNetwork(network) {
 		return
 	}
 
-	slog.Warn("hostAccess.network is ignored until the qubesome gateway lands, the sandbox gets loopback only",
+	slog.Warn("hostAccess.network needs a gateway block in the qubesome config, the sandbox gets loopback only",
 		"name", name, "network", network)
 }
 
-// WarnIgnoredDNS reports a profile dns value that has no effect.
+// netAdmin is the capability a workload must not hold over a network
+// namespace the gateway addresses. The configuration is free to write it
+// either way round, as the bwrap runner's capsAdd is.
+const netAdmin = "NET_ADMIN"
+
+// ValidateGatewayAccess refuses a workload that asks for both a gateway
+// network and CAP_NET_ADMIN.
 //
-// The container runners passed it as --dns. A sandbox has no resolver to
-// point anywhere, and no network to resolve against, so the value is read
-// by nothing. It is kept for the same reason a named network is: name
-// resolution is the gateway's, and this is the field that would configure
-// it.
-func WarnIgnoredDNS(name, dns string) {
-	if dns == "" {
-		return
+// A workload's address is its identity to the gateway. It is what the
+// gateway looks a policy up by and what it injects that policy's
+// credentials for, so a workload able to renumber its own interface could
+// claim another workload's policy and another workload's injected
+// credentials. Both ends of the veth are therefore configured from outside
+// and the workload keeps nothing over its own network namespace, which is
+// only true if it is never granted this.
+//
+// The refusal is per workload rather than per profile because a workload
+// holds a capability only when it asks for one the profile also grants, so
+// the effective workload is where the two meet.
+//
+// A configuration with no gateway block is unaffected: a named network
+// there means an empty namespace, and CAP_NET_ADMIN over one of those
+// reaches nothing.
+func (c *Config) ValidateGatewayAccess(ew EffectiveWorkload) error {
+	if c == nil || c.Gateway == nil {
+		return nil
 	}
 
-	slog.Warn("profile dns is ignored until the qubesome gateway lands, the sandbox has no resolver",
-		"name", name, "dns", dns)
+	network := ew.Workload.HostAccess.Network
+	if !GatewayNetwork(network) {
+		return nil
+	}
+
+	for _, capability := range ew.Workload.HostAccess.CapsAdd {
+		if strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(capability)), "CAP_") != netAdmin {
+			continue
+		}
+
+		return fmt.Errorf(
+			"workload %q asks for capsAdd %s on the %q network, which the qubesome gateway cannot give it: "+
+				"a workload's address is its identity to the gateway, so one that can renumber itself could claim "+
+				"another workload's policy and another workload's injected credentials. "+
+				"Drop the capability to keep the network, or set hostAccess.network to none to keep the capability "+
+				"with no egress",
+			ew.Name, netAdmin, network)
+	}
+
+	return nil
 }
 
 func valid(val, field string, maxLen int, allowEmpty bool, format *regexp.Regexp) error {
@@ -378,9 +410,6 @@ func (p Profile) Validate() error {
 		return err
 	}
 	if err := valid(p.Image, "image", 100, true, imageRegex); err != nil {
-		return err
-	}
-	if err := valid(p.DNS, "dns", 15, true, ipRegex); err != nil {
 		return err
 	}
 	if err := valid(p.WindowManager, "windowManager", 50, false, nil); err != nil {

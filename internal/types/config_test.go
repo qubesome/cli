@@ -117,24 +117,6 @@ func TestProfileValidate(t *testing.T) {
 			false,
 		},
 		{
-			"dns: valid empty",
-			Profile{
-				Name:          "valid",
-				DNS:           "",
-				WindowManager: "valid",
-			},
-			false,
-		},
-		{
-			"dns: valid empty",
-			Profile{
-				Name:          "valid",
-				DNS:           "1.1.1.1",
-				WindowManager: "valid",
-			},
-			false,
-		},
-		{
 			"windowManager: valid",
 			Profile{
 				Name:          "valid",
@@ -303,16 +285,6 @@ func TestProfileValidateReportsARemovedRunner(t *testing.T) {
 	}
 }
 
-// A profile dns is still accepted. Nothing reads it, and it warns at
-// start rather than failing a config that has always loaded.
-func TestProfileValidateAcceptsDNS(t *testing.T) {
-	t.Parallel()
-
-	p := Profile{Name: "valid", WindowManager: "valid", DNS: "1.1.1.1"}
-
-	require.NoError(t, p.Validate())
-}
-
 // captureLogs redirects the default logger for the duration of the test
 // and returns what was written to it. It replaces a package level logger,
 // so a test using it cannot run in parallel.
@@ -338,37 +310,89 @@ func TestGatewayNetworkIsOnlyANamedOne(t *testing.T) {
 }
 
 // A named network is kept and reported, never refused. The message has to
-// name the field and say the value does nothing yet, since the config
-// looks like it grants a network and the sandbox gets loopback only.
-func TestWarnIgnoredNetwork(t *testing.T) {
+// name the field and say what is missing, since the config looks like it
+// grants a network and the sandbox gets loopback only.
+func TestWarnIgnoredNetworkWithoutAGateway(t *testing.T) {
 	buf := captureLogs(t)
 
 	for _, network := range []string{"", "none", "host"} {
-		WarnIgnoredNetwork("chrome-work", network)
+		WarnIgnoredNetwork("chrome-work", network, false)
 	}
 	require.NotContains(t, buf.String(), "hostAccess.network")
 
-	WarnIgnoredNetwork("chrome-work", "qubesome")
+	WarnIgnoredNetwork("chrome-work", "qubesome", false)
 
 	out := buf.String()
 	assert.Contains(t, out, "hostAccess.network")
-	assert.Contains(t, out, "ignored")
+	assert.Contains(t, out, "gateway block")
 	assert.Contains(t, out, "qubesome")
 	assert.Contains(t, out, "chrome-work")
 }
 
-func TestWarnIgnoredDNS(t *testing.T) {
+// With a gateway the name is honoured, so there is nothing to report.
+func TestWarnIgnoredNetworkSaysNothingWithAGateway(t *testing.T) {
 	buf := captureLogs(t)
 
-	WarnIgnoredDNS("work", "")
-	require.NotContains(t, buf.String(), "profile dns")
+	WarnIgnoredNetwork("chrome-work", "qubesome", true)
 
-	WarnIgnoredDNS("work", "1.1.1.1")
+	assert.NotContains(t, buf.String(), "hostAccess.network")
+}
 
-	out := buf.String()
-	assert.Contains(t, out, "dns")
-	assert.Contains(t, out, "ignored")
-	assert.Contains(t, out, "1.1.1.1")
+// The one deliberate regression of this stage. A workload that can renumber
+// its own interface could claim another workload's policy and another
+// workload's injected credentials, so it cannot be given a gateway address.
+// The message has to name the workload and say what to change, because the
+// same configuration used to work.
+func TestValidateGatewayAccessRefusesNetAdminOnAGatewayNetwork(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Gateway: &GatewayConfig{}}
+
+	for _, capability := range []string{"NET_ADMIN", "net_admin", "CAP_NET_ADMIN"} {
+		err := cfg.ValidateGatewayAccess(gatewayWorkload("qubesome", capability))
+
+		require.Error(t, err, "capsAdd %q", capability)
+		assert.Contains(t, err.Error(), "kali-pentest")
+		assert.Contains(t, err.Error(), "NET_ADMIN")
+		assert.Contains(t, err.Error(), "identity to the gateway")
+	}
+}
+
+// Another capability says nothing about the address, so it is left alone.
+func TestValidateGatewayAccessAllowsOtherCapabilities(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Gateway: &GatewayConfig{}}
+
+	require.NoError(t, cfg.ValidateGatewayAccess(gatewayWorkload("qubesome", "SYS_PTRACE")))
+}
+
+// Without a gateway address there is nothing to claim. A named network with
+// no gateway block is an empty namespace, and CAP_NET_ADMIN over one of
+// those reaches nothing.
+func TestValidateGatewayAccessAllowsNetAdminWithoutAGatewayAddress(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, (&Config{}).ValidateGatewayAccess(gatewayWorkload("qubesome", "NET_ADMIN")))
+	require.NoError(t, (*Config)(nil).ValidateGatewayAccess(gatewayWorkload("qubesome", "NET_ADMIN")))
+
+	cfg := &Config{Gateway: &GatewayConfig{}}
+	for _, network := range []string{"", "none", "host"} {
+		require.NoError(t, cfg.ValidateGatewayAccess(gatewayWorkload(network, "NET_ADMIN")), "network %q", network)
+	}
+}
+
+func gatewayWorkload(network, capability string) EffectiveWorkload {
+	return EffectiveWorkload{
+		Name: "kali-pentest",
+		Workload: Workload{
+			Name: "kali",
+			HostAccess: HostAccess{
+				Network: network,
+				CapsAdd: []string{capability},
+			},
+		},
+	}
 }
 
 func TestGatewayConfigValidate(t *testing.T) {

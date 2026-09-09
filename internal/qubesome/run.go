@@ -180,8 +180,17 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 
 	// The effective value, so a name inherited from the profile is
 	// reported once here rather than at every validation of it.
-	types.WarnIgnoredNetwork(ew.Name, ew.Workload.HostAccess.Network)
+	types.WarnIgnoredNetwork(ew.Name, ew.Workload.HostAccess.Network, in.Config.Gateway != nil)
 	types.WarnIgnoredMicroVMFields(ew.Name, ew.Workload)
+
+	// A workload that could renumber its own interface could claim another
+	// workload's policy and another workload's injected credentials, so the
+	// gateway cannot give one an address. It is refused here rather than at
+	// launch because it is a fact about the configuration, and because the
+	// same workload used to work: the message has to say what to change.
+	if err := in.Config.ValidateGatewayAccess(ew); err != nil {
+		return err
+	}
 
 	if ew.Workload.AttachVM != "" {
 		if err := attachVM(root, profile, ew.Workload.AttachVM); err != nil {
