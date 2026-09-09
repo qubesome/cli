@@ -100,16 +100,25 @@ func pullExpired() (bool, error) {
 // The profile image is in the store by the time this runs, so what it
 // fetches is the workload images.
 func PreemptWorkloadImages(cfg *types.Config) {
-	slog.Debug("Check need for the preemptive pull of workload images")
-	fn := files.ImagesLastCheckedPath()
+	slog.Info("preemptively pulling workload images, which happens once and saves waiting on the first launch of each")
 
-	_, err := os.Stat(fn)
-	if err != nil && os.IsNotExist(err) {
-		fmt.Println("INFO: Preemptively pulling workload images. This only happens on first execution and aims to avoid delays opening apps.")
+	_ = pullMissing(NewStore(), cfg)
+}
 
-		_ = pullMissing(NewStore(), cfg)
-		_ = os.WriteFile(fn, []byte{}, files.FileMode)
-	}
+// FirstRun reports whether this host has never checked its images.
+//
+// It answers from the same sentinel RefreshExpired keeps its timestamp
+// in, because the two questions have one answer: a host that has never
+// refreshed is a host that has never been offered a preload either.
+//
+// The offer used to be made whenever an image was missing, and the
+// sentinel was only consulted afterwards, inside the pull it led to. So
+// declining left nothing recorded and the question came back on every
+// start, which is the one answer that made it permanent.
+func FirstRun() bool {
+	_, err := os.Stat(files.ImagesLastCheckedPath())
+
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // PullAll refreshes every image in a config.

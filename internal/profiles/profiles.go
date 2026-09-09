@@ -295,13 +295,21 @@ func Start(profile *types.Profile, cfg *types.Config, interactive bool) (err err
 		return fmt.Errorf("cannot prepare profile image: %w", err)
 	}
 
-	imgs, err := images.MissingImages(cfg)
-	if err != nil {
-		return err
-	}
+	// Offered once, on the first start on a host, and never again
+	// whatever was answered. RefreshExpired below writes the sentinel
+	// FirstRun reads, so the second start does not ask.
+	//
+	// Nothing is asked without a terminal to ask on. A profile started
+	// from a desktop entry or a keybinding has no one reading its
+	// stdout, and a question nobody sees is a question answered no.
+	if term.IsTerminal(int(os.Stdout.Fd())) && images.FirstRun() {
+		imgs, err := images.MissingImages(cfg)
+		if err != nil {
+			return err
+		}
 
-	if len(imgs) > 0 && term.IsTerminal(int(os.Stdout.Fd())) {
-		if proceed("Not all workload images are present. Start loading them on the background?") {
+		if len(imgs) > 0 &&
+			proceed("Not all workload images are present. Start loading them on the background?") {
 			go images.PreemptWorkloadImages(cfg)
 		}
 	}
