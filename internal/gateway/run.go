@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
@@ -357,6 +358,21 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 		return gw.stop(err)
 	}
 
+	// An uplink that is gone before it was ever useful is a gateway with no
+	// egress, and starting one is worse than not starting: every workload
+	// after it would come up policed but unable to reach anything, with the
+	// only sign a warning in the log of whoever started the session.
+	//
+	// cmd.Start succeeding says only that bwrap ran. It says nothing about
+	// pasta, which is what bwrap then executes, so a gateway image missing
+	// it fails here rather than at Start. That is exactly what a missing
+	// /usr/bin/pasta produced: bwrap reported execvp failed, the launch
+	// carried on, and the uplink was reported lost a moment later as though
+	// it had once been there.
+	if err := stillUp(gw.uplink, uplinkGrace); err != nil {
+		return gw.stop(err)
+	}
+
 	// The sandbox's own init is recorded and not the bwrap that started it.
 	// It is the pid every namespace path is built from, so a later launch
 	// with a workload to wire has to be able to read it back. It is also the
@@ -376,7 +392,6 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 	slog.Debug("[gateway] started the session gateway", "pid", cmd.Process.Pid, "sandbox", gw.pid)
 
 	go reap(cmd, g.StatePath)
-	go watchUplink(gw.uplink)
 
 	return nil
 }
@@ -496,19 +511,40 @@ func pastaArgs(pid int) []string {
 	}
 }
 
-// watchUplink reports the uplink going away and deliberately does nothing
-// else about it.
-//
-// A gateway that loses pasta loses its egress, which is the safe direction:
-// the workloads behind it stop reaching anything rather than reaching it
-// unpoliced. Restarting it here would be a session that cannot say whether
-// what it is doing is being policed, and a workload that briefly could not
-// resolve a name is the better of those two.
-func watchUplink(cmd *execabs.Cmd) {
-	err := cmd.Wait()
+// uplinkGrace is how long the uplink has to fail before its going away is
+// read as a failure to start rather than as a loss of egress later. It is
+// short because the failures it catches are immediate: a binary that is not
+// in the image, or one that refuses its arguments.
+const uplinkGrace = 500 * time.Millisecond
 
-	slog.Warn("the session gateway has lost its uplink and has no egress; "+
-		"restart the session to give it one", "error", err)
+// stillUp reports whether the uplink survived its first moments.
+//
+// It waits rather than polling the process table, because a command that
+// exits is only reapable once, and watchUplink is what reaps it afterwards.
+func stillUp(cmd *execabs.Cmd, grace time.Duration) error {
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case err := <-done:
+		// It is already reaped, so nothing else may wait on it. Replacing
+		// the process leaves watchUplink with a command it cannot wait on
+		// twice, which is why this path returns rather than starting it.
+		return fmt.Errorf("the gateway uplink did not start: %w", err)
+	case <-time.After(grace):
+		// Hand the wait back. The goroutine above still owns it, so
+		// watchUplink is given the channel rather than the command.
+		// Losing it later is reported and not repaired. Restarting it
+		// would be a session that cannot say whether what it is doing is
+		// policed, and a workload that briefly could not resolve a name
+		// is the better of those two.
+		go func() {
+			slog.Warn("the session gateway has lost its uplink and has no egress; "+
+				"restart the session to give it one", "error", <-done)
+		}()
+
+		return nil
+	}
 }
 
 // helper is a short-lived command run from the gateway image's rootfs inside
@@ -704,8 +740,22 @@ func (g Gateway) spec(bundle images.Bundle, configPath string, creds *mtls.Crede
 	return sandbox.Spec{
 		Rootfs:   bundle.Rootfs,
 		Hostname: gatewayHostname,
-		UID:      bundle.UID,
-		GID:      bundle.GID,
+		// Zero and not the image's uid, which is what every other
+		// sandbox takes. bwrap builds a second user namespace to switch
+		// to a non-zero uid, and the network namespace stays owned by
+		// the first, so CAP_NET_ADMIN granted in the second does not
+		// reach it. The gateway programs nftables in that namespace, and
+		// with the image's uid every rule came back Operation not
+		// permitted. Measured with NS_GET_USERNS on the sandbox's own
+		// netns: at uid 0 the owner is the process's own user namespace,
+		// and at any other uid the ioctl is refused outright because the
+		// owner is a namespace the process is not in.
+		//
+		// It is not host root. It is uid 0 of a user namespace bwrap
+		// created for this sandbox, mapped to the invoking user, holding
+		// CAP_NET_ADMIN and nothing else.
+		UID: 0,
+		GID: 0,
 
 		// Its own empty namespace. The uplink and every workload's veth are
 		// put into it from the session namespace above rather than by
