@@ -106,6 +106,22 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		// default, and a missing /sys is fatal rather than a silent drop
 		// to software rendering, which is the failure this exists to
 		// remove.
+		//
+		// The cost is that a workload in its own empty network namespace
+		// still reads the host's interface names and addresses through
+		// /sys/class/net. sysfs carries the mounting namespace's view and
+		// this bind carries the host's. It is disclosure and not
+		// reachability, since /proc/net is per namespace and shows
+		// nothing.
+		//
+		// Narrowing it has been tried and cost hardware rendering.
+		// Sharing /sys/dev/char and the render node's device directory
+		// satisfies libdrm, measured with drmGetDevices2 and
+		// drmGetDevice2 in a real sandbox, and Mesa still failed with
+		// "MESA-LOADER: failed to retrieve device information". Mesa
+		// reads more than libdrm enumerates, so a libdrm probe is not
+		// evidence that narrowing is safe. Anyone trying again needs a GL
+		// or Vulkan initialisation inside the sandbox as the check.
 		"--ro-bind", "/sys", "/sys",
 
 		// /tmp holds nothing from the image that the sandbox needs, and a
