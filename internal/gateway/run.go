@@ -566,6 +566,26 @@ type helper struct {
 	// not make.
 	Devices []string
 
+	// OwnNet gives the helper a network namespace of its own.
+	//
+	// It decides whether the helper may create a link at all. A netlink
+	// request is authorised against the namespace the caller is standing
+	// in, so a helper in the host's namespace needs CAP_NET_ADMIN over
+	// the host's, which an ordinary user has nowhere. In one it made
+	// itself, the owner is the session's user namespace and the same
+	// capability applies.
+	//
+	// That is what creating a veth failed on, with RTNETLINK answers:
+	// Operation not permitted, while both namespaces the ends were bound
+	// for were reachable. Moving an end into a target namespace is a
+	// separate permission, held over the target's owner, and the session
+	// namespace covers every sandbox nested under it.
+	//
+	// pasta is the helper that must not have one. It holds its sockets in
+	// the host's namespace and puts a tap in the target, so a namespace
+	// of its own would leave it serving from nowhere.
+	OwnNet bool
+
 	// Args is the command, argv[0] first.
 	Args []string
 
@@ -688,17 +708,19 @@ func (h helper) bwrapArgs(usernsFD int) ([]string, error) {
 		"--overlay-src", h.Rootfs,
 		"--tmp-overlay", "/",
 
-		// Neither the network namespace nor the pid namespace is unshared.
-		// The first is where pasta holds its sockets, and the second is
-		// what makes /proc/<pid>/ns/net name the sandbox a helper is
-		// pointed at: a fresh pid namespace would carry a /proc listing
-		// only the helper itself.
+		// The pid namespace is never unshared. It is what makes
+		// /proc/<pid>/ns/net name the sandbox a helper is pointed at,
+		// and a fresh one would carry a /proc listing only the helper.
 		"--unshare-ipc",
 		"--unshare-uts",
 		"--unshare-cgroup",
 
 		"--cap-drop", "ALL",
 	)
+
+	if h.OwnNet {
+		args = append(args, "--unshare-net")
+	}
 
 	// bwrap applies capability arguments in order, so these have to follow
 	// the drop above, as sandbox.Args emits them.

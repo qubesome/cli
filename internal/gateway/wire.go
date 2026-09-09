@@ -74,7 +74,14 @@ func (g Gateway) Wire(cfg types.GatewayConfig, addr netip.Addr, workloadPID int)
 
 	// One command places both ends, so nothing has to enter a namespace to
 	// build the pair. Entering is only needed to address one.
-	if err := (helper{Rootfs: w.rootfs, Caps: wireCaps, Args: linkArgs(w)}).run(); err != nil {
+	//
+	// OwnNet because the request is authorised against the namespace the
+	// caller stands in, not the ones the ends are bound for. In the
+	// host's it needs CAP_NET_ADMIN over the host's network, which an
+	// ordinary user does not have, and creating the pair failed with
+	// RTNETLINK answers: Operation not permitted while both destinations
+	// were perfectly reachable.
+	if err := (helper{Rootfs: w.rootfs, Caps: wireCaps, Args: linkArgs(w), OwnNet: true}).run(); err != nil {
 		return fmt.Errorf("failed to create the veth to workload %s: %w", addr, err)
 	}
 
@@ -159,6 +166,9 @@ func (g Gateway) wiring(cfg types.GatewayConfig, addr netip.Addr, workloadPID in
 
 // configure runs one namespace's worth of ip commands inside it.
 func (w wiring) configure(pid int, script []string) error {
+	// No OwnNet here. This one enters the namespace it configures, so the
+	// namespace it starts in decides nothing, and giving it one would be
+	// a namespace it immediately leaves.
 	return helper{
 		Rootfs: w.rootfs,
 		Caps:   wireCaps,

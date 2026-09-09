@@ -245,3 +245,45 @@ func read(t *testing.T, path string) string {
 
 	return string(data)
 }
+
+// A netlink request is authorised against the namespace the caller stands
+// in, not the ones the link's ends are bound for. In the host's namespace
+// creating the pair fails with RTNETLINK answers: Operation not permitted,
+// while both destinations are reachable, which reads as though the targets
+// were the problem.
+func TestLinkHelperOwnsItsNetworkNamespace(t *testing.T) {
+	t.Parallel()
+
+	args, err := helper{
+		Rootfs: "/bundle/rootfs",
+		Caps:   wireCaps,
+		Args:   []string{"/usr/sbin/ip"},
+		OwnNet: true,
+	}.bwrapArgs(3)
+	require.NoError(t, err)
+	assert.Contains(t, args, "--unshare-net")
+}
+
+// pasta is the helper that must not have one. It holds its sockets in the
+// host's namespace and puts a tap in the target, so a namespace of its own
+// would leave it serving from nowhere. The addressing helper does not need
+// one either, since it enters the namespace it configures.
+func TestHelpersThatMustNotOwnANetworkNamespace(t *testing.T) {
+	t.Parallel()
+
+	for name, h := range map[string]helper{
+		"uplink": {Rootfs: "/bundle/rootfs", Caps: wireCaps, Args: []string{"/usr/bin/pasta"}},
+		"address": {
+			Rootfs: "/bundle/rootfs", Caps: wireCaps,
+			Args: []string{"/usr/bin/nsenter", "--net=/proc/1/ns/net"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			args, err := h.bwrapArgs(3)
+			require.NoError(t, err)
+			assert.NotContains(t, args, "--unshare-net")
+		})
+	}
+}
