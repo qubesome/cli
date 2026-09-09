@@ -22,6 +22,7 @@ const (
 	GatewayControl_Register_FullMethodName   = "/control.GatewayControl/Register"
 	GatewayControl_Unregister_FullMethodName = "/control.GatewayControl/Unregister"
 	GatewayControl_Ready_FullMethodName      = "/control.GatewayControl/Ready"
+	GatewayControl_Reload_FullMethodName     = "/control.GatewayControl/Reload"
 )
 
 // GatewayControlClient is the client API for GatewayControl service.
@@ -31,6 +32,7 @@ type GatewayControlClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterReply, error)
 	Unregister(ctx context.Context, in *UnregisterRequest, opts ...grpc.CallOption) (*UnregisterReply, error)
 	Ready(ctx context.Context, in *ReadyRequest, opts ...grpc.CallOption) (*ReadyReply, error)
+	Reload(ctx context.Context, in *ReloadRequest, opts ...grpc.CallOption) (*ReloadReply, error)
 }
 
 type gatewayControlClient struct {
@@ -71,6 +73,16 @@ func (c *gatewayControlClient) Ready(ctx context.Context, in *ReadyRequest, opts
 	return out, nil
 }
 
+func (c *gatewayControlClient) Reload(ctx context.Context, in *ReloadRequest, opts ...grpc.CallOption) (*ReloadReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReloadReply)
+	err := c.cc.Invoke(ctx, GatewayControl_Reload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GatewayControlServer is the server API for GatewayControl service.
 // All implementations must embed UnimplementedGatewayControlServer
 // for forward compatibility.
@@ -78,6 +90,7 @@ type GatewayControlServer interface {
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
 	Unregister(context.Context, *UnregisterRequest) (*UnregisterReply, error)
 	Ready(context.Context, *ReadyRequest) (*ReadyReply, error)
+	Reload(context.Context, *ReloadRequest) (*ReloadReply, error)
 	mustEmbedUnimplementedGatewayControlServer()
 }
 
@@ -96,6 +109,9 @@ func (UnimplementedGatewayControlServer) Unregister(context.Context, *Unregister
 }
 func (UnimplementedGatewayControlServer) Ready(context.Context, *ReadyRequest) (*ReadyReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Ready not implemented")
+}
+func (UnimplementedGatewayControlServer) Reload(context.Context, *ReloadRequest) (*ReloadReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Reload not implemented")
 }
 func (UnimplementedGatewayControlServer) mustEmbedUnimplementedGatewayControlServer() {}
 func (UnimplementedGatewayControlServer) testEmbeddedByValue()                        {}
@@ -172,6 +188,24 @@ func _GatewayControl_Ready_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GatewayControl_Reload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GatewayControlServer).Reload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GatewayControl_Reload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GatewayControlServer).Reload(ctx, req.(*ReloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // GatewayControl_ServiceDesc is the grpc.ServiceDesc for GatewayControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -190,6 +224,10 @@ var GatewayControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Ready",
 			Handler:    _GatewayControl_Ready_Handler,
+		},
+		{
+			MethodName: "Reload",
+			Handler:    _GatewayControl_Reload_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

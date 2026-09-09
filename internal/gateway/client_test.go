@@ -117,6 +117,29 @@ func TestReadyGivesUpWithTheCaller(t *testing.T) {
 	assert.Error(t, c.Ready(ctx))
 }
 
+func TestReloadAsksTheGatewayToReReadItsPolicy(t *testing.T) {
+	gw := newGateway(closedChan(), testWorkload)
+	c := startGateway(t, gw)
+
+	require.NoError(t, c.Reload(t.Context()))
+
+	assert.Equal(t, 1, gw.reloaded())
+}
+
+// A gateway older than this qubesome does not serve the call. That is a
+// gateway which will never re-read its policy, which is a different answer
+// from a reload the gateway refused.
+func TestReloadReportsAGatewayThatCannotReload(t *testing.T) {
+	gw := newGateway(closedChan(), testWorkload)
+	gw.noReload = true
+	c := startGateway(t, gw)
+
+	err := c.Reload(t.Context())
+
+	require.ErrorIs(t, err, ErrReloadUnsupported)
+	assert.Equal(t, 0, gw.reloaded())
+}
+
 // The control channel writes the map every classification decision is made
 // from, so a client the gateway's CA did not sign gets nowhere.
 func TestClientWithTheWrongCAIsRefused(t *testing.T) {
@@ -210,17 +233,21 @@ func closedChan() <-chan struct{} {
 }
 
 // testGateway stands in for the gateway's side of the control channel. It
-// answers the three methods the same way the gateway does, over a policy that
-// is just the set of names it was built with.
+// answers the same way the gateway does, over a policy that is just the set of
+// names it was built with.
 type testGateway struct {
 	pb.UnimplementedGatewayControlServer
 
 	ready <-chan struct{}
 
+	// noReload makes this a gateway built before Reload existed.
+	noReload bool
+
 	mu       sync.Mutex
 	known    map[string]bool
 	byAddr   map[netip.Addr]string
 	addrOfWl map[string]netip.Addr
+	reloads  int
 }
 
 func newGateway(ready <-chan struct{}, known ...string) *testGateway {
@@ -277,6 +304,19 @@ func (gw *testGateway) Unregister(_ context.Context, in *pb.UnregisterRequest) (
 	return &pb.UnregisterReply{}, nil
 }
 
+func (gw *testGateway) Reload(_ context.Context, _ *pb.ReloadRequest) (*pb.ReloadReply, error) {
+	if gw.noReload {
+		return nil, status.Error(codes.Unimplemented, "method Reload not implemented")
+	}
+
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+
+	gw.reloads++
+
+	return &pb.ReloadReply{}, nil
+}
+
 func (gw *testGateway) Ready(ctx context.Context, _ *pb.ReadyRequest) (*pb.ReadyReply, error) {
 	select {
 	case <-gw.ready:
@@ -285,6 +325,14 @@ func (gw *testGateway) Ready(ctx context.Context, _ *pb.ReadyRequest) (*pb.Ready
 		//nolint:wrapcheck // A gRPC status is the wire representation of the failure.
 		return nil, status.FromContextError(ctx.Err()).Err()
 	}
+}
+
+// reloaded returns how many times the control channel asked for a reload.
+func (gw *testGateway) reloaded() int {
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+
+	return gw.reloads
 }
 
 // mapped returns the address to workload map the control channel has written.

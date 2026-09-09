@@ -123,11 +123,62 @@ func (g Gateway) Up(cfg types.GatewayConfig, root string) error {
 		return fmt.Errorf("failed to create the session dir %q: %w", g.Dir, err)
 	}
 
-	if err := g.startOnce(cfg, root); err != nil {
+	started, err := g.startOnce(cfg, root)
+	if err != nil {
 		return err
 	}
 
-	return g.ready()
+	if err := g.ready(); err != nil {
+		return err
+	}
+
+	// A gateway this launch started has just read the policy file, so there
+	// is nothing to re-read.
+	if started {
+		return nil
+	}
+
+	return g.reload()
+}
+
+// reload asks a gateway that was already running to re-read its policy file.
+//
+// It happens on every launch that finds one running, and not only when the
+// file looks changed. Whether it changed since that gateway read it is not
+// something this process can answer: the launch that started the gateway was
+// another process and has usually exited, so nothing is left holding the stat
+// it took. The alternative is a stamp file on disk that can go stale in either
+// direction, and the thing it would save is one read of a small YAML by a
+// process that is otherwise about to unpack an image and build a sandbox.
+//
+// After ready and never before it. The gateway programs its ruleset and brings
+// up its resolver and proxy before it reports ready, and a reload arriving in
+// that window would ask it to swap a policy it has not finished standing up
+// on.
+//
+// A failure here stops the launch, for the reason Attached is rigid about. The
+// workload is about to be handed to a policy the user edited, and running it
+// under the older one means running it with rules it was not meant to have.
+// The one exception is a gateway too old to serve the call at all, which never
+// re-read its policy and is no worse for being asked.
+func (g Gateway) reload() error {
+	c, err := g.Client()
+	if err != nil {
+		return err
+	}
+
+	if err := c.Reload(context.Background()); err != nil {
+		if errors.Is(err, ErrReloadUnsupported) {
+			slog.Warn("the running gateway cannot re-read its policy, so edits to it apply only to the next session")
+			return nil
+		}
+
+		return err
+	}
+
+	slog.Debug("[gateway] the session gateway re-read its policy")
+
+	return nil
 }
 
 // Client returns a client for this session's gateway, presenting the
@@ -162,7 +213,8 @@ func (g Gateway) SandboxPID() (int, error) {
 	return st.PID, nil
 }
 
-// startOnce starts the gateway unless one is already running.
+// startOnce starts the gateway unless one is already running, and reports
+// whether it started one.
 //
 // One per session, on demand, and not one per profile: the policy file is
 // keyed by workload across every profile, so a gateway per profile would
@@ -179,19 +231,23 @@ func (g Gateway) SandboxPID() (int, error) {
 // A launch arriving while the gateway is still coming up has to wait for the
 // same event, and the Ready call is where that waiting belongs. Holding the
 // lock would make it wait twice for one thing.
-func (g Gateway) startOnce(cfg types.GatewayConfig, root string) error {
+func (g Gateway) startOnce(cfg types.GatewayConfig, root string) (bool, error) {
 	lock, err := acquire(g.LockPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer lock.Close()
 
 	if sandbox.Alive(g.StatePath) {
 		slog.Debug("[gateway] the session gateway is already running")
-		return nil
+		return false, nil
 	}
 
-	return g.start(cfg, root)
+	if err := g.start(cfg, root); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 // acquire takes the gateway lock and returns the file that holds it.

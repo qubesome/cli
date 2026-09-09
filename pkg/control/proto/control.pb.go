@@ -264,6 +264,85 @@ func (*ReadyReply) Descriptor() ([]byte, []int) {
 	return file_pkg_control_proto_control_proto_rawDescGZIP(), []int{5}
 }
 
+// Reload asks the gateway to re-read the policy file it was started with.
+// The path is not carried: the gateway is handed its policy at start and is
+// the only side that knows where the file landed inside its sandbox.
+//
+// The workload map is not part of the file and survives a reload. qubesome
+// is the source of truth for it, and a reload that dropped it would leave
+// running workloads unclassified.
+type ReloadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReloadRequest) Reset() {
+	*x = ReloadRequest{}
+	mi := &file_pkg_control_proto_control_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReloadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReloadRequest) ProtoMessage() {}
+
+func (x *ReloadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_control_proto_control_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReloadRequest.ProtoReflect.Descriptor instead.
+func (*ReloadRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_control_proto_control_proto_rawDescGZIP(), []int{6}
+}
+
+type ReloadReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReloadReply) Reset() {
+	*x = ReloadReply{}
+	mi := &file_pkg_control_proto_control_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReloadReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReloadReply) ProtoMessage() {}
+
+func (x *ReloadReply) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_control_proto_control_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReloadReply.ProtoReflect.Descriptor instead.
+func (*ReloadReply) Descriptor() ([]byte, []int) {
+	return file_pkg_control_proto_control_proto_rawDescGZIP(), []int{7}
+}
+
 var File_pkg_control_proto_control_proto protoreflect.FileDescriptor
 
 const file_pkg_control_proto_control_proto_rawDesc = "" +
@@ -278,12 +357,15 @@ const file_pkg_control_proto_control_proto_rawDesc = "" +
 	"\x0fUnregisterReply\"\x0e\n" +
 	"\fReadyRequest\"\f\n" +
 	"\n" +
-	"ReadyReply2\xcd\x01\n" +
+	"ReadyReply\"\x0f\n" +
+	"\rReloadRequest\"\r\n" +
+	"\vReloadReply2\x87\x02\n" +
 	"\x0eGatewayControl\x12>\n" +
 	"\bRegister\x12\x18.control.RegisterRequest\x1a\x16.control.RegisterReply\"\x00\x12D\n" +
 	"\n" +
 	"Unregister\x12\x1a.control.UnregisterRequest\x1a\x18.control.UnregisterReply\"\x00\x125\n" +
-	"\x05Ready\x12\x15.control.ReadyRequest\x1a\x13.control.ReadyReply\"\x00B+Z)github.com/qubesome/cli/pkg/control/protob\x06proto3"
+	"\x05Ready\x12\x15.control.ReadyRequest\x1a\x13.control.ReadyReply\"\x00\x128\n" +
+	"\x06Reload\x12\x16.control.ReloadRequest\x1a\x14.control.ReloadReply\"\x00B+Z)github.com/qubesome/cli/pkg/control/protob\x06proto3"
 
 var (
 	file_pkg_control_proto_control_proto_rawDescOnce sync.Once
@@ -297,7 +379,7 @@ func file_pkg_control_proto_control_proto_rawDescGZIP() []byte {
 	return file_pkg_control_proto_control_proto_rawDescData
 }
 
-var file_pkg_control_proto_control_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_pkg_control_proto_control_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_pkg_control_proto_control_proto_goTypes = []any{
 	(*RegisterRequest)(nil),   // 0: control.RegisterRequest
 	(*RegisterReply)(nil),     // 1: control.RegisterReply
@@ -305,16 +387,20 @@ var file_pkg_control_proto_control_proto_goTypes = []any{
 	(*UnregisterReply)(nil),   // 3: control.UnregisterReply
 	(*ReadyRequest)(nil),      // 4: control.ReadyRequest
 	(*ReadyReply)(nil),        // 5: control.ReadyReply
+	(*ReloadRequest)(nil),     // 6: control.ReloadRequest
+	(*ReloadReply)(nil),       // 7: control.ReloadReply
 }
 var file_pkg_control_proto_control_proto_depIdxs = []int32{
 	0, // 0: control.GatewayControl.Register:input_type -> control.RegisterRequest
 	2, // 1: control.GatewayControl.Unregister:input_type -> control.UnregisterRequest
 	4, // 2: control.GatewayControl.Ready:input_type -> control.ReadyRequest
-	1, // 3: control.GatewayControl.Register:output_type -> control.RegisterReply
-	3, // 4: control.GatewayControl.Unregister:output_type -> control.UnregisterReply
-	5, // 5: control.GatewayControl.Ready:output_type -> control.ReadyReply
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
+	6, // 3: control.GatewayControl.Reload:input_type -> control.ReloadRequest
+	1, // 4: control.GatewayControl.Register:output_type -> control.RegisterReply
+	3, // 5: control.GatewayControl.Unregister:output_type -> control.UnregisterReply
+	5, // 6: control.GatewayControl.Ready:output_type -> control.ReadyReply
+	7, // 7: control.GatewayControl.Reload:output_type -> control.ReloadReply
+	4, // [4:8] is the sub-list for method output_type
+	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -331,7 +417,7 @@ func file_pkg_control_proto_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_control_proto_control_proto_rawDesc), len(file_pkg_control_proto_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

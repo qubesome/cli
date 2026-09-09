@@ -18,15 +18,26 @@ import (
 	"github.com/qubesome/cli/pkg/control"
 	pb "github.com/qubesome/cli/pkg/control/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
-// writeTimeout bounds Register and Unregister.
+// ErrReloadUnsupported reports a gateway that does not serve Reload, which
+// is one built before the call existed. It re-reads its policy never, which
+// is what it did before there was anything to ask.
+var ErrReloadUnsupported = errors.New("gateway: this gateway does not support reloading its policy")
+
+// writeTimeout bounds Register, Unregister and Reload.
 //
-// Both are one write to a map the gateway already holds in memory. There is
-// no work behind either of them, so a round trip over a unix socket is all
-// they cost. Anything longer means the gateway is not answering, and waiting
-// on it will not change that.
+// Register and Unregister are one write to a map the gateway already holds in
+// memory. There is no work behind either of them, so a round trip over a unix
+// socket is all they cost. Anything longer means the gateway is not answering,
+// and waiting on it will not change that.
+//
+// Reload belongs with them rather than with Ready. Re-reading a small policy
+// file the gateway already has bound into its sandbox is not a launch, and
+// nothing behind it pulls an image or programs a ruleset.
 const writeTimeout = 5 * time.Second
 
 // readyTimeout bounds the wait for the gateway to finish coming up.
@@ -169,6 +180,38 @@ func (c *Client) Unregister(ctx context.Context, name string) error {
 	_, err = pb.NewGatewayControlClient(conn).Unregister(ctx, &pb.UnregisterRequest{Name: name})
 	if err != nil {
 		return fmt.Errorf("failed to unregister workload %q: %w", name, err)
+	}
+
+	return nil
+}
+
+// Reload asks the gateway to re-read the policy file it was started with.
+//
+// The gateway keeps its workload map across the reload, because qubesome is
+// the source of truth for that map and the file says nothing about it.
+//
+// A gateway older than this qubesome does not serve the call and answers
+// Unimplemented. That is reported as ErrReloadUnsupported so a caller can
+// tell "this gateway will never re-read its policy" apart from "the reload
+// was refused", which are different problems with different answers.
+func (c *Client) Reload(ctx context.Context) error {
+	conn, err := c.dial()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+
+	slog.Debug("[gateway] calling Reload")
+	_, err = pb.NewGatewayControlClient(conn).Reload(ctx, &pb.ReloadRequest{})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return ErrReloadUnsupported
+		}
+
+		return fmt.Errorf("failed to reload the gateway policy: %w", err)
 	}
 
 	return nil

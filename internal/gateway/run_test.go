@@ -90,17 +90,39 @@ func TestAttachedStopsTheLaunchWhenTheGatewayWillNotStart(t *testing.T) {
 
 // One gateway per session. The config here would fail at the first thing
 // start does, so a launch that returns without an error is one that never
-// went looking for a second gateway to start.
+// went looking for a second gateway to start. The gateway it found instead is
+// asked to re-read its policy, because the file may have been edited since the
+// launch that started it read it.
 func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 	g := newSessionGateway(t)
 
 	creds := newCreds(t)
 	require.NoError(t, g.writeCreds(creds))
-	listenOn(t, newGateway(closedChan()), creds, g.Socket)
+	gw := newGateway(closedChan())
+	listenOn(t, gw, creds, g.Socket)
 
 	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
 
 	require.NoError(t, g.Up(unusableConfig(), t.TempDir()))
+
+	assert.Equal(t, 1, gw.reloaded())
+}
+
+// A gateway too old to re-read its policy is one that behaves as every gateway
+// did before the call existed, so a launch carries on rather than refusing to
+// start a workload over it.
+func TestUpAcceptsAGatewayThatCannotReload(t *testing.T) {
+	g := newSessionGateway(t)
+
+	creds := newCreds(t)
+	require.NoError(t, g.writeCreds(creds))
+	gw := newGateway(closedChan())
+	gw.noReload = true
+	listenOn(t, gw, creds, g.Socket)
+
+	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
+
+	assert.NoError(t, g.Up(unusableConfig(), t.TempDir()))
 }
 
 // A state file outlives the process it names, so a gateway that crashed must
