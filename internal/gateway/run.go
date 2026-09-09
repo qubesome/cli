@@ -11,7 +11,10 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
@@ -50,18 +53,32 @@ const (
 	// gatewayHostname is what the sandbox calls itself. There is one gateway
 	// for the whole session, so unlike a workload's it carries no profile.
 	gatewayHostname = "qubesome-gateway"
+
+	// pastaCommand is the uplink binary in the gateway image, where the
+	// passt package puts it.
+	pastaCommand = "/usr/bin/pasta"
+
+	// tunDevice is the node pasta opens to create the tap it puts in the
+	// gateway's network namespace. bwrap's --dev makes a small set of nodes
+	// and this is not one of them, so it is bound in by name.
+	tunDevice = "/dev/net/tun"
 )
 
-// The descriptors the sandbox is handed, in the order they are put in
-// exec.Cmd.ExtraFiles, which os/exec numbers from 3 upwards. The seccomp
-// filter and the packed arguments are read by the inner bwrap and the
-// namespace by the outer one, and all three pass through the outer bwrap
-// unchanged.
+// The descriptors the gateway sandbox is handed, in the order they are put
+// in exec.Cmd.ExtraFiles, which os/exec numbers from 3 upwards. The seccomp
+// filter, the packed arguments and the info pipe are read and written by the
+// inner bwrap and the namespace by the outer one, and all four pass through
+// the outer bwrap unchanged.
 const (
 	seccompFD = 3
 	packedFD  = 4
 	usernsFD  = 5
+	infoFD    = 6
 )
+
+// helperUsernsFD is the session namespace's descriptor in a helper. A helper
+// is handed nothing else, so it is the first one os/exec numbers.
+const helperUsernsFD = 3
 
 // Serves reports whether network names a network the gateway provides.
 //
@@ -256,7 +273,7 @@ func (g Gateway) start(cfg types.GatewayConfig, root string) error {
 		return fmt.Errorf("failed to get the gateway image %q: %w", cfg.Image, err)
 	}
 
-	return g.launch(g.spec(bundle, configPath, creds))
+	return g.launch(bundle, g.spec(bundle, configPath, creds))
 }
 
 // prepareDirs creates the host directories the sandbox is given.
@@ -277,8 +294,13 @@ func (g Gateway) prepareDirs() error {
 	return nil
 }
 
-// launch starts the gateway sandbox and records it.
-func (g Gateway) launch(spec sandbox.Spec) error {
+// launch starts the gateway sandbox, gives it its uplink, and records it.
+//
+// It is recorded last. Everything before that point can fail, and a gateway
+// found alive by the next launch is one that launch will use, so a gateway
+// that has no pid to wire workloads to or no uplink to reach anything
+// through must not be left behind looking healthy.
+func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 	filter, err := seccomp.MemFD()
 	if err != nil {
 		return err
@@ -293,7 +315,7 @@ func (g Gateway) launch(spec sandbox.Spec) error {
 	// The server half of the control credentials is in the environment, and
 	// a command line is world readable through /proc. Only the descriptor
 	// holding the options, and the command, stay on it.
-	outer, packed, err := sandbox.PackArgs(spec, args, packedFD)
+	outer, packed, err := sandbox.PackArgs(spec, infoFDArgs(args), packedFD)
 	if err != nil {
 		return err
 	}
@@ -310,8 +332,14 @@ func (g Gateway) launch(spec sandbox.Spec) error {
 	}
 	defer ns.Close()
 
+	info, report, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("failed to create the gateway info pipe: %w", err)
+	}
+	defer info.Close()
+
 	cmd := execabs.Command(files.BwrapBinary, ns.Enter(outer)...) //nolint:gosec // the arguments are built from the gateway config.
-	cmd.ExtraFiles = []*os.File{filter, packed, ns.File()}
+	cmd.ExtraFiles = []*os.File{filter, packed, ns.File(), report}
 
 	// The gateway outlives the launch that started it, and a qubesome run
 	// typed at a terminal sits in the shell's foreground process group. A
@@ -321,19 +349,32 @@ func (g Gateway) launch(spec sandbox.Spec) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+
+	// The sandbox has its own copy of the write end now, and this one is of
+	// no further use. It is closed whether or not the start worked, since
+	// otherwise this process would be holding a pipe nothing will ever
+	// write to.
+	report.Close()
+
+	if err != nil {
 		return fmt.Errorf("failed to start the gateway sandbox: %w", err)
 	}
 
-	if err := sandbox.WriteState(g.StatePath, cmd.Process.Pid); err != nil {
-		// A gateway nothing can find again is worse than none: the next
-		// launch would start a second one on the same socket.
-		if kerr := cmd.Process.Kill(); kerr != nil {
-			slog.Warn("failed to kill the unrecorded gateway", "error", kerr)
-		}
-		_ = cmd.Wait()
+	gw := running{cmd: cmd}
 
-		return fmt.Errorf("failed to record the gateway state: %w", err)
+	gw.pid, err = childPID(info, infoGrace)
+	if err != nil {
+		return gw.stop(err)
+	}
+
+	gw.uplink, err = uplink(bundle.Rootfs, gw.pid)
+	if err != nil {
+		return gw.stop(err)
+	}
+
+	if err := sandbox.WriteState(g.StatePath, cmd.Process.Pid); err != nil {
+		return gw.stop(fmt.Errorf("failed to record the gateway state: %w", err))
 	}
 
 	// This gateway holds an empty map, so the addresses its predecessor was
@@ -342,12 +383,351 @@ func (g Gateway) launch(spec sandbox.Spec) error {
 		slog.Warn("failed to reset the gateway addresses", "path", g.AllocPath, "error", err)
 	}
 
-	slog.Debug("[gateway] started the session gateway", "pid", cmd.Process.Pid)
+	slog.Debug("[gateway] started the session gateway", "pid", cmd.Process.Pid, "sandbox", gw.pid)
 
 	go reap(cmd, g.StatePath)
+	go watchUplink(gw.uplink)
 
 	return nil
 }
+
+// running is a gateway sandbox that has started but is not yet usable.
+type running struct {
+	// cmd is the bwrap that was started, which is the outer one of the two.
+	cmd *execabs.Cmd
+
+	// pid is the sandbox's own init process in the host's pid namespace,
+	// which is what bwrap reports on its info descriptor. It is the pid
+	// every namespace path is built from, so it is carried rather than
+	// worked out again from the process tree.
+	pid int
+
+	// uplink is pasta, or nil before it has been started.
+	uplink *execabs.Cmd
+}
+
+// stop takes down a gateway that cannot be used and returns why.
+//
+// A gateway nothing can find again is worse than none, and so is one with no
+// uplink: the next launch would find it alive, skip starting one and hand a
+// workload an address on a gateway that reaches nothing. Killing it here
+// means the next launch starts one properly.
+func (r running) stop(cause error) error {
+	kill(r.uplink)
+
+	// The bwrap that was started is the outer one, and killing it does not
+	// signal the sandbox nested below it. The sandbox's own init is pid 1 of
+	// its pid namespace, and a SIGKILL from an ancestor namespace takes the
+	// whole namespace with it, so that is the one to name.
+	if r.pid > 0 {
+		if err := syscall.Kill(r.pid, syscall.SIGKILL); err != nil {
+			slog.Warn("failed to kill the unusable gateway sandbox", "pid", r.pid, "error", err)
+		}
+	}
+
+	kill(r.cmd)
+
+	return cause
+}
+
+// kill ends a started process and reaps it. A process that was never started
+// is not an error to pass here, which is what lets stop take a gateway down
+// at any point in its launch.
+func kill(cmd *execabs.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+
+	if err := cmd.Process.Kill(); err != nil {
+		slog.Warn("failed to kill a gateway process", "pid", cmd.Process.Pid, "error", err)
+	}
+
+	_ = cmd.Wait()
+}
+
+// infoGrace bounds the wait for bwrap to report the sandbox's pid.
+//
+// bwrap writes it as soon as it has cloned the sandbox, before anything from
+// the image runs, so this is not sized for the work behind a launch the way
+// the readiness deadline is. It is a ceiling for a sandbox that fails before
+// it reports anything, which would otherwise leave the read waiting on a
+// descriptor the outer bwrap holds open for the whole life of the sandbox.
+const infoGrace = 30 * time.Second
+
+// info is the object bwrap writes to its --info-fd. It carries more than
+// this and everything else is ignored.
+type info struct {
+	// ChildPID is the sandbox's init process in the pid namespace bwrap was
+	// started in. Nothing above the gateway unshares one, so it is the
+	// host's, which is what makes /proc/<pid>/ns/net nameable from here.
+	ChildPID int `json:"child-pid"` //nolint:tagliatelle // bwrap chose the name and this end only reads it.
+}
+
+// infoFDArgs prefixes bwrap options with the descriptor the sandbox pid is
+// to be reported on.
+//
+// It is put in front of what sandbox.Args rendered rather than added to
+// sandbox.Spec, because it describes this launch and not the sandbox. The
+// position is deliberate: sandbox.PackArgs finds the command by counting
+// back from the end of the list, so options added in front of it change
+// nothing about where that split falls.
+func infoFDArgs(args []string) []string {
+	return append([]string{"--info-fd", strconv.Itoa(infoFD)}, args...)
+}
+
+// childPID reads the sandbox's pid from the descriptor bwrap reports it on.
+//
+// The pid is taken from bwrap rather than guessed from the process tree.
+// There are two bwrap processes and a sandbox init between this process and
+// the gateway, and which pid a workload's veth has to be put next to is not
+// something to infer from parentage.
+//
+// The read ends at the end of the JSON object rather than at the end of the
+// file, which matters because the outer bwrap keeps a copy of the write end
+// for as long as the sandbox runs and no end of file arrives while the
+// gateway is up.
+func childPID(r *os.File, grace time.Duration) (int, error) {
+	if err := r.SetReadDeadline(time.Now().Add(grace)); err != nil {
+		return 0, fmt.Errorf("failed to bound the wait for the gateway sandbox pid: %w", err)
+	}
+
+	var i info
+	if err := json.NewDecoder(r).Decode(&i); err != nil {
+		return 0, fmt.Errorf("failed to read the gateway sandbox pid: %w", err)
+	}
+
+	if i.ChildPID <= 0 {
+		return 0, errors.New("bwrap reported no pid for the gateway sandbox")
+	}
+
+	return i.ChildPID, nil
+}
+
+// uplink gives the gateway its egress and returns the process that is it.
+//
+// pasta does not run inside the gateway's network namespace, and the natural
+// reading is the one that cannot work. It holds its sockets in the host's
+// namespace and creates a tap device in the target one, so a pasta confined
+// to the namespace it serves would have nothing to serve it from. It runs
+// here as a second short-lived sandbox from the gateway image's own rootfs,
+// in the session user namespace, with no --unshare-net, and it is pointed at
+// the gateway's namespace by path.
+//
+// Nothing on the host is privileged for it. CAP_NET_ADMIN creates the tap
+// and CAP_SYS_ADMIN enters the namespace, and both are held in the session
+// namespace. A capability reaches every descendant of the namespace it is
+// held in, so from there it reaches the gateway's namespace, which is nested
+// below, and nothing above or beside it.
+func uplink(rootfs string, pid int) (*execabs.Cmd, error) {
+	cmd, err := helper{
+		Rootfs:  rootfs,
+		Caps:    []string{"CAP_NET_ADMIN", "CAP_SYS_ADMIN"},
+		Devices: []string{tunDevice},
+		Args:    pastaArgs(pid),
+	}.start()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start the gateway uplink: %w", err)
+	}
+
+	slog.Debug("[gateway] started the gateway uplink", "pid", cmd.Process.Pid, "netns", NetnsPath(pid))
+
+	return cmd, nil
+}
+
+// pastaArgs is the uplink's own command line, inside the helper sandbox.
+func pastaArgs(pid int) []string {
+	return []string{
+		pastaCommand,
+
+		// It stays in the foreground so that its going away is something
+		// this process can see. pasta puts itself in the background
+		// otherwise, and the gateway would lose its egress with nothing
+		// anywhere saying so.
+		"--foreground",
+
+		// pasta addresses the tap end inside the target namespace itself.
+		// The gateway image runs no DHCP client, so without this the tap
+		// comes up with no address and the gateway reaches nothing.
+		"--config-net",
+
+		// No port is forwarded in either direction. Inbound forwarding
+		// would publish the gateway's own proxy listeners on the host,
+		// where anything running there could reach them directly, without
+		// the address that tells the gateway which workload it is talking
+		// to and therefore which policy to apply.
+		"-t", "none",
+		"-u", "none",
+		"-T", "none",
+		"-U", "none",
+
+		"--netns", NetnsPath(pid),
+	}
+}
+
+// watchUplink reports the uplink going away and deliberately does nothing
+// else about it.
+//
+// A gateway that loses pasta loses its egress, which is the safe direction:
+// the workloads behind it stop reaching anything rather than reaching it
+// unpoliced. Restarting it here would be a session that cannot say whether
+// what it is doing is being policed, and a workload that briefly could not
+// resolve a name is the better of those two.
+func watchUplink(cmd *execabs.Cmd) {
+	err := cmd.Wait()
+
+	slog.Warn("the session gateway has lost its uplink and has no egress; "+
+		"restart the session to give it one", "error", err)
+}
+
+// NetnsPath names a process's network namespace.
+//
+// The pid is in the host's pid namespace, which is the only namespace every
+// caller of this shares, and the one bwrap reports on its info descriptor.
+func NetnsPath(pid int) string {
+	return "/proc/" + strconv.Itoa(pid) + "/ns/net"
+}
+
+// helper is a short-lived command run from the gateway image's rootfs inside
+// the session's user namespace.
+//
+// The tools it runs come from the image rather than the host, so a host with
+// no iproute2 and no passt on it can still run a session, and the versions
+// qubesome drives are the ones the image was tested with.
+type helper struct {
+	// Rootfs is the gateway image's root filesystem.
+	Rootfs string
+
+	// Caps are the capabilities it keeps, named the way bwrap names them.
+	// They are held in the session's user namespace, so they reach every
+	// sandbox started under it and nothing on the host.
+	Caps []string
+
+	// Devices are host device nodes it needs, which bwrap's own --dev does
+	// not make.
+	Devices []string
+
+	// Args is the command, argv[0] first.
+	Args []string
+}
+
+// start runs the helper and returns the process without waiting for it.
+func (h helper) start() (*execabs.Cmd, error) {
+	args, err := h.bwrapArgs(helperUsernsFD)
+	if err != nil {
+		return nil, err
+	}
+
+	ns, err := session.Current().Open(helperUsernsFD)
+	if err != nil {
+		return nil, err
+	}
+	defer ns.Close()
+
+	cmd := execabs.Command(files.BwrapBinary, args...) //nolint:gosec // the arguments are built from the gateway config and this process's own pids.
+	cmd.ExtraFiles = []*os.File{ns.File()}
+
+	// A helper outlives the launch that started it for the same reason the
+	// gateway does. pasta is the session's egress and a Ctrl-C at the
+	// terminal that started a workload is not a request to take it away.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	return cmd, nil
+}
+
+// bwrapArgs renders the helper into bwrap arguments.
+//
+// usernsFD is the descriptor the session's user namespace has in the child,
+// which os/exec numbers from 3 upwards in the order of exec.Cmd.ExtraFiles.
+//
+// This joins the session's user namespace rather than nesting a new one
+// below it, which is the whole point of a helper and the reason it cannot go
+// through sandbox.Args. A capability is held in the namespace it is granted
+// in and reaches that namespace's descendants, so a helper in a namespace
+// nested below the session's would hold nothing over the gateway's, which is
+// beside it rather than below. bwrap also refuses --userns together with
+// --unshare-user, which sandbox.Args always passes.
+//
+// The uid is left alone for a related reason. A joined namespace carries the
+// holder's single uid mapping and nothing else, so --uid would fail rather
+// than change anything, and the capabilities are what the helper needs
+// rather than a particular uid.
+//
+// There is no seccomp filter here, and that is not an oversight. The
+// vendored profile denies setns outright, because it is gated on
+// CAP_SYS_ADMIN and a sandbox that drops every capability can never hold it.
+// Entering a namespace is the one thing a helper exists to do.
+func (h helper) bwrapArgs(usernsFD int) ([]string, error) {
+	if h.Rootfs == "" {
+		return nil, errors.New("gateway: the helper has no rootfs")
+	}
+	if len(h.Args) == 0 {
+		return nil, errors.New("gateway: the helper has no command")
+	}
+	if usernsFD < 3 {
+		return nil, fmt.Errorf("gateway: namespace descriptor %d collides with the standard streams", usernsFD)
+	}
+
+	args := make([]string, 0, 22+2*len(h.Caps)+3*len(h.Devices)+len(h.Args))
+	args = append(args,
+		"--userns", strconv.Itoa(usernsFD),
+
+		// The image is shared read-only and the writes a helper makes are
+		// discarded with it, as a sandbox's are.
+		"--overlay-src", h.Rootfs,
+		"--tmp-overlay", "/",
+
+		// Neither the network namespace nor the pid namespace is unshared.
+		// The first is where pasta holds its sockets, and the second is
+		// what makes /proc/<pid>/ns/net name the sandbox a helper is
+		// pointed at: a fresh pid namespace would carry a /proc listing
+		// only the helper itself.
+		"--unshare-ipc",
+		"--unshare-uts",
+		"--unshare-cgroup",
+
+		"--cap-drop", "ALL",
+	)
+
+	// bwrap applies capability arguments in order, so these have to follow
+	// the drop above, as sandbox.Args emits them.
+	for _, c := range h.Caps {
+		if !strings.HasPrefix(c, "CAP_") {
+			return nil, fmt.Errorf("gateway: capability %q is missing the CAP_ prefix", c)
+		}
+		args = append(args, "--cap-add", c)
+	}
+
+	args = append(args,
+		"--clearenv",
+
+		// The host's own /proc, bound rather than mounted afresh, because
+		// the pids a helper names are the host's and the paths under them
+		// are only read.
+		"--ro-bind", "/proc", "/proc",
+
+		"--dev", "/dev",
+		"--tmpfs", "/tmp",
+
+		"--new-session",
+	)
+
+	for _, d := range h.Devices {
+		args = append(args, "--dev-bind", d, d)
+	}
+
+	args = append(args, separator)
+
+	return append(args, h.Args...), nil
+}
+
+// separator ends bwrap's own options and begins the command.
+const separator = "--"
 
 // spec renders the gateway into the sandbox it runs in.
 func (g Gateway) spec(bundle images.Bundle, configPath string, creds *mtls.Credentials) sandbox.Spec {

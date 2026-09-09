@@ -1,19 +1,27 @@
 // Starting a gateway cannot be tested in the development container. No
 // sandbox starts here, because mounting /proc in a new pid namespace is
 // denied, and the session's namespace holder cannot start for the same
-// reason. What is covered below is everything that decides whether a gateway
-// is started and what a workload is given once one is: the fail-closed path,
-// the singleton, a state file left behind by a crash, and the address
-// allocation. Task 12 covers the rest on the target host.
+// reason. Running the uplink cannot be tested here either: pasta is not
+// installed, and there is no host network namespace to give it even if it
+// were.
+//
+// What is covered below is everything that decides whether a gateway is
+// started and what a workload is given once one is: the fail-closed path,
+// the singleton, a state file left behind by a crash, the address
+// allocation, the pid bwrap reports the sandbox on, and the arguments the
+// uplink is run with. Task 12 covers the rest on the target host.
 package gateway
 
 import (
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
@@ -249,6 +257,250 @@ func TestAllocateRefusesASubnetItCannotHandAddressesOutOf(t *testing.T) {
 
 	_, err = g.Allocate(prefix(t, "10.111.0.0/31"))
 	require.ErrorContains(t, err, "no host addresses")
+}
+
+// The descriptors are numbered by the order of exec.Cmd.ExtraFiles, so the
+// order here is part of the launch and not a detail of it.
+func TestTheSandboxDescriptorsAreNumberedInOrder(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []int{3, 4, 5, 6}, []int{seccompFD, packedFD, usernsFD, infoFD})
+}
+
+func TestNetnsPathNamesTheSandboxNamespace(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "/proc/4242/ns/net", NetnsPath(4242))
+}
+
+// The pid is bwrap's to report. Between this process and the gateway sit two
+// bwraps and a sandbox init, so which pid a veth has to be put next to is
+// not something to infer from parentage.
+func TestChildPIDIsWhatBwrapReported(t *testing.T) {
+	t.Parallel()
+
+	pid, err := childPID(reported(t, `{"child-pid": 4242}`), testTimeout)
+
+	require.NoError(t, err)
+	assert.Equal(t, 4242, pid)
+}
+
+// bwrap writes more than one field and the object it writes is what ends the
+// read, not the end of the descriptor.
+func TestChildPIDReadsOneObjectAndStops(t *testing.T) {
+	t.Parallel()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	// The write end stays open, the way the outer bwrap keeps its copy for
+	// as long as the sandbox runs. Nothing here ends the read but the
+	// object itself.
+	t.Cleanup(func() {
+		r.Close()
+		w.Close()
+	})
+
+	_, err = w.WriteString(`{"child-pid": 4242, "unexpected": "field"}`)
+	require.NoError(t, err)
+
+	pid, err := childPID(r, testTimeout)
+
+	require.NoError(t, err)
+	assert.Equal(t, 4242, pid)
+}
+
+func TestChildPIDFailsWhenNoPidWasReported(t *testing.T) {
+	t.Parallel()
+
+	_, err := childPID(reported(t, `{}`), testTimeout)
+
+	require.ErrorContains(t, err, "no pid")
+}
+
+func TestChildPIDFailsOnSomethingThatIsNotAnInfoObject(t *testing.T) {
+	t.Parallel()
+
+	_, err := childPID(reported(t, "bwrap: execvp gateway: No such file\n"), testTimeout)
+
+	require.ErrorContains(t, err, "failed to read the gateway sandbox pid")
+}
+
+// A sandbox that dies before it reports anything leaves a descriptor the
+// outer bwrap still holds open, so the read has to give up on its own rather
+// than wait for an end of file that is not coming.
+func TestChildPIDGivesUpWhenNothingIsReported(t *testing.T) {
+	t.Parallel()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		r.Close()
+		w.Close()
+	})
+
+	_, err = childPID(r, time.Millisecond)
+
+	require.ErrorContains(t, err, "failed to read the gateway sandbox pid")
+}
+
+// The info descriptor is prefixed to the sandbox's own options, where it
+// travels in the packed file and cannot disturb the split PackArgs makes by
+// counting back from the end of the list.
+func TestTheInfoDescriptorIsPackedWithTheOtherOptions(t *testing.T) {
+	t.Parallel()
+
+	spec := sandbox.Spec{Rootfs: t.TempDir(), Args: []string{gatewayCommand}}
+
+	args, err := sandbox.Args(spec, -1)
+	require.NoError(t, err)
+
+	outer, packed, err := sandbox.PackArgs(spec, infoFDArgs(args), packedFD)
+	require.NoError(t, err)
+	defer packed.Close()
+
+	assert.Equal(t, []string{"--args", "4", "--", gatewayCommand}, outer)
+
+	opts, err := io.ReadAll(packed)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(string(opts), "--info-fd\x006\x00"), "packed options: %q", opts)
+}
+
+// pasta runs from the gateway image's rootfs in the session's user
+// namespace, and it is pointed at the gateway's network namespace rather
+// than confined to it.
+func TestTheUplinkRunsPastaAgainstTheGatewayNamespace(t *testing.T) {
+	t.Parallel()
+
+	args, err := helper{
+		Rootfs:  "/images/gateway/rootfs",
+		Caps:    []string{"CAP_NET_ADMIN", "CAP_SYS_ADMIN"},
+		Devices: []string{tunDevice},
+		Args:    pastaArgs(4242),
+	}.bwrapArgs(helperUsernsFD)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"--userns", "3",
+		"--overlay-src", "/images/gateway/rootfs",
+		"--tmp-overlay", "/",
+		"--unshare-ipc",
+		"--unshare-uts",
+		"--unshare-cgroup",
+		"--cap-drop", "ALL",
+		"--cap-add", "CAP_NET_ADMIN",
+		"--cap-add", "CAP_SYS_ADMIN",
+		"--clearenv",
+		"--ro-bind", "/proc", "/proc",
+		"--dev", "/dev",
+		"--tmpfs", "/tmp",
+		"--new-session",
+		"--dev-bind", "/dev/net/tun", "/dev/net/tun",
+		"--",
+		"/usr/bin/pasta",
+		"--foreground",
+		"--config-net",
+		"-t", "none",
+		"-u", "none",
+		"-T", "none",
+		"-U", "none",
+		"--netns", "/proc/4242/ns/net",
+	}, args)
+}
+
+// The absences are the point. A helper that unshared a network namespace
+// would hold pasta's sockets in an empty one and have nothing to serve the
+// gateway from. One that unshared a pid namespace could not name the sandbox
+// it is pointed at, because its /proc would list only itself. One that
+// unshared a user namespace would hold its capabilities beside the
+// gateway's namespace rather than above it, and bwrap refuses the
+// combination anyway. And the vendored seccomp profile denies setns, which
+// is the one thing a helper exists to do.
+func TestTheUplinkSharesTheNamespacesItHasToSee(t *testing.T) {
+	t.Parallel()
+
+	args, err := uplinkArgs(t)
+	require.NoError(t, err)
+
+	for _, unwanted := range []string{"--unshare-net", "--unshare-pid", "--unshare-user", "--seccomp"} {
+		assert.NotContains(t, args, unwanted)
+	}
+}
+
+// The gateway's proxy listeners answer on the address a workload was
+// registered under. Published on the host they would answer connections that
+// carry no such address, and so no policy.
+func TestTheUplinkForwardsNoPorts(t *testing.T) {
+	t.Parallel()
+
+	args, err := uplinkArgs(t)
+	require.NoError(t, err)
+
+	for _, flag := range []string{"-t", "-u", "-T", "-U"} {
+		i := indexOf(args, flag)
+		require.GreaterOrEqual(t, i, 0, "flag %q", flag)
+		assert.Equal(t, "none", args[i+1], "flag %q", flag)
+	}
+}
+
+func TestHelperRefusesWhatItCannotRun(t *testing.T) {
+	t.Parallel()
+
+	_, err := helper{Args: []string{pastaCommand}}.bwrapArgs(helperUsernsFD)
+	require.ErrorContains(t, err, "rootfs")
+
+	_, err = helper{Rootfs: "/images/gateway/rootfs"}.bwrapArgs(helperUsernsFD)
+	require.ErrorContains(t, err, "command")
+
+	_, err = helper{
+		Rootfs: "/images/gateway/rootfs",
+		Caps:   []string{"NET_ADMIN"},
+		Args:   []string{pastaCommand},
+	}.bwrapArgs(helperUsernsFD)
+	require.ErrorContains(t, err, "CAP_ prefix")
+
+	_, err = helper{
+		Rootfs: "/images/gateway/rootfs",
+		Args:   []string{pastaCommand},
+	}.bwrapArgs(2)
+	require.ErrorContains(t, err, "standard streams")
+}
+
+func uplinkArgs(t *testing.T) ([]string, error) {
+	t.Helper()
+
+	return helper{
+		Rootfs:  "/images/gateway/rootfs",
+		Caps:    []string{"CAP_NET_ADMIN", "CAP_SYS_ADMIN"},
+		Devices: []string{tunDevice},
+		Args:    pastaArgs(4242),
+	}.bwrapArgs(helperUsernsFD)
+}
+
+func indexOf(args []string, want string) int {
+	for i, a := range args {
+		if a == want {
+			return i
+		}
+	}
+
+	return -1
+}
+
+// reported returns the read end of a pipe carrying what bwrap wrote to its
+// info descriptor, with the write end already closed.
+func reported(t *testing.T, out string) *os.File {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { r.Close() })
+
+	_, err = w.WriteString(out)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	return r
 }
 
 // newSessionGateway returns a gateway whose files are all in the test's own
