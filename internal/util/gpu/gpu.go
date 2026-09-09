@@ -54,6 +54,48 @@ func params(root, runner string, lookPath func(string) (string, error)) ([]strin
 	return nil, false
 }
 
+// SandboxEdits returns the device nodes and mounts a bwrap sandbox needs
+// for GPU access.
+//
+// Params returns runner arguments naming a CDI kind or a runner feature,
+// and bwrap resolves neither. The CDI spec was always the real content, so
+// this returns it directly for the caller to render as --dev-bind and
+// --ro-bind.
+func SandboxEdits(root string) ([]DeviceNode, []Mount, error) {
+	spec, err := NewSpec(root)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// NewSpec always returns exactly one device named "all" when it
+	// succeeds, so this is unreachable today. It stays as a guard against
+	// that invariant changing underneath this function.
+	if len(spec.Devices) == 0 {
+		return nil, nil, ErrNoGPU
+	}
+
+	edits := spec.Devices[0].ContainerEdits
+
+	return edits.DeviceNodes, edits.Mounts, nil
+}
+
+// NvidiaToolkitPresent reports whether the nvidia container toolkit is
+// installed.
+//
+// The toolkit injects driver libraries into the container through a runner
+// hook, which bwrap has no equivalent of, so a profile on an nvidia GPU
+// cannot be given hardware rendering this way. The caller warns and
+// continues without a GPU rather than starting one that silently does not
+// work.
+func NvidiaToolkitPresent() bool {
+	return nvidiaToolkitPresent(exec.LookPath)
+}
+
+func nvidiaToolkitPresent(lookPath func(string) (string, error)) bool {
+	path, _ := lookPath("nvidia-container-toolkit")
+	return path != ""
+}
+
 func cdiSpecRegistered(root string) bool {
 	for _, dir := range cdiSpecDirs {
 		if _, err := os.Stat(filepath.Join(root, dir, CDISpecName)); err == nil {

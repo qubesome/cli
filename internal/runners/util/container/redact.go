@@ -8,11 +8,20 @@ const redactedEnvValue = "REDACTED"
 // environment variable values removed. The original arguments are left
 // untouched so callers can safely use the result for logging and the original
 // slice for execution.
+//
+// bwrap's --setenv is covered as well. It takes the name and the value as two
+// separate arguments, and the profile sandbox passes the mTLS private key
+// through it.
 func RedactEnvArgs(args []string) []string {
 	redacted := append([]string(nil), args...)
 
 	for i := 0; i < len(redacted); i++ {
 		switch redacted[i] {
+		case "--setenv":
+			if i+2 < len(redacted) {
+				redacted[i+2] = redactedEnvValue
+				i += 2
+			}
 		case "-e", "--env":
 			if i+1 < len(redacted) {
 				redacted[i+1] = redactEnvSpec(redacted[i+1])

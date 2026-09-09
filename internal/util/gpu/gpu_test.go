@@ -114,6 +114,39 @@ func TestParams(t *testing.T) {
 	}
 }
 
+func TestSandboxEdits(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "dev/dri"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dev/dri/renderD128"), nil, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dev/dri/card0"), nil, 0o600))
+
+	nodes, mounts, err := SandboxEdits(root)
+	require.NoError(t, err)
+
+	paths := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		paths = append(paths, n.Path)
+	}
+	assert.ElementsMatch(t, []string{"/dev/dri/renderD128", "/dev/dri/card0"}, paths)
+	assert.Empty(t, mounts, "no Vulkan ICDs in the fixture")
+}
+
+func TestSandboxEditsNoGPU(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := SandboxEdits(t.TempDir())
+	assert.ErrorIs(t, err, ErrNoGPU)
+}
+
+func TestNvidiaToolkitPresent(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, nvidiaToolkitPresent(found))
+	assert.False(t, nvidiaToolkitPresent(notFound))
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 

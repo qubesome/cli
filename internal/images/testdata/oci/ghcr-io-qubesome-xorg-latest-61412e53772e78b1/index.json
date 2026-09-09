@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 2,
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "size": 123,
+      "annotations": {"org.opencontainers.image.ref.name": "ghcr-io-qubesome-xorg-latest-61412e53772e78b1"}
+    }
+  ]
+}

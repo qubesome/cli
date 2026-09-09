@@ -234,27 +234,32 @@ func RunDisplay(p DisplayParams) error {
 		return fmt.Errorf("failed to start compositor: %w", err)
 	}
 
+	// The compositor is reaped here rather than only after it is killed,
+	// so that a compositor which dies on its own is noticed. When it goes
+	// first, everything downstream reports the symptom instead: Xwayland
+	// says its Wayland connection was reset, the window manager says the
+	// X server connection broke, and the compositor's own exit status,
+	// the one diagnostic that says why, is never looked at. The same
+	// holds when the socket never appears and the wait below times out.
+	//
+	// The channel is buffered so this send never blocks, and every read
+	// puts the status back for the next one.
+	compositorExit := make(chan error, 1)
+	go func() { compositorExit <- compositor.Wait() }()
+
 	defer func() {
 		if compositor.Process != nil {
 			_ = compositor.Process.Kill()
-
-			// When the socket never appeared, the compositor usually died
-			// during startup rather than being slow, and its exit status
-			// is the diagnostic that says which. Discarding it leaves
-			// only the timeout, which describes the symptom.
-			state, err := compositor.Process.Wait()
-			switch {
-			case err != nil:
-				slog.Debug("failed to reap compositor", "error", err)
-			case state != nil:
-				slog.Debug("compositor exited", "state", state.String())
-			}
 		}
+
+		err := <-compositorExit
+		compositorExit <- err
+		slog.Debug("compositor exited", "error", err)
 	}()
 
 	socket := filepath.Join(compositorRuntimeDir, compositorSocket)
 	if err := waitForSocket(socket, 15*time.Second); err != nil {
-		return err
+		return errors.Join(err, compositorFailure(compositorExit))
 	}
 
 	slog.Debug("starting Xwayland", "binary", files.XwaylandRunBinary, "args", xArgs)
@@ -266,7 +271,34 @@ func RunDisplay(p DisplayParams) error {
 	x.Stdout = os.Stdout
 	x.Stderr = os.Stderr
 
-	return x.Run()
+	// The window manager exiting on its own is how a profile stops, so
+	// the compositor is only asked about when something did go wrong.
+	// Asking either way would turn the race between the two shutting
+	// down into an intermittent failure.
+	if err := x.Run(); err != nil {
+		return errors.Join(err, compositorFailure(compositorExit))
+	}
+
+	return nil
+}
+
+// compositorFailure reports how the compositor exited, if it has already
+// done so, and nil while it is still running.
+//
+// It reads the status without consuming it, so the deferred reap still
+// finds one waiting for it.
+func compositorFailure(exit chan error) error {
+	select {
+	case err := <-exit:
+		exit <- err
+		if err == nil {
+			return errors.New("compositor exited first, reporting success")
+		}
+
+		return fmt.Errorf("compositor exited first: %w", err)
+	default:
+		return nil
+	}
 }
 
 const (

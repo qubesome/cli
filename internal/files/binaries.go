@@ -14,7 +14,6 @@ const (
 	FireCrackerBinary = "/usr/bin/firecracker"
 	XrandrBinary      = "/usr/bin/xrandr"
 	WlrRandrBinary    = "/usr/bin/wlr-randr"
-	DbusBinary        = "/usr/bin/dbus-send"
 	PodmanBinary      = "/usr/bin/podman"
 	DockerBinary      = "/usr/bin/docker"
 
@@ -30,6 +29,22 @@ const (
 	// InProfileBinary is where the qubesome binary is bind-mounted inside
 	// the profile container.
 	InProfileBinary = "/usr/local/bin/qubesome"
+
+	// BwrapBinary creates the profile sandbox. Like the container runner
+	// it enforces every isolation setting qubesome asks for, so it is not
+	// resolved through PATH.
+	BwrapBinary = "/usr/bin/bwrap"
+
+	// SkopeoBinary pulls images, verifying manifest and blob digests.
+	SkopeoBinary = "/usr/bin/skopeo"
+
+	// UmociBinary applies image layers, rootless.
+	UmociBinary = "/usr/bin/umoci"
+
+	// GetfaclBinary reports the ACLs on a device node. deps uses it to
+	// check for the uaccess ACL that systemd-logind grants the seat's
+	// user, without which a profile silently drops to software rendering.
+	GetfaclBinary = "/usr/bin/getfacl"
 )
 
 // runnerDirs holds the directories searched for a container runner, in

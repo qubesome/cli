@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/qubesome/cli/internal/runners/util/usb"
@@ -34,6 +35,12 @@ type Env interface {
 
 	// Getenv reads an environment variable.
 	Getenv(key string) string
+
+	// UID is the caller's numeric user id, as a string. The session bus
+	// lives under /run/user/<uid>, and the dbus client qubesome uses
+	// builds that path from the uid rather than from XDG_RUNTIME_DIR, so
+	// doctor has to look where the client will.
+	UID() string
 
 	// Output runs a command and returns its combined output. The error
 	// says whether it failed, and the output usually says why, so both
@@ -88,6 +95,10 @@ func (e *OSEnv) Readlink(path string) (string, error) {
 
 func (e *OSEnv) Getenv(key string) string {
 	return os.Getenv(key)
+}
+
+func (e *OSEnv) UID() string {
+	return strconv.Itoa(os.Getuid())
 }
 
 func (e *OSEnv) Output(name string, args ...string) ([]byte, error) {

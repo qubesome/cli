@@ -82,25 +82,99 @@ func PreemptWorkloadImages(bin string, cfg *types.Config) {
 	if err != nil && os.IsNotExist(err) {
 		fmt.Println("INFO: Preemptively pulling workload images. This only happens on first execution and aims to avoid delays opening apps.")
 
-		_ = PullAll(bin, cfg)
+		_ = pullWorkloadImages(bin, cfg)
 		_ = os.WriteFile(fn, []byte{}, files.FileMode)
 	}
 }
 
+// PullAll refreshes every image in a config.
+//
+// Profile images are pulled whether or not the store already holds them,
+// because refreshing is the whole point of the command behind this.
 func PullAll(bin string, cfg *types.Config) error {
+	s := NewStore()
+	for _, img := range ProfileImages(cfg) {
+		if _, err := refreshProfileImage(s, img); err != nil {
+			slog.Error("cannot pull profile image", "image", img, "error", err)
+		}
+	}
+
+	return pullWorkloadImages(bin, cfg)
+}
+
+func pullWorkloadImages(bin string, cfg *types.Config) error {
 	imgs, err := UniqueImages(cfg)
 	if err != nil {
 		return fmt.Errorf("cannot get images: %w", err)
 	}
 
 	for _, img := range imgs {
-		err = PullImage(bin, img)
-		if err != nil {
-			slog.Error("cannot pull image %q: %w", img, err)
+		if err := PullImage(bin, img); err != nil {
+			slog.Error("cannot pull workload image", "image", img, "error", err)
 		}
 	}
 
 	return nil
+}
+
+// PullProfileImage returns the bundle for a profile image, pulling it into
+// the OCI store only when the store cannot already provide it.
+//
+// Workload images still go through the container runner, because workloads
+// still run under it. The two stores coexist until workloads move.
+func PullProfileImage(ref string) (Bundle, error) {
+	return pullProfileImage(NewStore(), ref)
+}
+
+// pullProfileImage skips the pull for an image the store already holds.
+//
+// A warm store lets a profile start with no network, which is what the
+// runner backed path gave through PullImageIfNotPresent. Refreshing is
+// PullAll's job, not a side effect of starting a profile.
+func pullProfileImage(s *Store, ref string) (Bundle, error) {
+	if b, err := s.Resolve(ref); err == nil {
+		slog.Debug("profile image is already in the store", "image", ref)
+		return b, nil
+	}
+
+	return refreshProfileImage(s, ref)
+}
+
+// refreshProfileImage pulls and unpacks ref whether or not the store
+// already holds it.
+func refreshProfileImage(s *Store, ref string) (Bundle, error) {
+	if err := s.Pull(ref); err != nil {
+		return Bundle{}, err
+	}
+
+	return s.Unpack(ref)
+}
+
+// ProfileImages returns the unique profile images in a config.
+//
+// Profile images live in the OCI store and workload images live in the
+// container runner's store, because only profiles have moved to bwrap. The
+// two coexist until workloads follow.
+func ProfileImages(cfg *types.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+
+	seen := map[string]struct{}{}
+	imgs := make([]string, 0, len(cfg.Profiles))
+
+	for _, p := range cfg.Profiles {
+		if p.Image == "" {
+			continue
+		}
+		if _, ok := seen[p.Image]; ok {
+			continue
+		}
+		seen[p.Image] = struct{}{}
+		imgs = append(imgs, p.Image)
+	}
+
+	return imgs
 }
 
 func PullImage(bin, image string) error {
@@ -162,12 +236,6 @@ func UniqueImages(cfg *types.Config) ([]string, error) {
 	missing := []string{}
 
 	seen := map[string]struct{}{}
-	for _, p := range cfg.Profiles {
-		if _, ok := seen[p.Image]; !ok {
-			seen[p.Image] = struct{}{}
-			missing = append(missing, p.Image)
-		}
-	}
 
 	wf, err := cfg.WorkloadFiles()
 	if err != nil {
