@@ -32,6 +32,8 @@ func TestCheckWorkloadDevices(t *testing.T) {
 		require.Equal(t, Fail, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Detail, "/dev/ttyUSB0")
+		require.Contains(t, c.Fix, "hostAccess")
+		require.NotContains(t, c.Fix, "grant")
 	})
 
 	t.Run("device in src:dst:perms form only stats the source", func(t *testing.T) {
@@ -103,6 +105,8 @@ func TestCheckWorkloadDevices(t *testing.T) {
 		require.Equal(t, Warn, c.Status)
 		require.NotEmpty(t, c.Fix)
 		require.Contains(t, c.Detail, "camera")
+		require.Contains(t, c.Fix, "hostAccess")
+		require.NotContains(t, c.Fix, "grant")
 	})
 
 	t.Run("camera requested with video2 present counts as present", func(t *testing.T) {

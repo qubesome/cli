@@ -1,7 +1,8 @@
 package gpu
 
 import (
-	"os"
+	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -15,44 +16,11 @@ const (
 	CDISpecName = "qubesome-gpu.yaml"
 )
 
-// cdiSpecDirs are the directories container runners load CDI specs from.
+// cdiSpecDirs are the directories a CDI spec is written to. Nothing
+// qubesome runs reads them any more, since bwrap does not resolve a CDI
+// kind, but the generated spec is still what gpu setup writes and what a
+// container runner elsewhere on the host would pick up.
 var cdiSpecDirs = []string{"/etc/cdi", "/var/run/cdi"}
-
-// Params returns the runner arguments that give a container access to the
-// host GPU, and whether a GPU was detected at all. A GPU may be supported
-// without requiring any additional argument.
-func Params(runner string) ([]string, bool) {
-	return params("/", runner, exec.LookPath)
-}
-
-func params(root, runner string, lookPath func(string) (string, error)) ([]string, bool) {
-	if path, _ := lookPath("nvidia-container-toolkit"); path != "" {
-		if runner == "podman" {
-			return []string{"--device=nvidia.com/gpu=all"}, true
-		}
-		return []string{"--gpus=all"}, true
-	}
-
-	// A generated CDI spec shares the host Vulkan drivers, so it is preferred
-	// over the plain render nodes below.
-	if cdiSpecRegistered(root) {
-		return []string{"--device=" + CDIKind + "=all"}, true
-	}
-
-	// AMD GPU based on AMD Kernel Fusion Driver.
-	if _, err := os.Stat(filepath.Join(root, "dev/kfd")); err == nil {
-		return []string{"--device=/dev/kfd"}, true
-	}
-
-	// Mesa drivers only need the render nodes, which are always shared with
-	// workloads. No additional argument is required as long as the workload
-	// image carries the hardware ICDs.
-	if nodes, _ := filepath.Glob(filepath.Join(root, "dev/dri/renderD*")); len(nodes) > 0 {
-		return nil, true
-	}
-
-	return nil, false
-}
 
 // SandboxEdits returns the device nodes and mounts a bwrap sandbox needs
 // for GPU access.
@@ -96,16 +64,6 @@ func nvidiaToolkitPresent(lookPath func(string) (string, error)) bool {
 	return path != ""
 }
 
-func cdiSpecRegistered(root string) bool {
-	for _, dir := range cdiSpecDirs {
-		if _, err := os.Stat(filepath.Join(root, dir, CDISpecName)); err == nil {
-			return true
-		}
-	}
-
-	return false
-}
-
 // SpecPath returns the location the CDI spec is written to.
 func SpecPath() string {
 	return filepath.Join(cdiSpecDirs[0], CDISpecName)
@@ -122,16 +80,49 @@ func Setup() error {
 	return spec.Write(SpecPath())
 }
 
-// Describe reports how GPU access is shared with workloads.
-func Describe(runner string) string {
-	params, ok := Params(runner)
-	if !ok {
-		return "no GPU detected"
+// Describe reports how GPU access is shared with a sandbox.
+//
+// It used to render the arguments Params produced for a container
+// runner, which meant it answered for a runtime qubesome no longer has.
+// A host with an AMD card was told "GPU shared with: --device=/dev/kfd",
+// naming a flag nothing passes any more. It now reports what a sandbox
+// is actually given.
+func Describe() string {
+	return describe("/", exec.LookPath)
+}
+
+func describe(root string, lookPath func(string) (string, error)) string {
+	// The toolkit shares a GPU by injecting driver libraries through a
+	// container runner hook, and bwrap has no equivalent, so a profile
+	// on such a host is started without a GPU rather than with one that
+	// silently does not work. Saying so is more use than describing the
+	// devices it would otherwise have had.
+	if nvidiaToolkitPresent(lookPath) {
+		return "nvidia container toolkit found, which a sandbox cannot use: " +
+			"it shares a GPU through a container runner hook. Profiles and " +
+			"workloads on this host run without a GPU."
 	}
 
-	if len(params) == 0 {
-		return "GPU shared through the render nodes in /dev/dri. Workload images must carry their own Vulkan drivers."
+	nodes, mounts, err := SandboxEdits(root)
+	if err != nil {
+		if errors.Is(err, ErrNoGPU) {
+			return "no GPU detected"
+		}
+
+		return "cannot tell how the GPU would be shared: " + err.Error()
 	}
 
-	return "GPU shared with: " + strings.Join(params, " ")
+	paths := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		paths = append(paths, n.Path)
+	}
+
+	desc := "GPU shared through " + strings.Join(paths, " ")
+	if len(mounts) == 0 {
+		// Nothing from the host is mounted, so the drivers have to come
+		// from the image.
+		return desc + ". Images must carry their own Vulkan drivers, or run `qubesome gpu setup`."
+	}
+
+	return fmt.Sprintf("%s, with %d host driver path(s) shared read-only.", desc, len(mounts))
 }

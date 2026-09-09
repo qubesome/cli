@@ -134,10 +134,8 @@ func unpackArgs(layout, ref, dest string) []string {
 	}
 }
 
-// runCmd executes a helper and attaches its stderr to any failure,
-// following the pattern established in
-// internal/runners/util/container/home.go. The reason a pull or an unpack
-// failed is always on stderr.
+// runCmd executes a helper and attaches its stderr to any failure. The
+// reason a pull or an unpack failed is always on stderr.
 func runCmd(bin string, args []string) error {
 	slog.Debug("exec", "binary", bin, "args", args)
 

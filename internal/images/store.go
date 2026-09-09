@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/files"
 )
 
@@ -67,13 +66,15 @@ type Bundle struct {
 // layouts remove that between distinct images, and they also mean a
 // reference is looked up in a directory that holds nothing else.
 //
-// The key is a generated single path component, but it is still joined
-// securely, as bundleDir is.
+// The key is a generated single path component, but it is still checked
+// before it names a directory, as bundleDir's is.
 func (s *Store) layout(ref string) (string, error) {
-	dir, err := securejoin.SecureJoin(filepath.Join(s.Root, "oci"), storeKey(ref))
-	if err != nil {
+	key := storeKey(ref)
+	if err := files.ValidateName("image store key", key); err != nil {
 		return "", err
 	}
+
+	dir := filepath.Join(s.Root, "oci", key)
 
 	// Both tools cut the layout from the key at the FIRST colon. umoci
 	// does it on the whole --image, and skopeo on what is left once the
@@ -148,12 +149,17 @@ func (s *Store) Resolve(ref string) (Bundle, error) {
 	return readBundle(dir)
 }
 
-// bundleDir returns the unpack destination for a digest. The digest comes
-// from the index rather than from user input, but it still names a
-// directory, so it is joined securely.
+// bundleDir returns the unpack destination for a digest. The digest is
+// read out of a layout's index.json rather than typed by a user, but the
+// file it is read from is on disk and it names a directory, so it is
+// checked as a single path component before it does.
 func (s *Store) bundleDir(digest string) (string, error) {
-	return securejoin.SecureJoin(filepath.Join(s.Root, "unpacked"),
-		strings.ReplaceAll(digest, ":", "-"))
+	name := strings.ReplaceAll(digest, ":", "-")
+	if err := files.ValidateName("image digest", name); err != nil {
+		return "", err
+	}
+
+	return filepath.Join(s.Root, "unpacked", name), nil
 }
 
 const (

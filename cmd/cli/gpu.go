@@ -16,16 +16,13 @@ func gpuCommand() *cli.Command {
 		Usage: "manages how the GPU is shared with workloads",
 		Commands: []*cli.Command{
 			{
-				Name:  "status",
-				Usage: "shows how the GPU is shared with workloads",
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:        "runner",
-						Destination: &runner,
-					},
-				},
+				Name: "status",
+				// The runner flag went with Describe's runner argument.
+				// There is one sandbox implementation and it takes no
+				// arguments from here.
+				Usage: "shows how the GPU is shared with profiles and workloads",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					fmt.Println(gpu.Describe(runner))
+					fmt.Println(gpu.Describe())
 					return nil
 				},
 			},

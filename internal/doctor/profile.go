@@ -11,20 +11,10 @@ import (
 	"github.com/qubesome/cli/internal/types"
 )
 
-// containerState is what checkProfileContainer found, passed to the
-// later checks so that they do not each run ps again.
-type containerState int
-
-const (
-	containerNotRunning containerState = iota
-	containerUp
-	containerExited
-)
-
 // Profile diagnoses one profile. cfg may be nil, which is itself a
 // finding rather than an error, because a user whose config did not load
 // is exactly who needs this command.
-func Profile(env Env, cfg *types.Config, runner, name string) []Check {
+func Profile(env Env, cfg *types.Config, name string) []Check {
 	configCheck := checkProfileConfig(cfg, name)
 	if configCheck.Status != OK {
 		// Every later check depends on a valid profile. Returning here
@@ -34,25 +24,24 @@ func Profile(env Env, cfg *types.Config, runner, name string) []Check {
 
 	profile := cfg.Profiles[name]
 	src := resolveSource(env, cfg, name)
-	bin := files.ContainerRunnerBinary(runnerFor(runner, profile))
 
 	// The path checks below read paths as a start would, which means
 	// after the variables they are written against have been registered.
 	primeExpansion(src, profile)
 
-	containerCheck, state := checkProfileContainer(env, bin, name)
+	sandboxCheck, running := checkProfileSandbox(env, name)
 
 	return []Check{
 		configCheck,
 		checkProfileSource(src),
-		checkProfileImage(env, bin, profile.Image),
-		containerCheck,
-		checkProfileSocket(env, name, state),
-		checkProfileCookies(env, name, state),
+		checkProfileImage(env, profile.Image),
+		sandboxCheck,
+		checkProfileSocket(env, name, running),
+		checkProfileCookies(env, name, running),
 		checkMappedPaths(env, "profile paths", profile.Paths),
 		checkProfileDevices(env, profile.HostAccess),
 		checkExternalDrives(env, profile.ExternalDrives),
-		checkProfileDisplay(env, profile.Display, state),
+		checkProfileDisplay(env, profile.Display, running),
 	}
 }
 
@@ -100,69 +89,57 @@ func checkProfileConfig(cfg *types.Config, name string) Check {
 	}
 }
 
-// checkProfileImage reports whether the profile's image is present
-// locally. Its absence is a Warn, not a Fail, since qubesome pulls a
-// missing image on start.
-func checkProfileImage(env Env, bin, image string) Check {
-	if _, err := env.Output(bin, "image", "inspect", image); err != nil {
+// checkProfileImage reports whether the profile's image is in the OCI
+// store, which is where a sandbox takes its root filesystem from. Its
+// absence is a Warn, not a Fail, since qubesome pulls a missing image on
+// start.
+func checkProfileImage(env Env, image string) Check {
+	if !env.ImageInStore(image) {
 		return Check{
 			Name:   "profile image",
 			Status: Warn,
-			Detail: fmt.Sprintf("%s is not present locally", image),
-			Fix:    fmt.Sprintf("It will be pulled on start, or pull it now with `%s pull %s`.", bin, image),
+			Detail: fmt.Sprintf("%s is not in the image store", image),
+			Fix:    "It will be pulled on start, or pull it now with `qubesome images refresh`.",
 		}
 	}
 
 	return Check{
 		Name:   "profile image",
 		Status: OK,
-		Detail: fmt.Sprintf("%s is present locally", image),
+		Detail: fmt.Sprintf("%s is in the image store", image),
 	}
 }
 
-// containerName mirrors profiles.ContainerNameFormat from
-// internal/profiles/profiles.go, which is safe to import directly here
-// with no cycle, kept as its own helper only for the fmt.Sprintf call
-// site.
-func containerName(name string) string {
-	return fmt.Sprintf(profiles.ContainerNameFormat, name)
-}
+// checkProfileSandbox reports whether the profile is running, and returns
+// that so the later checks do not each read the state file again.
+//
+// A profile records its sandbox's pid and start time in a state file, and
+// that file is the whole answer: it either describes a live process or it
+// does not. There is no command that can fail to answer, so a profile
+// that is not running is the only finding here, and it is a Warn because
+// a profile that has not been started yet is not broken.
+func checkProfileSandbox(env Env, name string) (Check, bool) {
+	path := profiles.SandboxStatePath(name)
 
-// checkProfileContainer reports on the profile's container, and returns
-// the state the later checks need so they do not run ps again.
-func checkProfileContainer(env Env, bin, name string) (Check, containerState) {
-	out, _ := env.Output(bin, "ps", "-a", "--filter", "name="+containerName(name),
-		"--format", "{{.Names}} {{.Status}}")
-
-	status := strings.TrimSpace(string(out))
-	if status == "" {
+	if !env.SandboxAlive(path) {
 		return Check{
-			Name:   "profile container",
+			Name:   "profile sandbox",
 			Status: Warn,
 			Detail: "the profile is not running",
 			Fix:    fmt.Sprintf("Start it with `qubesome start %s`.", name),
-		}, containerNotRunning
-	}
-
-	if strings.Contains(status, "Up") {
-		return Check{
-			Name:   "profile container",
-			Status: OK,
-			Detail: status,
-		}, containerUp
+		}, false
 	}
 
 	return Check{
-		Name:   "profile container",
-		Status: Fail,
-		Detail: status,
-		Fix:    "The container runs with --rm, so its logs are already gone. Re-run with -i and start the display by hand to see the error.",
-	}, containerExited
+		Name:   "profile sandbox",
+		Status: OK,
+		Detail: fmt.Sprintf("%s records a running sandbox", path),
+	}, true
 }
 
 // checkProfileSocket reports on the gRPC socket workloads use to reach
 // the host.
-func checkProfileSocket(env Env, name string, state containerState) Check {
+func checkProfileSocket(env Env, name string, running bool) Check {
 	path, err := files.SocketPath(name)
 	if err != nil {
 		return Check{
@@ -174,7 +151,7 @@ func checkProfileSocket(env Env, name string, state containerState) Check {
 
 	fi, statErr := env.Stat(path)
 	if statErr != nil {
-		if state == containerUp {
+		if running {
 			return Check{
 				Name:   "profile socket",
 				Status: Fail,
@@ -199,7 +176,7 @@ func checkProfileSocket(env Env, name string, state containerState) Check {
 		}
 	}
 
-	if state != containerUp {
+	if !running {
 		return Check{
 			Name:   "profile socket",
 			Status: Fail,
@@ -217,8 +194,8 @@ func checkProfileSocket(env Env, name string, state containerState) Check {
 
 // checkProfileCookies reports on the Xauthority cookies workloads use to
 // authenticate to the profile's X server.
-func checkProfileCookies(env Env, name string, state containerState) Check {
-	if state != containerUp {
+func checkProfileCookies(env Env, name string, running bool) Check {
+	if !running {
 		return Check{
 			Name:   "profile cookies",
 			Status: OK,
@@ -321,32 +298,32 @@ func checkExternalDrives(env Env, drives []string) Check {
 }
 
 // checkProfileDisplay reports on the profile's X server socket.
-func checkProfileDisplay(env Env, display uint8, state containerState) Check {
+func checkProfileDisplay(env Env, display uint8, running bool) Check {
 	path := fmt.Sprintf("/tmp/.X11-unix/X%d", display)
 
 	_, err := env.Stat(path)
 	present := err == nil
 
 	switch {
-	case present && state == containerUp:
+	case present && running:
 		return Check{
 			Name:   "display",
 			Status: OK,
 			Detail: fmt.Sprintf("%s is present and the profile is up", path),
 		}
-	case present && state != containerUp:
+	case present && !running:
 		return Check{
 			Name:   "display",
 			Status: Warn,
 			Detail: fmt.Sprintf("%s is present but the profile is not running, something else is using that display number", path),
 			Fix:    "Change display in the profile config, since two profiles on one number collide.",
 		}
-	case !present && state == containerUp:
+	case !present && running:
 		return Check{
 			Name:   "display",
 			Status: Fail,
 			Detail: fmt.Sprintf("the profile is running but %s is not there", path),
-			Fix:    "Check the container's output to see why its X server did not start.",
+			Fix:    "Check the profile's output to see why its X server did not start.",
 		}
 	default:
 		return Check{

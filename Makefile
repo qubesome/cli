@@ -3,6 +3,7 @@ include hack/base.mk
 TARGET_BIN ?= build/bin/qubesome
 
 PROTO = pkg/inception/proto
+CONTROL_PROTO = pkg/control/proto
 
 GO_TAGS = -tags 'netgo,osusergo,static_build'
 LDFLAGS = -ldflags '-extldflags -static -s -w -X \
@@ -27,7 +28,7 @@ verify-lint: $(GOLANGCI)
 
 generate: $(PROTOC)
 	go generate ./internal/seccomp/...
-	rm $(PROTO)/*.pb.go || true
+	rm $(PROTO)/*.pb.go $(CONTROL_PROTO)/*.pb.go || true
 	PATH=$(TOOLS_BIN) $(PROTOC) --go_out=. --go_opt=paths=source_relative \
     	--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		$(PROTO)/host.proto
+		$(PROTO)/host.proto $(CONTROL_PROTO)/control.proto

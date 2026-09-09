@@ -50,18 +50,32 @@ func unmarshalState(data []byte, s *State) error {
 	return nil
 }
 
+// ReadState returns the sandbox recorded at path.
+//
+// It says what was written and not whether it is still true. A caller that
+// needs the pid checks Alive first, since a state file outlives the
+// process it names.
+func ReadState(path string) (State, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return State{}, fmt.Errorf("failed to read sandbox state %q: %w", path, err)
+	}
+
+	var s State
+	if err := unmarshalState(data, &s); err != nil {
+		return State{}, err
+	}
+
+	return s, nil
+}
+
 // Alive reports whether the sandbox recorded at path is still running.
 //
 // Anything unreadable, unparsable or mismatched reads as not running. A
 // stale state file must not stop a profile from starting.
 func Alive(path string) bool {
-	data, err := os.ReadFile(path)
+	s, err := ReadState(path)
 	if err != nil {
-		return false
-	}
-
-	var s State
-	if err := unmarshalState(data, &s); err != nil {
 		return false
 	}
 

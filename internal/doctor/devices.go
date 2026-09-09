@@ -13,11 +13,11 @@ type missingDevice struct {
 	// desc names what is missing, for the report.
 	desc string
 
-	// fatal says whether a container that asked for it refuses to start.
-	// A device node and /dev/snd are handed to the container runner as
-	// they are, so the runner fails when they are absent. A USB name
-	// matching nothing, an absent camera and an absent GPU are left out
-	// of the arguments instead, so the container starts without them.
+	// fatal says whether a sandbox that asked for it refuses to start.
+	// A device node and /dev/snd are bound into the sandbox as they were
+	// written, so bwrap fails when they are absent. A USB name matching
+	// nothing, an absent camera and an absent GPU are left out of the
+	// binds instead, so the sandbox starts without them.
 	fatal bool
 }
 
@@ -93,8 +93,8 @@ func describe(missing []missingDevice) string {
 // not present.
 //
 // A profile's hostAccess is an envelope its workloads are narrowed to,
-// not a set of devices the profile container is given: the profile
-// container is passed /dev/dri and its GPU parameters and nothing else.
+// not a set of devices the profile sandbox is given: the profile sandbox
+// is passed /dev/dri and its GPU nodes and nothing else.
 // So a grant for a device that is not attached costs a workload the
 // feature and never stops the profile from starting.
 func checkProfileDevices(env Env, access types.HostAccess) Check {
@@ -129,11 +129,11 @@ func checkProfileDevices(env Env, access types.HostAccess) Check {
 // checkWorkloadDevices reports the host devices a workload asks for that
 // are not present.
 //
-// Severity is per device, because the container runner is not handed all
-// of them the same way. What is passed through as it was written breaks
-// the container when it is not there, and what qubesome resolves against
-// the host is left out instead, which costs the workload a feature and
-// nothing more. The check takes the severity of the worst thing in it.
+// Severity is per device, because they are not bound into the sandbox
+// the same way. What is bound as it was written breaks the sandbox when
+// it is not there, and what qubesome resolves against the host is left
+// out instead, which costs the workload a feature and nothing more. The
+// check takes the severity of the worst thing in it.
 func checkWorkloadDevices(env Env, access types.HostAccess) Check {
 	const name = "workload devices"
 
@@ -160,7 +160,7 @@ func checkWorkloadDevices(env Env, access types.HostAccess) Check {
 				Name:   name,
 				Status: Fail,
 				Detail: describe(missing),
-				Fix:    "The container will not start without them. Attach the device, or remove the grant from the config.",
+				Fix:    "The sandbox will not start without them. Attach the device, or remove the request from the workload's hostAccess.",
 			}
 		}
 	}
@@ -178,8 +178,8 @@ func checkWorkloadDevices(env Env, access types.HostAccess) Check {
 		Name:   name,
 		Status: Warn,
 		Detail: describe(missing),
-		Fix: "These are left out of the container's arguments, so the workload starts without them. " +
-			"Attach the device, or remove the grant from the config.",
+		Fix: "These are left out of the sandbox's binds, so the workload starts without them. " +
+			"Attach the device, or remove the request from the workload's hostAccess.",
 	}
 }
 

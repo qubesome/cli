@@ -16,6 +16,16 @@ const (
 
 	// NetHost leaves the sandbox in the host network namespace.
 	NetHost
+
+	// NetGateway gives the sandbox its own empty network namespace and
+	// says that qubesome will put a link to the session's gateway in it.
+	//
+	// bwrap is handed exactly what NetNone hands it. The veth is created
+	// and addressed by a helper in the session's user namespace once the
+	// sandbox exists, and nothing inside the sandbox holds anything over
+	// its own network namespace, which is what keeps a workload's address
+	// its identity rather than its choice.
+	NetGateway
 )
 
 // Mount is a bind mount from the host into the sandbox.
@@ -72,9 +82,47 @@ type Spec struct {
 
 	Net NetMode
 
+	// CapsAdd are the capabilities the sandbox keeps, named the way bwrap
+	// names them, with the CAP_ prefix. A bare NET_ADMIN is rejected as an
+	// unknown capability.
+	//
+	// bwrap applies capability arguments in the order they appear, and
+	// Args emits --cap-drop ALL in its prologue ahead of everything else,
+	// so a grant rendered here lands after the drop and survives it. That
+	// ordering is the whole mechanism. Moving the drop below these would
+	// empty the set again and leave no trace on the command line that it
+	// had.
+	//
+	// The grant is held in the user namespace bwrap creates, not the
+	// host's. CAP_NET_ADMIN here administers the sandbox's own network
+	// namespace and can do nothing to the host's.
+	//
+	// bwrap --help says these apply "when running as privileged user".
+	// That is misleading. Measured against bubblewrap 0.11.2, an
+	// unprivileged --cap-add CAP_NET_ADMIN leaves CapEff bit 12 set
+	// inside the sandbox.
+	CapsAdd []string
+
 	// Seccomp applies the embedded filter. It is false for
 	// seccompUnconfined.
 	Seccomp bool
+
+	// DieWithParent kills the sandbox when the process that started it
+	// dies. bwrap asks the kernel for a parent death signal, so it holds
+	// however the parent goes, a kill included.
+	//
+	// A profile sets it. The qubesome process that starts a profile also
+	// serves its socket and stays up for as long as the profile runs, so
+	// the two lifetimes are meant to be the same one.
+	//
+	// A workload leaves it off. Its launch may be a qubesome run typed at
+	// a terminal, which returns as soon as the workload is up, and a
+	// workload tied to that process would not outlive the shell prompt
+	// coming back. The container runner detached a workload for the same
+	// reason. What still ties a workload to its profile is the display:
+	// the X server it draws on lives inside the profile's sandbox, so a
+	// profile that goes away takes the connection with it.
+	DieWithParent bool
 
 	// Interactive keeps the sandbox attached to the terminal. It skips
 	// --new-session, which calls setsid and would detach the controlling

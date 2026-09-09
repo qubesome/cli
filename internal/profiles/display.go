@@ -276,29 +276,58 @@ func RunDisplay(p DisplayParams) error {
 	// Asking either way would turn the race between the two shutting
 	// down into an intermittent failure.
 	if err := x.Run(); err != nil {
+		exited, cerr := compositorStatus(compositorExit)
+
+		// A compositor that exited reporting success was asked to shut
+		// down and did, which is the profile being closed. The window
+		// manager and Xwayland then lose the socket they were running
+		// on and exit non-zero, but that is the shutdown arriving at
+		// them rather than a failure of their own, and reporting it as
+		// one turns closing a profile into an error.
+		if exited && cerr == nil {
+			slog.Info("compositor shut down, stopping the profile")
+			return nil
+		}
+
 		return errors.Join(err, compositorFailure(compositorExit))
 	}
 
 	return nil
 }
 
-// compositorFailure reports how the compositor exited, if it has already
-// done so, and nil while it is still running.
+// compositorStatus reports whether the compositor has already exited and
+// what it exited with. A nil error from an exited compositor is a clean
+// shutdown, which is why the two are returned separately: nil alone
+// cannot say whether it is still running.
 //
 // It reads the status without consuming it, so the deferred reap still
 // finds one waiting for it.
-func compositorFailure(exit chan error) error {
+func compositorStatus(exit chan error) (bool, error) {
 	select {
 	case err := <-exit:
 		exit <- err
-		if err == nil {
-			return errors.New("compositor exited first, reporting success")
-		}
-
-		return fmt.Errorf("compositor exited first: %w", err)
+		return true, err
 	default:
+		return false, nil
+	}
+}
+
+// compositorFailure reports how the compositor exited, if it has already
+// done so, and nil while it is still running.
+//
+// Every caller of this is on a path where the compositor should still be
+// up, so exiting at all is the failure, whatever it exited with.
+func compositorFailure(exit chan error) error {
+	exited, err := compositorStatus(exit)
+	if !exited {
 		return nil
 	}
+
+	if err == nil {
+		return errors.New("compositor exited first, reporting success")
+	}
+
+	return fmt.Errorf("compositor exited first: %w", err)
 }
 
 const (

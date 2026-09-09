@@ -51,6 +51,10 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		return addCap(multiplier * v)
 	}
 
+	// Two arguments per capability, "--cap-add" and the name.
+	if err := addMulCap(2, len(s.CapsAdd)); err != nil {
+		return nil, err
+	}
 	if err := addMulCap(3, len(s.Devices)); err != nil {
 		return nil, err
 	}
@@ -81,7 +85,6 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		"--gid", strconv.Itoa(s.GID),
 
 		"--cap-drop", "ALL",
-		"--die-with-parent",
 
 		// The sandbox environment is built from the image and the profile,
 		// so the host environment must not leak into it.
@@ -103,6 +106,22 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		// default, and a missing /sys is fatal rather than a silent drop
 		// to software rendering, which is the failure this exists to
 		// remove.
+		//
+		// The cost is that a workload in its own empty network namespace
+		// still reads the host's interface names and addresses through
+		// /sys/class/net. sysfs carries the mounting namespace's view and
+		// this bind carries the host's. It is disclosure and not
+		// reachability, since /proc/net is per namespace and shows
+		// nothing.
+		//
+		// Narrowing it has been tried and cost hardware rendering.
+		// Sharing /sys/dev/char and the render node's device directory
+		// satisfies libdrm, measured with drmGetDevices2 and
+		// drmGetDevice2 in a real sandbox, and Mesa still failed with
+		// "MESA-LOADER: failed to retrieve device information". Mesa
+		// reads more than libdrm enumerates, so a libdrm probe is not
+		// evidence that narrowing is safe. Anyone trying again needs a GL
+		// or Vulkan initialisation inside the sandbox as the check.
 		"--ro-bind", "/sys", "/sys",
 
 		// /tmp holds nothing from the image that the sandbox needs, and a
@@ -118,6 +137,23 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		"--tmpfs", "/tmp",
 	)
 
+	// Whether the sandbox outlives the process that started it is the
+	// caller's to say, so this is not part of the prologue. See
+	// Spec.DieWithParent for which callers set it and why.
+	if s.DieWithParent {
+		args = append(args, "--die-with-parent")
+	}
+
+	// bwrap applies capability arguments in order, so these have to follow
+	// the --cap-drop ALL above. Emitted before it they would be dropped
+	// again, and nothing would report it.
+	for _, c := range s.CapsAdd {
+		if !strings.HasPrefix(c, "CAP_") {
+			return nil, fmt.Errorf("sandbox: capability %q is missing the CAP_ prefix", c)
+		}
+		args = append(args, "--cap-add", c)
+	}
+
 	// The XDG runtime directory has to exist before anything inside looks
 	// for it, and an image is not obliged to ship one. bwrap creates it
 	// while it still holds the privileges of the sandbox setup, so the
@@ -129,7 +165,10 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		args = append(args, "--perms", "0700", "--dir", s.RuntimeDir)
 	}
 
-	if s.Net == NetNone {
+	// Every mode but NetHost gets a namespace of its own. NetGateway
+	// differs from NetNone in what qubesome does next rather than in what
+	// bwrap is asked for.
+	if s.Net != NetHost {
 		args = append(args, "--unshare-net")
 	}
 

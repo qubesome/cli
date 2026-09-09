@@ -34,9 +34,9 @@ func TestStartRefusesARunningProfile(t *testing.T) {
 	cookie := filepath.Join(dir, ".Xserver-cookie")
 	require.NoError(t, os.WriteFile(cookie, []byte("cookie"), files.FileMode))
 
-	require.NoError(t, sandbox.WriteState(sandboxStatePath(name), os.Getpid()))
+	require.NoError(t, sandbox.WriteState(SandboxStatePath(name), os.Getpid()))
 
-	err := Start("", &types.Profile{Name: name, WindowManager: "i3"}, &types.Config{}, false)
+	err := Start(&types.Profile{Name: name, WindowManager: "i3"}, &types.Config{}, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already started")
 
@@ -93,7 +93,7 @@ func lastEnv(env []string, name string) string {
 func TestStartWithoutAConfig(t *testing.T) {
 	t.Parallel()
 
-	err := Start("", &types.Profile{Name: "work", WindowManager: "i3"}, nil, false)
+	err := Start(&types.Profile{Name: "work", WindowManager: "i3"}, nil, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "config is nil")
 }
@@ -124,4 +124,50 @@ func TestAwaitSandboxAcceptsACleanExit(t *testing.T) {
 	require.NoError(t, cmd.Start())
 
 	require.NoError(t, awaitSandbox("work", cmd))
+}
+
+func TestLoadConfigUnder(t *testing.T) {
+	t.Parallel()
+
+	const config = "profiles:\n  work:\n    path: work\n    windowManager: exec awesome\n"
+
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	outside := filepath.Join(tmp, "outside")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "sub"), 0o700))
+	require.NoError(t, os.MkdirAll(outside, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "qubesome.config"), []byte(config), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "sub", "qubesome.config"), []byte(config), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "qubesome.config"), []byte(config), 0o600))
+	require.NoError(t, os.Symlink(outside, filepath.Join(repo, "escape")))
+
+	t.Run("reads a config below the dir", func(t *testing.T) {
+		t.Parallel()
+
+		for _, path := range []string{"", "sub"} {
+			rel := filepath.Join(path, "qubesome.config")
+			cfg, err := loadConfigUnder(repo, rel)
+			require.NoError(t, err)
+			require.Equal(t, filepath.Join(repo, path), cfg.RootDir)
+		}
+	})
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "traversal", path: "../outside"},
+		{name: "absolute", path: "/etc"},
+		{name: "through a symlink out of the dir", path: "escape"},
+	}
+
+	for _, tc := range tests {
+		t.Run("refuses a path with a "+tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := loadConfigUnder(repo, filepath.Join(tc.path, "qubesome.config"))
+			require.Error(t, err)
+		})
+	}
 }

@@ -11,9 +11,9 @@ import (
 
 // Environment checks the host qubesome runs on, independently of any
 // profile or workload.
-func Environment(env Env, runner string) []Check {
+func Environment(env Env) []Check {
 	return []Check{
-		checkRunner(env, runner),
+		checkSandboxTools(env),
 		checkResolution(env),
 		checkHostDisplay(env),
 		checkRenderNode(env),
@@ -22,55 +22,47 @@ func Environment(env Env, runner string) []Check {
 	}
 }
 
-// checkRunner verifies that the container runner is not just installed
-// but usable, since a runner that refuses every connection is no better
-// than one that is missing.
-func checkRunner(env Env, runner string) Check {
-	bin := files.ContainerRunnerBinary(runner)
+// sandboxTools are the binaries every profile and workload is built
+// from. bwrap creates the sandbox, and skopeo and umoci put the image on
+// disk for it to run.
+var sandboxTools = []string{
+	files.BwrapBinary,
+	files.SkopeoBinary,
+	files.UmociBinary,
+}
 
-	if _, err := env.LookPath(bin); err != nil {
-		return Check{
-			Name:   "container runner",
-			Status: Fail,
-			Detail: fmt.Sprintf("%s was not found", bin),
-			Fix:    "Install docker or podman, then run doctor again.",
+// checkSandboxTools reports whether the tools a sandbox is built from are
+// installed.
+//
+// All three are reported as one check, because they are installed
+// together and a host that is missing one is usually missing the rest.
+// What makes bwrap usable rather than merely present is the user
+// namespace and device ACL state of the host, which qubesome deps
+// reports on, so none of that is repeated here.
+func checkSandboxTools(env Env) Check {
+	const name = "sandbox tools"
+
+	var missing []string
+	for _, bin := range sandboxTools {
+		if _, err := env.LookPath(bin); err != nil {
+			missing = append(missing, bin)
 		}
 	}
 
-	out, err := env.Output(bin, "info")
-	if err == nil {
+	if len(missing) > 0 {
 		return Check{
-			Name:   "container runner",
-			Status: OK,
-			Detail: fmt.Sprintf("%s is installed and reachable", bin),
+			Name:   name,
+			Status: Fail,
+			Detail: fmt.Sprintf("not found: %s", strings.Join(missing, ", ")),
+			Fix: "Profiles and workloads run under bwrap, from images that skopeo pulls and umoci " +
+				"unpacks. Install the missing ones, then run doctor again.",
 		}
 	}
 
-	text := string(out)
-	lower := strings.ToLower(text)
-
-	switch {
-	case strings.Contains(lower, "permission denied"):
-		return Check{
-			Name:   "container runner",
-			Status: Fail,
-			Detail: fmt.Sprintf("%s refused the connection", bin),
-			Fix:    "Add your user to the docker group with `sudo usermod -aG docker $USER`, then log out and back in. Alternatively, switch to podman, which does not require group membership.",
-		}
-	case strings.Contains(lower, "cannot connect"), strings.Contains(lower, "daemon"), strings.Contains(lower, "refused"):
-		return Check{
-			Name:   "container runner",
-			Status: Fail,
-			Detail: fmt.Sprintf("%s daemon is not reachable", bin),
-			Fix:    "Start the daemon with `systemctl --user start docker` or `systemctl start docker`, depending on how it is installed.",
-		}
-	default:
-		return Check{
-			Name:   "container runner",
-			Status: Fail,
-			Detail: firstLine(text),
-			Fix:    fmt.Sprintf("Run `%s info` directly to see the full error and act on it.", bin),
-		}
+	return Check{
+		Name:   name,
+		Status: OK,
+		Detail: fmt.Sprintf("%s are installed", strings.Join(sandboxTools, ", ")),
 	}
 }
 

@@ -40,11 +40,6 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles i3
 				Usage:       "local is the local path for a git repository. This is to be used in combination with --git.",
 				Destination: &local,
 			},
-			&cli.StringFlag{
-				Name:        "runner",
-				Destination: &runner,
-				Usage:       "sets what runner to be used, this will override the value set at the qubesome.config. Options: docker or podman.",
-			},
 			&cli.BoolFlag{
 				Name:        "interactive",
 				Aliases:     []string{"i"},
@@ -100,7 +95,6 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles i3
 				profiles.WithGitURL(gitURL),
 				profiles.WithPath(path),
 				profiles.WithLocal(local),
-				profiles.WithRunner(runner),
 			}
 
 			if interactive {

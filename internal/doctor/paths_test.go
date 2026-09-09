@@ -74,7 +74,7 @@ func TestCheckMappedPaths(t *testing.T) {
 }
 
 // TestPrimeExpansion does not run in parallel, since the expansion
-// mapping it primes is a package global shared with the runners.
+// mapping it primes is a package global shared with the sandbox specs.
 func TestPrimeExpansion(t *testing.T) {
 	t.Run("GITDIR and drive labels expand once primed", func(t *testing.T) {
 		cfg := &types.Config{RootDir: "/home/user/git/config"}

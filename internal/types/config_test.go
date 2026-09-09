@@ -1,8 +1,13 @@
 package types
 
 import (
+	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestProfileValidate(t *testing.T) {
@@ -112,24 +117,6 @@ func TestProfileValidate(t *testing.T) {
 			false,
 		},
 		{
-			"dns: valid empty",
-			Profile{
-				Name:          "valid",
-				DNS:           "",
-				WindowManager: "valid",
-			},
-			false,
-		},
-		{
-			"dns: valid empty",
-			Profile{
-				Name:          "valid",
-				DNS:           "1.1.1.1",
-				WindowManager: "valid",
-			},
-			false,
-		},
-		{
 			"windowManager: valid",
 			Profile{
 				Name:          "valid",
@@ -146,13 +133,22 @@ func TestProfileValidate(t *testing.T) {
 			true,
 		},
 		{
-			"runner: docker",
+			"runner: removed docker",
 			Profile{
 				Name:          "valid",
 				Runner:        "docker",
 				WindowManager: "valid",
 			},
-			false,
+			true,
+		},
+		{
+			"runner: removed podman",
+			Profile{
+				Name:          "valid",
+				Runner:        "podman",
+				WindowManager: "valid",
+			},
+			true,
 		},
 		{
 			"runner: firecracker",
@@ -270,6 +266,312 @@ func TestProfileValidate(t *testing.T) {
 			if !tc.wantErr && err != nil {
 				t.Errorf("did not expect an error but got %v: %+v", err, tc.profile)
 			}
+		})
+	}
+}
+
+// A profile naming a removed runner is told so too, in the same words the
+// workload gets, so the two do not read as different problems.
+func TestProfileValidateReportsARemovedRunner(t *testing.T) {
+	t.Parallel()
+
+	for _, runner := range []string{"docker", "podman"} {
+		p := Profile{Name: "valid", WindowManager: "valid", Runner: runner}
+
+		err := p.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "has been removed")
+		assert.Contains(t, err.Error(), runner)
+	}
+}
+
+// captureLogs redirects the default logger for the duration of the test
+// and returns what was written to it. It replaces a package level logger,
+// so a test using it cannot run in parallel.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	buf := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	return buf
+}
+
+func TestGatewayNetworkIsOnlyANamedOne(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []string{"", "none", "host"} {
+		assert.False(t, GatewayNetwork(network), "network %q", network)
+	}
+
+	assert.True(t, GatewayNetwork("qubesome"))
+}
+
+// A named network is kept and reported, never refused. The message has to
+// name the field and say what is missing, since the config looks like it
+// grants a network and the sandbox gets loopback only.
+func TestWarnIgnoredNetworkWithoutAGateway(t *testing.T) {
+	buf := captureLogs(t)
+
+	for _, network := range []string{"", "none", "host"} {
+		WarnIgnoredNetwork("chrome-work", network, false)
+	}
+	require.NotContains(t, buf.String(), "hostAccess.network")
+
+	WarnIgnoredNetwork("chrome-work", "qubesome", false)
+
+	out := buf.String()
+	assert.Contains(t, out, "hostAccess.network")
+	assert.Contains(t, out, "gateway block")
+	assert.Contains(t, out, "qubesome")
+	assert.Contains(t, out, "chrome-work")
+}
+
+// With a gateway the name is honoured, so there is nothing to report.
+func TestWarnIgnoredNetworkSaysNothingWithAGateway(t *testing.T) {
+	buf := captureLogs(t)
+
+	WarnIgnoredNetwork("chrome-work", "qubesome", true)
+
+	assert.NotContains(t, buf.String(), "hostAccess.network")
+}
+
+// The one deliberate regression of this stage. A workload that can renumber
+// its own interface could claim another workload's policy and another
+// workload's injected credentials, so it cannot be given a gateway address.
+// The message has to name the workload and say what to change, because the
+// same configuration used to work.
+func TestValidateGatewayAccessRefusesNetAdminOnAGatewayNetwork(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Gateway: &GatewayConfig{}}
+
+	for _, capability := range []string{"NET_ADMIN", "net_admin", "CAP_NET_ADMIN"} {
+		err := cfg.ValidateGatewayAccess(gatewayWorkload("qubesome", capability))
+
+		require.Error(t, err, "capsAdd %q", capability)
+		assert.Contains(t, err.Error(), "kali-pentest")
+		assert.Contains(t, err.Error(), "NET_ADMIN")
+		assert.Contains(t, err.Error(), "identity to the gateway")
+	}
+}
+
+// Another capability says nothing about the address, so it is left alone.
+func TestValidateGatewayAccessAllowsOtherCapabilities(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Gateway: &GatewayConfig{}}
+
+	require.NoError(t, cfg.ValidateGatewayAccess(gatewayWorkload("qubesome", "SYS_PTRACE")))
+}
+
+// Without a gateway address there is nothing to claim. A named network with
+// no gateway block is an empty namespace, and CAP_NET_ADMIN over one of
+// those reaches nothing.
+func TestValidateGatewayAccessAllowsNetAdminWithoutAGatewayAddress(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, (&Config{}).ValidateGatewayAccess(gatewayWorkload("qubesome", "NET_ADMIN")))
+	require.NoError(t, (*Config)(nil).ValidateGatewayAccess(gatewayWorkload("qubesome", "NET_ADMIN")))
+
+	cfg := &Config{Gateway: &GatewayConfig{}}
+	for _, network := range []string{"", "none", "host"} {
+		require.NoError(t, cfg.ValidateGatewayAccess(gatewayWorkload(network, "NET_ADMIN")), "network %q", network)
+	}
+}
+
+func gatewayWorkload(network, capability string) EffectiveWorkload {
+	return EffectiveWorkload{
+		Name: "kali-pentest",
+		Workload: Workload{
+			Name: "kali",
+			HostAccess: HostAccess{
+				Network: network,
+				CapsAdd: []string{capability},
+			},
+		},
+	}
+}
+
+func TestGatewayConfigValidate(t *testing.T) {
+	t.Parallel()
+
+	base := GatewayConfig{
+		Image:  "ghcr.io/qubesome/gateway:latest",
+		Config: "gateway.yml",
+		Subnet: "10.111.0.0/24",
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*GatewayConfig)
+		wantErr string
+	}{
+		{
+			name:   "valid",
+			mutate: func(*GatewayConfig) {},
+		},
+		{
+			name:    "image does not match the format",
+			mutate:  func(g *GatewayConfig) { g.Image = "Gateway Image:latest" },
+			wantErr: "does not match format",
+		},
+		{
+			name:    "image is empty",
+			mutate:  func(g *GatewayConfig) { g.Image = "" },
+			wantErr: "gateway image cannot be empty",
+		},
+		{
+			name:    "config is empty",
+			mutate:  func(g *GatewayConfig) { g.Config = "" },
+			wantErr: "gateway config cannot be empty",
+		},
+		{
+			name:    "config leaves the config tree",
+			mutate:  func(g *GatewayConfig) { g.Config = "../gateway.yml" },
+			wantErr: "unsafe path",
+		},
+		{
+			name:    "subnet is not a prefix",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "10.111.0.0" },
+			wantErr: "invalid gateway subnet",
+		},
+		{
+			name:    "subnet is empty",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "" },
+			wantErr: "invalid gateway subnet",
+		},
+		{
+			name:    "subnet is IPv6",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "fd00::/64" },
+			wantErr: "must be IPv4",
+		},
+		{
+			name:    "subnet has no host addresses",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "10.111.0.0/31" },
+			wantErr: "has no host addresses",
+		},
+		{
+			name:    "subnet names a host",
+			mutate:  func(g *GatewayConfig) { g.Subnet = "10.111.0.5/24" },
+			wantErr: "names a host, not a network",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			gw := base
+			tc.mutate(&gw)
+
+			err := gw.Validate("/config/root")
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+// Both spellings of an absolute path a real configuration uses resolve
+// under the config root, and so does a relative one.
+func TestGatewayConfigPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"relative", "gateway.yml", "/config/root/gateway.yml"},
+		{"rooted at the config tree", "/gateway.yml", "/config/root/gateway.yml"},
+		{"under the config root", "/config/root/gateway.yml", "/config/root/gateway.yml"},
+		{"rooted at the tree, in a subdirectory", "/shared/gateway.yml", "/config/root/shared/gateway.yml"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := GatewayConfig{Config: tc.path}.ConfigPath("/config/root")
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDecodeConfigGateway(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+		want    *GatewayConfig
+	}{
+		{
+			name:    "absent block means no gateway",
+			content: "profiles: {}\n",
+		},
+		{
+			name: "present block",
+			content: `gateway:
+  image: ghcr.io/qubesome/gateway:latest
+  config: /gateway.yml
+  subnet: 10.111.0.0/24
+`,
+			want: &GatewayConfig{
+				Image:  "ghcr.io/qubesome/gateway:latest",
+				Config: "/gateway.yml",
+				Subnet: "10.111.0.0/24",
+			},
+		},
+		{
+			name: "unknown field in the block",
+			content: `gateway:
+  image: ghcr.io/qubesome/gateway:latest
+  configPath: gateway.yml
+`,
+			wantErr: "failed to decode config",
+		},
+		{
+			name: "invalid subnet",
+			content: `gateway:
+  image: ghcr.io/qubesome/gateway:latest
+  config: gateway.yml
+  subnet: 10.111.0.0/31
+`,
+			wantErr: "invalid gateway",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := DecodeConfig(strings.NewReader(tc.content), "/config/root/qubesome.config")
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, cfg.Gateway)
+
+			if tc.want == nil {
+				return
+			}
+
+			got, err := cfg.Gateway.ConfigPath(cfg.RootDir)
+			require.NoError(t, err)
+			assert.Equal(t, "/config/root/gateway.yml", got)
 		})
 	}
 }

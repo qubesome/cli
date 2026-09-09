@@ -37,6 +37,20 @@ type Workload struct {
 
 	Runner string `yaml:"runner"`
 	User   *int   `yaml:"user"`
+
+	// MicroVM configures the machine a firecracker workload boots.
+	//
+	// It is a pointer so that an absent block is distinguishable from an
+	// empty one, which is what lets the defaults be applied in one place
+	// rather than being guessed at from a zero value.
+	MicroVM *MicroVM `yaml:"microvm"`
+
+	// AttachVM names the firecracker workload, in the same profile, whose
+	// machine this workload attaches to. It is a plain name because it
+	// becomes a filename.
+	//
+	//nolint:tagliatelle // VM is an initialism tagliatelle does not know, and the key is user facing.
+	AttachVM string `yaml:"attachVM"`
 }
 
 type HostAccess struct {
@@ -55,7 +69,6 @@ type HostAccess struct {
 	Microphone bool `yaml:"microphone"`
 	Speakers   bool `yaml:"speakers"`
 	VarRunUser bool `yaml:"varRunUser"`
-	Privileged bool `yaml:"privileged"`
 	Mime       bool `yaml:"mime"`
 
 	Bluetooth bool `yaml:"bluetooth"`
@@ -67,7 +80,7 @@ type HostAccess struct {
 	// the runtime's default profile denies, most notably the user namespace
 	// calls used by Chromium-based browsers. Granting this gives up the
 	// mitigation that stands between a workload and the host kernel, so it
-	// is opt-in at both workload and profile level, exactly like privileged.
+	// is opt-in at both workload and profile level.
 	SeccompUnconfined bool `yaml:"seccompUnconfined"`
 
 	// USBDevices defines the USB devices to be made available to a
@@ -107,7 +120,6 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	e.Workload.HostAccess.VarRunUser = w.HostAccess.VarRunUser && p.VarRunUser
 	e.Workload.HostAccess.Bluetooth = w.HostAccess.Bluetooth && p.Bluetooth
 	e.Workload.HostAccess.Mime = w.HostAccess.Mime && p.Mime
-	e.Workload.HostAccess.Privileged = w.HostAccess.Privileged && p.Privileged
 	e.Workload.HostAccess.SeccompUnconfined = w.HostAccess.SeccompUnconfined && p.SeccompUnconfined
 
 	// TODO: Consider restraining user on workloads.
@@ -227,7 +239,7 @@ func (w Workload) Validate() error {
 	if err := valid(w.Image, "image", 100, false, imageRegex); err != nil {
 		return err
 	}
-	if err := valid(w.Runner, "runner", 20, true, runnerRegex); err != nil {
+	if err := validateRunner(w.Runner); err != nil {
 		return err
 	}
 	for _, mime := range w.MimeApps {
@@ -257,11 +269,11 @@ func (w Workload) Validate() error {
 		}
 	}
 	for _, device := range w.HostAccess.Devices {
-		if _, _, _, err := ParseDevice(device); err != nil {
+		if err := ValidateDeviceRequest(device); err != nil {
 			return err
 		}
 	}
-	return nil
+	return ValidateMicroVM(w)
 }
 
 func (w EffectiveWorkload) Validate() error {

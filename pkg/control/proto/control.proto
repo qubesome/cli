@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+option go_package = "github.com/qubesome/cli/pkg/control/proto";
+
+package control;
+
+service GatewayControl {
+  rpc Register (RegisterRequest) returns (RegisterReply) {}
+  rpc Unregister (UnregisterRequest) returns (UnregisterReply) {}
+  rpc Ready (ReadyRequest) returns (ReadyReply) {}
+  rpc Reload (ReloadRequest) returns (ReloadReply) {}
+}
+
+// name is the policy key, which is the single string the gateway's workloads
+// map is keyed by. Profile and workload are not sent separately, otherwise
+// two repositories would have to agree on how they are joined.
+message RegisterRequest {
+  string name = 1;
+  string address = 2;
+}
+
+message RegisterReply {
+}
+
+message UnregisterRequest {
+  string name = 1;
+}
+
+message UnregisterReply {
+}
+
+message ReadyRequest {
+}
+
+message ReadyReply {
+}
+
+// Reload asks the gateway to re-read the policy file it was started with.
+// The path is not carried: the gateway is handed its policy at start and is
+// the only side that knows where the file landed inside its sandbox.
+//
+// The workload map is not part of the file and survives a reload. qubesome
+// is the source of truth for it, and a reload that dropped it would leave
+// running workloads unclassified.
+message ReloadRequest {
+}
+
+message ReloadReply {
+}

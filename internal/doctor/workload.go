@@ -1,20 +1,23 @@
 package doctor
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/profiles"
 	"github.com/qubesome/cli/internal/types"
 	"go.yaml.in/yaml/v3"
 )
 
 // Workload diagnoses one workload of a profile.
-func Workload(env Env, cfg *types.Config, runner, profileName, workloadName string) []Check {
+func Workload(env Env, cfg *types.Config, profileName, workloadName string) []Check {
 	src := resolveSource(env, cfg, profileName)
 
 	configCheck := checkWorkloadConfig(cfg, src, profileName, workloadName)
@@ -26,7 +29,6 @@ func Workload(env Env, cfg *types.Config, runner, profileName, workloadName stri
 	}
 
 	profile := cfg.Profiles[profileName]
-	bin := files.ContainerRunnerBinary(runnerFor(runner, profile))
 
 	// ApplyProfile matches a workload's paths against the profile's
 	// allowlist with both sides expanded, and the path check below reads
@@ -50,8 +52,9 @@ func Workload(env Env, cfg *types.Config, runner, profileName, workloadName stri
 
 	return []Check{
 		configCheck,
-		checkWorkloadImage(env, bin, w.Image),
-		checkWorkloadProfileRunning(env, bin, profileName),
+		checkWorkloadRunner(env, effective.Workload.Runner),
+		checkWorkloadImage(env, w.Image),
+		checkWorkloadProfileRunning(env, profileName),
 		checkWorkloadHostAccess(w, effective),
 		checkWorkloadDevices(env, effective.Workload.HostAccess),
 		checkMappedPaths(env, "workload paths", effective.Workload.HostAccess.Paths),
@@ -139,14 +142,7 @@ func checkWorkloadConfig(cfg *types.Config, src source, profileName, workloadNam
 // its name, so deriving the directory from the profile name finds nothing
 // for any profile whose path differs from it.
 func workloadsDir(src source, profile types.Profile) (string, error) {
-	rel, err := filepath.Rel(src.root, profile.Path)
-	if err != nil {
-		// Rel fails when exactly one side is absolute, which is the case
-		// for the relative profile path a config normally carries.
-		return files.WorkloadsDir(src.root, profile.Path)
-	}
-
-	return files.WorkloadsDir(src.root, rel)
+	return files.WorkloadsDir(src.root, profile.Path)
 }
 
 // workloadNames lists the workloads defined in dir. A workload's name is
@@ -179,18 +175,27 @@ func loadWorkload(src source, profile types.Profile, workloadName string) (types
 		return types.Workload{}, err
 	}
 
-	path, err := securejoin.SecureJoin(dir, workloadName+".yaml")
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return types.Workload{}, err
 	}
+	defer root.Close()
 
-	data, err := os.ReadFile(path)
+	name := workloadName + ".yaml"
+	path := filepath.Join(dir, name)
+
+	data, err := root.ReadFile(name)
 	if err != nil {
 		return types.Workload{}, err
 	}
 
 	var w types.Workload
-	if err := yaml.Unmarshal(data, &w); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
+	if err := decoder.Decode(&w); err != nil {
+		if errors.Is(err, io.EOF) {
+			return types.Workload{}, fmt.Errorf("workload file %q is empty", path)
+		}
 		return types.Workload{}, err
 	}
 
@@ -199,33 +204,96 @@ func loadWorkload(src source, profile types.Profile, workloadName string) (types
 	return w, nil
 }
 
-// checkWorkloadImage reports whether the workload's image is present
-// locally. Its absence is a Warn, not a Fail, since qubesome pulls a
-// missing image on start.
-func checkWorkloadImage(env Env, bin, image string) Check {
-	if _, err := env.Output(bin, "image", "inspect", image); err != nil {
+// checkWorkloadRunner reports on the runner the workload asks for.
+//
+// A workload runs under bwrap, which needs nothing beyond the tools the
+// environment section already reports on. Firecracker is the one other
+// runner qubesome still has. It boots a machine on a root filesystem
+// built out of the workload's own image bundle, so it needs its own
+// binary, mkfs.ext4 to write that filesystem and bwrap to compose the
+// tree it is written from. A runner qubesome no longer has is a workload
+// that cannot start at all, and a config naming one still validates, so
+// this is the only place it is visible before a launch refuses it.
+func checkWorkloadRunner(env Env, runner string) Check {
+	const name = "workload runner"
+
+	switch runner {
+	case "":
+		return Check{
+			Name:   name,
+			Status: OK,
+			Detail: "runs in a bwrap sandbox",
+		}
+	case "firecracker":
+		tools := []string{files.FireCrackerBinary, files.BwrapBinary, files.MkfsExt4Binary}
+
+		var missing []string
+		for _, bin := range tools {
+			if _, err := env.LookPath(bin); err != nil {
+				missing = append(missing, bin)
+			}
+		}
+
+		if len(missing) > 0 {
+			return Check{
+				Name:   name,
+				Status: Fail,
+				Detail: fmt.Sprintf("the firecracker runner is missing %s", strings.Join(missing, ", ")),
+				Fix: "a microVM boots a root filesystem built from the workload's own image: bwrap composes " +
+					"the unpacked bundle and mkfs.ext4 writes it out, and firecracker boots the result. " +
+					"Install the missing ones, or drop the runner from the workload so it runs under bwrap.",
+			}
+		}
+
+		return Check{
+			Name:   name,
+			Status: OK,
+			Detail: fmt.Sprintf("firecracker is installed, with %s and %s to build a root filesystem",
+				files.BwrapBinary, files.MkfsExt4Binary),
+		}
+	case "docker", "podman":
+		return Check{
+			Name:   name,
+			Status: Fail,
+			Detail: fmt.Sprintf("the %q runner has been removed", runner),
+			Fix:    "Drop the runner from the workload so it runs under bwrap.",
+		}
+	default:
+		return Check{
+			Name:   name,
+			Status: Fail,
+			Detail: fmt.Sprintf("%q is not a runner qubesome has", runner),
+			Fix:    "Drop the runner from the workload so it runs under bwrap, or set it to firecracker.",
+		}
+	}
+}
+
+// checkWorkloadImage reports whether the workload's image is in the OCI
+// store, which is where a sandbox takes its root filesystem from. Its
+// absence is a Warn, not a Fail, since qubesome pulls a missing image on
+// start.
+func checkWorkloadImage(env Env, image string) Check {
+	if !env.ImageInStore(image) {
 		return Check{
 			Name:   "workload image",
 			Status: Warn,
-			Detail: fmt.Sprintf("%s is not present locally", image),
-			Fix:    fmt.Sprintf("It will be pulled on start, or pull it now with `%s pull %s`.", bin, image),
+			Detail: fmt.Sprintf("%s is not in the image store", image),
+			Fix:    "It will be pulled on start, or pull it now with `qubesome images refresh`.",
 		}
 	}
 
 	return Check{
 		Name:   "workload image",
 		Status: OK,
-		Detail: fmt.Sprintf("%s is present locally", image),
+		Detail: fmt.Sprintf("%s is in the image store", image),
 	}
 }
 
 // checkWorkloadProfileRunning reports whether the profile a workload
 // needs is up, since a workload connects to its profile's display and
 // has nowhere to attach to otherwise.
-func checkWorkloadProfileRunning(env Env, bin, profileName string) Check {
-	out, _ := env.Output(bin, "ps", "--filter", "name=qubesome-"+profileName, "--format", "{{.Names}}")
-
-	if strings.TrimSpace(string(out)) == "" {
+func checkWorkloadProfileRunning(env Env, profileName string) Check {
+	if !env.SandboxAlive(profiles.SandboxStatePath(profileName)) {
 		return Check{
 			Name:   "profile running",
 			Status: Fail,
@@ -261,7 +329,6 @@ func checkWorkloadHostAccess(w types.Workload, effective types.EffectiveWorkload
 		{"varRunUser", w.HostAccess.VarRunUser, effective.Workload.HostAccess.VarRunUser},
 		{"bluetooth", w.HostAccess.Bluetooth, effective.Workload.HostAccess.Bluetooth},
 		{"mime", w.HostAccess.Mime, effective.Workload.HostAccess.Mime},
-		{"privileged", w.HostAccess.Privileged, effective.Workload.HostAccess.Privileged},
 		{"seccompUnconfined", w.HostAccess.SeccompUnconfined, effective.Workload.HostAccess.SeccompUnconfined},
 	}
 
@@ -281,11 +348,15 @@ func checkWorkloadHostAccess(w types.Workload, effective types.EffectiveWorkload
 		}
 	}
 
-	if w.HostAccess.Network != "" && w.HostAccess.Network != "none" &&
-		w.HostAccess.Network != effective.Workload.HostAccess.Network {
+	switch {
+	case w.HostAccess.Network == "" || w.HostAccess.Network == "none":
+		// Nothing requested, or the workload explicitly asked to have no
+		// network, which ApplyProfile always honours. Neither is a grant
+		// to report.
+	case w.HostAccess.Network != effective.Workload.HostAccess.Network:
 		dropped = append(dropped, fmt.Sprintf("network (requested %q, got %q)",
 			w.HostAccess.Network, effective.Workload.HostAccess.Network))
-	} else if w.HostAccess.Network != "" {
+	default:
 		granted = append(granted, "network")
 	}
 

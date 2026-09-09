@@ -1,17 +1,18 @@
 package images
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
 	"go.yaml.in/yaml/v3"
-	"golang.org/x/sys/execabs"
 )
 
 func Run(opts ...command.Option[Options]) error {
@@ -20,31 +21,50 @@ func Run(opts ...command.Option[Options]) error {
 		opt(o)
 	}
 
-	bin := files.ContainerRunnerBinary(o.Runner)
-
 	slog.Debug("images.Run", "options", o)
-	return PullAll(bin, o.Config)
+	return PullAll(o.Config)
 }
 
-func Pull(bin string, cfg *types.Config, wg *sync.WaitGroup) error {
-	switch cfg.WorkloadPullMode {
-	case types.Background:
-		wg.Go(func() {
-			if exp, _ := pullExpired(); exp {
-				err := PullAll(bin, cfg)
-				if err != nil {
-					slog.Error("error pulling images", "error", err)
-				}
-			}
-		})
-	case types.OnDemand:
-		// no-op as images will be pull when needed.
+// RefreshExpired re-pulls every image in a config once the last check is
+// older than refreshExpiration. It blocks, so it belongs on a goroutine of a
+// process that outlives it.
+//
+// It is deliberately not called from a workload launch. It used to be,
+// with the launch waiting on it, so opening one app re-pulled and
+// re-unpacked every image the configuration named and the caller waited
+// for all of them. The refresh now runs where a profile is being started,
+// which is a process that stays up and where the wait is expected
+// anyway.
+func RefreshExpired(cfg *types.Config) {
+	refreshExpired(NewStore(), cfg)
+}
+
+func refreshExpired(s *Store, cfg *types.Config) {
+	if cfg.WorkloadPullMode != types.Background {
+		return
 	}
-	return nil
+
+	exp, err := pullExpired()
+	if err != nil {
+		slog.Error("cannot tell whether images are due a refresh", "error", err)
+		return
+	}
+	if !exp {
+		return
+	}
+
+	if err := pullAll(s, cfg); err != nil {
+		slog.Error("error pulling images", "error", err)
+	}
 }
 
 var (
-	pullExpiration = 24 * time.Hour
+	// refreshExpiration is how stale the store may get before starting a
+	// profile refreshes it in the background. Three days rather than one
+	// because a refresh re-fetches every image the configuration names,
+	// which is minutes of network and disk, and because nothing about an
+	// image qubesome runs changes daily.
+	refreshExpiration = 72 * time.Hour
 )
 
 func pullExpired() (bool, error) {
@@ -64,7 +84,7 @@ func pullExpired() (bool, error) {
 		return true, nil
 	}
 
-	if fi.ModTime().Before(time.Now().Add(-pullExpiration)) {
+	if fi.ModTime().Before(time.Now().Add(-refreshExpiration)) {
 		if err := os.WriteFile(fn, []byte{}, files.FileMode); err != nil {
 			return false, fmt.Errorf("cannot update file %q: %w", fn, err)
 		}
@@ -74,43 +94,66 @@ func pullExpired() (bool, error) {
 	return false, nil
 }
 
-func PreemptWorkloadImages(bin string, cfg *types.Config) {
-	slog.Debug("Check need for the preemptive pull of workload images")
-	fn := files.ImagesLastCheckedPath()
+// PreemptWorkloadImages pulls what the store lacks on the first run, so
+// that opening an app later does not wait on a pull.
+//
+// The profile image is in the store by the time this runs, so what it
+// fetches is the workload images.
+func PreemptWorkloadImages(cfg *types.Config) {
+	slog.Info("preemptively pulling workload images, which happens once and saves waiting on the first launch of each")
 
-	_, err := os.Stat(fn)
-	if err != nil && os.IsNotExist(err) {
-		fmt.Println("INFO: Preemptively pulling workload images. This only happens on first execution and aims to avoid delays opening apps.")
+	_ = pullMissing(NewStore(), cfg)
+}
 
-		_ = pullWorkloadImages(bin, cfg)
-		_ = os.WriteFile(fn, []byte{}, files.FileMode)
-	}
+// FirstRun reports whether this host has never checked its images.
+//
+// It answers from the same sentinel RefreshExpired keeps its timestamp
+// in, because the two questions have one answer: a host that has never
+// refreshed is a host that has never been offered a preload either.
+//
+// The offer used to be made whenever an image was missing, and the
+// sentinel was only consulted afterwards, inside the pull it led to. So
+// declining left nothing recorded and the question came back on every
+// start, which is the one answer that made it permanent.
+func FirstRun() bool {
+	_, err := os.Stat(files.ImagesLastCheckedPath())
+
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // PullAll refreshes every image in a config.
 //
-// Profile images are pulled whether or not the store already holds them,
-// because refreshing is the whole point of the command behind this.
-func PullAll(bin string, cfg *types.Config) error {
-	s := NewStore()
-	for _, img := range ProfileImages(cfg) {
-		if _, err := refreshProfileImage(s, img); err != nil {
-			slog.Error("cannot pull profile image", "image", img, "error", err)
-		}
-	}
-
-	return pullWorkloadImages(bin, cfg)
+// Images are pulled whether or not the store already holds them, because
+// refreshing is the whole point of the command behind this.
+func PullAll(cfg *types.Config) error {
+	return pullAll(NewStore(), cfg)
 }
 
-func pullWorkloadImages(bin string, cfg *types.Config) error {
-	imgs, err := UniqueImages(cfg)
+func pullAll(s *Store, cfg *types.Config) error {
+	imgs, err := ConfigImages(cfg)
 	if err != nil {
 		return fmt.Errorf("cannot get images: %w", err)
 	}
 
 	for _, img := range imgs {
-		if err := PullImage(bin, img); err != nil {
-			slog.Error("cannot pull workload image", "image", img, "error", err)
+		if _, err := refreshImage(s, img); err != nil {
+			slog.Error("cannot pull image", "image", img, "error", err)
+		}
+	}
+
+	return nil
+}
+
+// pullMissing pulls only the images the store cannot already provide.
+func pullMissing(s *Store, cfg *types.Config) error {
+	imgs, err := ConfigImages(cfg)
+	if err != nil {
+		return fmt.Errorf("cannot get images: %w", err)
+	}
+
+	for _, img := range imgs {
+		if _, err := pullImage(s, img); err != nil {
+			slog.Error("cannot pull image", "image", img, "error", err)
 		}
 	}
 
@@ -119,30 +162,27 @@ func pullWorkloadImages(bin string, cfg *types.Config) error {
 
 // PullProfileImage returns the bundle for a profile image, pulling it into
 // the OCI store only when the store cannot already provide it.
-//
-// Workload images still go through the container runner, because workloads
-// still run under it. The two stores coexist until workloads move.
 func PullProfileImage(ref string) (Bundle, error) {
-	return pullProfileImage(NewStore(), ref)
+	return pullImage(NewStore(), ref)
 }
 
-// pullProfileImage skips the pull for an image the store already holds.
+// pullImage skips the pull for an image the store already holds.
 //
-// A warm store lets a profile start with no network, which is what the
-// runner backed path gave through PullImageIfNotPresent. Refreshing is
-// PullAll's job, not a side effect of starting a profile.
-func pullProfileImage(s *Store, ref string) (Bundle, error) {
+// A warm store lets a profile start with no network, and it is what keeps
+// a repeated workload launch off the registry. Refreshing is PullAll's
+// job, not a side effect of starting something.
+func pullImage(s *Store, ref string) (Bundle, error) {
 	if b, err := s.Resolve(ref); err == nil {
-		slog.Debug("profile image is already in the store", "image", ref)
+		slog.Debug("image is already in the store", "image", ref)
 		return b, nil
 	}
 
-	return refreshProfileImage(s, ref)
+	return refreshImage(s, ref)
 }
 
-// refreshProfileImage pulls and unpacks ref whether or not the store
-// already holds it.
-func refreshProfileImage(s *Store, ref string) (Bundle, error) {
+// refreshImage pulls and unpacks ref whether or not the store already
+// holds it.
+func refreshImage(s *Store, ref string) (Bundle, error) {
 	if err := s.Pull(ref); err != nil {
 		return Bundle{}, err
 	}
@@ -150,75 +190,34 @@ func refreshProfileImage(s *Store, ref string) (Bundle, error) {
 	return s.Unpack(ref)
 }
 
-// ProfileImages returns the unique profile images in a config.
+// HasImage reports whether the store can already provide ref.
 //
-// Profile images live in the OCI store and workload images live in the
-// container runner's store, because only profiles have moved to bwrap. The
-// two coexist until workloads follow.
-func ProfileImages(cfg *types.Config) []string {
-	if cfg == nil {
-		return nil
-	}
-
-	seen := map[string]struct{}{}
-	imgs := make([]string, 0, len(cfg.Profiles))
-
-	for _, p := range cfg.Profiles {
-		if p.Image == "" {
-			continue
-		}
-		if _, ok := seen[p.Image]; ok {
-			continue
-		}
-		seen[p.Image] = struct{}{}
-		imgs = append(imgs, p.Image)
-	}
-
-	return imgs
+// It is the single reference form of MissingImages, for a caller that
+// holds one image and no config.
+func HasImage(ref string) bool {
+	return hasImage(NewStore(), ref)
 }
 
-func PullImage(bin, image string) error {
-	slog.Info("pulling container image", "image", image)
-	cmd := execabs.Command(bin, "pull", image)
-	cmd.Stdout = os.Stdout
+func hasImage(s *Store, ref string) bool {
+	_, err := s.Resolve(ref)
 
-	return cmd.Run()
+	return err == nil
 }
 
-func PullImageIfNotPresent(bin, image string) error {
-	ok, err := imagePresent(bin, image)
-	if ok && err == nil {
-		return nil
-	}
-
-	return PullImage(bin, image)
+// MissingImages returns the config images the store cannot resolve.
+func MissingImages(cfg *types.Config) ([]string, error) {
+	return missingImages(NewStore(), cfg)
 }
 
-func imagePresent(bin, image string) (found bool, err error) {
-	defer func() {
-		slog.Debug("checking container image presence", "image", image, "found", found)
-	}()
-	cmd := execabs.Command(bin, "images", "-q", image)
-
-	out, err := cmd.Output()
-	if len(out) > 0 && err == nil {
-		found = true
-		return
-	}
-
-	return
-}
-
-func MissingImages(bin string, cfg *types.Config) ([]string, error) {
-	imgs, err := UniqueImages(cfg)
+func missingImages(s *Store, cfg *types.Config) ([]string, error) {
+	imgs, err := ConfigImages(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get images: %w", err)
 	}
 
 	missing := make([]string, 0, len(imgs))
 	for _, img := range imgs {
-		ok, err := imagePresent(bin, img)
-		if ok && err == nil {
+		if hasImage(s, img) {
 			continue
 		}
 
@@ -228,14 +227,43 @@ func MissingImages(bin string, cfg *types.Config) ([]string, error) {
 	return missing, nil
 }
 
-func UniqueImages(cfg *types.Config) ([]string, error) {
+// ConfigImages returns every unique image a config references, profile and
+// workload alike.
+//
+// Profile and workload images were listed apart while each half lived in a
+// store of its own. One store holds them all, so one list answers for
+// every image.
+func ConfigImages(cfg *types.Config) ([]string, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
 
-	missing := []string{}
-
 	seen := map[string]struct{}{}
+	imgs := make([]string, 0, len(cfg.Profiles))
+
+	add := func(img string) {
+		if img == "" {
+			return
+		}
+		if _, ok := seen[img]; ok {
+			return
+		}
+		seen[img] = struct{}{}
+		imgs = append(imgs, img)
+	}
+
+	for _, p := range cfg.Profiles {
+		add(p.Image)
+	}
+
+	// The gateway's image is one the configuration names, so it belongs
+	// in the same list as every other. It was missing, which made
+	// refresh fetch everything except the one image a workload with a
+	// gateway network cannot start without, and left MissingImages
+	// reporting a complete store that was not.
+	if cfg.Gateway != nil {
+		add(cfg.Gateway.Image)
+	}
 
 	wf, err := cfg.WorkloadFiles()
 	if err != nil {
@@ -262,16 +290,17 @@ func UniqueImages(cfg *types.Config) ([]string, error) {
 		}
 
 		w := types.Workload{}
-		err = yaml.Unmarshal(data, &w)
-		if err != nil {
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
+		if err := decoder.Decode(&w); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil, fmt.Errorf("workload file %q is empty", fn)
+			}
 			return nil, fmt.Errorf("cannot unmarshal workload file %q: %w", fn, err)
 		}
 
-		if _, ok := seen[w.Image]; !ok {
-			seen[w.Image] = struct{}{}
-			missing = append(missing, w.Image)
-		}
+		add(w.Image)
 	}
 
-	return missing, nil
+	return imgs, nil
 }

@@ -2,6 +2,7 @@ package profiles
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +15,6 @@ import (
 	"text/template"
 	"time"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/transport/ssh"
@@ -35,6 +35,7 @@ import (
 	"github.com/qubesome/cli/internal/util/mtls"
 	"github.com/qubesome/cli/internal/util/resolution"
 	"github.com/qubesome/cli/internal/util/xauth"
+	"github.com/qubesome/cli/internal/util/xkb"
 	"github.com/qubesome/cli/pkg/inception"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/sys/execabs"
@@ -73,7 +74,7 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	if o.GitURL != "" {
-		return StartFromGit(o.Runner, o.Profile, o.GitURL, o.Path, o.Local, o.Interactive)
+		return StartFromGit(o.Profile, o.GitURL, o.Path, o.Local, o.Interactive)
 	}
 
 	if o.Local != "" {
@@ -104,7 +105,7 @@ func Run(opts ...command.Option[Options]) error {
 		return fmt.Errorf("cannot start profile: profile %q not found", o.Profile)
 	}
 
-	return Start(o.Runner, profile, cfg, o.Interactive)
+	return Start(profile, cfg, o.Interactive)
 }
 
 func validGitDir(path string) bool {
@@ -122,8 +123,38 @@ func validGitDir(path string) bool {
 	return err == nil
 }
 
-// sandboxStatePath returns where a running profile sandbox is recorded.
-func sandboxStatePath(profile string) string {
+// loadConfigUnder reads the qubesome config at rel, which must resolve
+// inside dir.
+//
+// rel is built from the -path flag, and dir is a repository qubesome
+// cloned. A repository is free to point one of its own directories
+// somewhere else with a symlink, so the config is opened through a root on
+// dir: the kernel refuses a rel that leaves it, and refuses it without a
+// window between the check and the read. The file is then decoded from the
+// handle that check produced, rather than re-opened by path.
+func loadConfigUnder(dir, rel string) (*types.Config, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+
+	f, err := root.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	return types.DecodeConfig(f, filepath.Join(dir, rel))
+}
+
+// SandboxStatePath returns where a running profile sandbox is recorded.
+//
+// It is exported because it is the only way to tell from outside whether
+// a profile is up: doctor pairs it with sandbox.Alive rather than
+// building the path itself, so the two cannot disagree about where a
+// profile records itself.
+func SandboxStatePath(profile string) string {
 	return filepath.Join(files.ProfileDir(profile), "sandbox.json")
 }
 
@@ -132,7 +163,7 @@ func errAlreadyStarted(profile string) error {
 	return fmt.Errorf("profile %q is already started", profile)
 }
 
-func StartFromGit(runner, name, gitURL, path, local string, interactive bool) error {
+func StartFromGit(name, gitURL, path, local string, interactive bool) error {
 	ln := files.ProfileConfig(name)
 
 	if _, err := os.Lstat(ln); err == nil {
@@ -140,7 +171,7 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 		// without a symlink. The check stays here as well so a running
 		// profile does not lose its config symlink on the way to that
 		// error.
-		if sandbox.Alive(sandboxStatePath(name)) {
+		if sandbox.Alive(SandboxStatePath(name)) {
 			return errAlreadyStarted(name)
 		}
 
@@ -194,12 +225,10 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 	}
 
 	// Get the qubesome config from the Git repository.
-	cfgPath, err := securejoin.SecureJoin(dir, filepath.Join(path, "qubesome.config"))
-	if err != nil {
-		return err
-	}
+	rel := filepath.Join(path, "qubesome.config")
+	cfgPath := filepath.Join(dir, rel)
 
-	cfg, err := types.LoadConfig(cfgPath)
+	cfg, err := loadConfigUnder(dir, rel)
 	if err != nil {
 		return err
 	}
@@ -223,7 +252,7 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 	}
 
 	// When sourcing from git, ensure profile path is relative to the git repository.
-	pp, err := securejoin.SecureJoin(filepath.Dir(cfgPath), p.Path)
+	pp, err := files.JoinProfilePath(filepath.Dir(cfgPath), p.Path)
 	if err != nil {
 		return err
 	}
@@ -231,10 +260,10 @@ func StartFromGit(runner, name, gitURL, path, local string, interactive bool) er
 
 	slog.Debug("start from git", "profile", p.Name, "p", path, "path", p.Path, "config", cfgPath)
 
-	return Start(runner, p, cfg, interactive)
+	return Start(p, cfg, interactive)
 }
 
-func Start(runner string, profile *types.Profile, cfg *types.Config, interactive bool) (err error) {
+func Start(profile *types.Profile, cfg *types.Config, interactive bool) (err error) {
 	if cfg == nil {
 		return fmt.Errorf("cannot start profile: config is nil")
 	}
@@ -248,19 +277,17 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
+	// Once per start. A profile network name also reaches every workload
+	// it launches, which warns for itself.
+	types.WarnIgnoredNetwork(profile.Name, profile.Network, cfg.Gateway != nil)
+
 	// Both entry paths land here, and docker used to refuse a second
 	// start through the container name. bwrap has no such thing, so a
 	// second start would truncate the running profile's X cookies, race
 	// for its display, and on the way out delete its socket, shm backing
 	// and runtime dir.
-	if sandbox.Alive(sandboxStatePath(profile.Name)) {
+	if sandbox.Alive(SandboxStatePath(profile.Name)) {
 		return errAlreadyStarted(profile.Name)
-	}
-
-	// If runner is not being overwritten (via -runner), use the runner
-	// set at profile level in the config.
-	if runner == "" && profile.Runner != "" {
-		runner = profile.Runner
 	}
 
 	bundle, err := images.PullProfileImage(profile.Image)
@@ -268,20 +295,30 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return fmt.Errorf("cannot prepare profile image: %w", err)
 	}
 
-	// Workloads still run under the container runner, so their images are
-	// still its to pull.
-	binary := files.ContainerRunnerBinary(runner)
+	// Offered once, on the first start on a host, and never again
+	// whatever was answered. RefreshExpired below writes the sentinel
+	// FirstRun reads, so the second start does not ask.
+	//
+	// Nothing is asked without a terminal to ask on. A profile started
+	// from a desktop entry or a keybinding has no one reading its
+	// stdout, and a question nobody sees is a question answered no.
+	if term.IsTerminal(int(os.Stdout.Fd())) && images.FirstRun() {
+		imgs, err := images.MissingImages(cfg)
+		if err != nil {
+			return err
+		}
 
-	imgs, err := images.MissingImages(binary, cfg)
-	if err != nil {
-		return err
-	}
-
-	if len(imgs) > 0 && term.IsTerminal(int(os.Stdout.Fd())) {
-		if proceed("Not all workload images are present. Start loading them on the background?") {
-			go images.PreemptWorkloadImages(binary, cfg)
+		if len(imgs) > 0 &&
+			proceed("Not all workload images are present. Start loading them on the background?") {
+			go images.PreemptWorkloadImages(cfg)
 		}
 	}
+
+	// The periodic refresh runs here rather than on a workload launch.
+	// This process stays up for as long as the profile does, so the
+	// goroutine has somewhere to live, and nothing a user is waiting on
+	// is behind it.
+	go images.RefreshExpired(cfg)
 
 	if profile.Gpus != "" {
 		switch {
@@ -400,7 +437,7 @@ func Start(runner string, profile *types.Profile, cfg *types.Config, interactive
 		return err
 	}
 
-	if err := sandbox.WriteState(sandboxStatePath(profile.Name), cmd.Process.Pid); err != nil {
+	if err := sandbox.WriteState(SandboxStatePath(profile.Name), cmd.Process.Pid); err != nil {
 		// The state file is the gate that stops a second start from
 		// trampling this one, so a sandbox that cannot be recorded must
 		// not keep running. Recording also fails when the sandbox is
@@ -537,8 +574,22 @@ func createMagicCookie(profile *types.Profile) error {
 func sandboxEnv(bundle images.Bundle, ca, cert, key []byte) []string {
 	const extra = 6
 
-	env := make([]string, 0, len(bundle.Env)+extra)
+	// The compositor decides the keymap for everything in the profile, so
+	// the host's layout is carried in here rather than anywhere nearer
+	// the keyboard. Nothing is added when the host cannot be asked, which
+	// leaves libxkbcommon's default rather than failing a profile over a
+	// layout.
+	keymap := xkb.Defaults()
+	if len(keymap) == 0 {
+		slog.Warn("no host keyboard layout found, the profile will use the default one",
+			"hint", "set XKB_DEFAULT_LAYOUT, or install "+files.SetxkbmapBinary)
+	} else {
+		slog.Info("profile keyboard layout", "keymap", keymap)
+	}
+
+	env := make([]string, 0, len(bundle.Env)+extra+len(keymap))
 	env = append(env, bundle.Env...)
+	env = append(env, keymap...)
 
 	return append(env,
 		"HOME="+profileHome,
@@ -800,6 +851,10 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		Seccomp:     !profile.SeccompUnconfined,
 		Interactive: interactive,
 		RuntimeDir:  appRuntimeDir,
+		// This process serves the profile's socket for as long as the
+		// profile runs, so the sandbox and the process that started it
+		// are meant to end together.
+		DieWithParent: true,
 		// The profile sandbox runs a compositor, an X server and a
 		// window manager, none of which nest a sandbox of their own.
 		DisableUserns: true,
@@ -1006,9 +1061,14 @@ func hydrateApps(cfg *types.Config, appsRoot, iconsRoot *os.Root) error {
 		}
 
 		w := types.Workload{}
-		err = yaml.Unmarshal(data, &w)
-		if err != nil {
-			slog.Error("cannot unmarshal workload file", "filename", fn, "error", err)
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		decoder.KnownFields(true) // Enforces that all YAML fields match struct fields exactly.
+		if err := decoder.Decode(&w); err != nil {
+			if errors.Is(err, io.EOF) {
+				slog.Error("workload file is empty", "filename", fn)
+			} else {
+				slog.Error("cannot unmarshal workload file", "filename", fn, "error", err)
+			}
 			continue
 		}
 

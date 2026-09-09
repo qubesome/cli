@@ -86,19 +86,6 @@ func gitDir(env Env, root string) string {
 	}
 }
 
-// runnerFor resolves the container runner the way a profile start
-// resolves it: the -runner flag wins, and a profile names its own runner
-// otherwise. A host with both runners installed answers about the wrong
-// one when the profile's choice is ignored, which reads as a running
-// profile not running.
-func runnerFor(runner string, profile types.Profile) string {
-	if runner == "" && profile.Runner != "" {
-		return profile.Runner
-	}
-
-	return runner
-}
-
 // checkProfileSource reports where the profile's things are.
 //
 // It never fails, because it is not a test of anything. It is here

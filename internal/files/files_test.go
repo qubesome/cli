@@ -141,3 +141,361 @@ func TestWorkloadShmPathIsPerWorkload(t *testing.T) {
 
 	require.NotEqual(t, a, b)
 }
+
+func TestWorkloadAgentDirIsOutsideTheSharedRuntimeDir(t *testing.T) {
+	t.Parallel()
+
+	shared, err := IsolatedRunUserPath("prof")
+	require.NoError(t, err)
+
+	dir, err := WorkloadAgentDir("prof", "work")
+	require.NoError(t, err)
+
+	// The shared runtime dir is mounted into every workload of a profile,
+	// and the supervisor socket takes no credential, so a socket inside it
+	// would let any workload of the profile start processes in any of its
+	// siblings. Where it sits is the whole of what separates them.
+	require.False(t, strings.HasPrefix(dir, shared+string(filepath.Separator)),
+		"workload agent dir %q must not be inside the shared runtime dir %q", dir, shared)
+}
+
+func TestWorkloadAgentDirIsPerWorkload(t *testing.T) {
+	t.Parallel()
+
+	a, err := WorkloadAgentDir("prof", "alpha")
+	require.NoError(t, err)
+
+	b, err := WorkloadAgentDir("prof", "beta")
+	require.NoError(t, err)
+
+	require.NotEqual(t, a, b)
+}
+
+func TestWorkloadAgentSocketRejectsANameThatIsNotOneComponent(t *testing.T) {
+	t.Parallel()
+
+	_, err := WorkloadAgentSocket("prof", "../other")
+	require.ErrorIs(t, err, ErrUnsafePath)
+
+	_, err = WorkloadAgentSocket("../other", "work")
+	require.ErrorIs(t, err, ErrUnsafePath)
+}
+
+// The host builds the socket path from its directory and the supervisor
+// inside the sandbox builds it from the path that directory is bound at.
+// They have to agree on the name at the end of it.
+func TestWorkloadAgentSocketMatchesTheSandboxSide(t *testing.T) {
+	t.Parallel()
+
+	dir, err := WorkloadAgentDir("prof", "work")
+	require.NoError(t, err)
+
+	socket, err := WorkloadAgentSocket("prof", "work")
+	require.NoError(t, err)
+
+	require.Equal(t, dir, filepath.Dir(socket))
+	require.Equal(t, InWorkloadAgentDir(), filepath.Dir(InWorkloadAgentSocket()))
+	require.Equal(t, filepath.Base(socket), filepath.Base(InWorkloadAgentSocket()))
+}
+
+// The API socket takes requests that own the machine, and only the vsock
+// dir is bound into the sandbox of a workload that attaches a console.
+// The two sitting apart is what makes that bind safe to give away.
+func TestVMAPISocketIsOutsideTheBoundVsockDir(t *testing.T) {
+	t.Parallel()
+
+	vsock, err := VMVsockDir("prof", "vm")
+	require.NoError(t, err)
+
+	api, err := VMAPISocket("prof", "vm")
+	require.NoError(t, err)
+
+	require.False(t, strings.HasPrefix(api, vsock+string(filepath.Separator)),
+		"the firecracker api socket %q must not be inside the bound vsock dir %q", api, vsock)
+}
+
+func TestVMRuntimeDirIsOutsideTheSharedRuntimeDir(t *testing.T) {
+	t.Parallel()
+
+	shared, err := IsolatedRunUserPath("prof")
+	require.NoError(t, err)
+
+	dir, err := VMRuntimeDir("prof", "vm")
+	require.NoError(t, err)
+
+	require.False(t, strings.HasPrefix(dir, shared+string(filepath.Separator)),
+		"vm runtime dir %q must not be inside the shared runtime dir %q", dir, shared)
+}
+
+func TestVMPathsAreUnderTheRuntimeDirAndPerWorkload(t *testing.T) {
+	t.Parallel()
+
+	dir, err := VMRuntimeDir("prof", "vm")
+	require.NoError(t, err)
+
+	vsock, err := VMVsockDir("prof", "vm")
+	require.NoError(t, err)
+	require.Equal(t, dir, filepath.Dir(vsock))
+
+	socket, err := VMVsockSocket("prof", "vm")
+	require.NoError(t, err)
+	require.Equal(t, vsock, filepath.Dir(socket))
+
+	api, err := VMAPISocket("prof", "vm")
+	require.NoError(t, err)
+	require.Equal(t, dir, filepath.Dir(api))
+
+	other, err := VMRuntimeDir("prof", "another")
+	require.NoError(t, err)
+	require.NotEqual(t, dir, other)
+}
+
+// The host builds the socket path from its directory and the console
+// inside the attaching sandbox builds it from the path that directory is
+// bound at. They have to agree on the name at the end of it.
+func TestVMVsockSocketMatchesTheSandboxSide(t *testing.T) {
+	t.Parallel()
+
+	socket, err := VMVsockSocket("prof", "vm")
+	require.NoError(t, err)
+
+	require.Equal(t, filepath.Base(socket), filepath.Base(InVMConsoleSocket()))
+	require.NotEqual(t, InWorkloadAgentDir(), filepath.Dir(InVMConsoleSocket()))
+}
+
+func TestVMPathsRejectANameThatIsNotOneComponent(t *testing.T) {
+	t.Parallel()
+
+	for _, fn := range []func(string, string) (string, error){
+		VMRuntimeDir, VMVsockDir, VMVsockSocket, VMAPISocket,
+	} {
+		_, err := fn("prof", "../other")
+		require.ErrorIs(t, err, ErrUnsafePath)
+
+		_, err = fn("../other", "vm")
+		require.ErrorIs(t, err, ErrUnsafePath)
+	}
+}
+
+func TestValidateName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		ok    bool
+	}{
+		{name: "plain", input: "work", ok: true},
+		{name: "hyphenated", input: "work-2", ok: true},
+		{name: "empty", input: "", ok: false},
+		{name: "traversal", input: "..", ok: false},
+		{name: "traversal with a separator", input: "../other", ok: false},
+		{name: "absolute", input: "/etc", ok: false},
+		{name: "nested", input: "work/sub", ok: false},
+		{name: "dot", input: ".", ok: false},
+		{name: "hidden", input: ".ssh", ok: false},
+		{name: "too long", input: strings.Repeat("a", nameMax+1), ok: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := ValidateName("profile name", tc.input)
+			if tc.ok {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, ErrUnsafePath)
+		})
+	}
+}
+
+func TestJoinRel(t *testing.T) {
+	t.Parallel()
+
+	const base = "/base"
+
+	tests := []struct {
+		name string
+		rel  string
+		want string
+	}{
+		{name: "descends", rel: "a/b", want: "/base/a/b"},
+		{name: "empty is the base itself", rel: "", want: "/base"},
+		{name: "dot is the base itself", rel: ".", want: "/base"},
+		{name: "traversal", rel: "../escape"},
+		{name: "traversal in the middle", rel: "a/../../escape"},
+		{name: "traversal on its own", rel: ".."},
+		{name: "absolute", rel: "/etc/passwd"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := JoinRel(base, tc.rel)
+			if tc.want == "" {
+				require.ErrorIs(t, err, ErrUnsafePath)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// Every profile path under the run dir is built from a name that reaches
+// qubesome from a command line, a config or an RPC.
+//
+// HOME is what the run dir resolves from, so this test cannot run in
+// parallel.
+func TestProfileRunPathsRefuseAnUnsafeName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	unsafe := []string{"", "..", "../other", "/etc", "work/sub"}
+
+	builders := map[string]func(string) (string, error){
+		"ClientCookiePath":    ClientCookiePath,
+		"IsolatedRunUserPath": IsolatedRunUserPath,
+		"ServerCookiePath":    ServerCookiePath,
+		"SocketPath":          SocketPath,
+		"WorkloadShmPath":     func(p string) (string, error) { return WorkloadShmPath(p, "term") },
+		"WorkloadShmWorkload": func(w string) (string, error) { return WorkloadShmPath("work", w) },
+	}
+
+	for name, build := range builders {
+		t.Run(name, func(t *testing.T) {
+			for _, in := range unsafe {
+				_, err := build(in)
+				require.ErrorIs(t, err, ErrUnsafePath, "%s(%q)", name, in)
+			}
+
+			got, err := build("work")
+			require.NoError(t, err)
+			require.True(t, strings.HasPrefix(got, RunUserQubesome()+string(filepath.Separator)),
+				"%s returned %q, which is outside %q", name, got, RunUserQubesome())
+		})
+	}
+}
+
+func TestWorkloadsDir(t *testing.T) {
+	t.Parallel()
+
+	const root = "/root"
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "under the profile path", path: "work", want: "/root/work/workloads"},
+		{name: "profile at the config root", path: "", want: "/root/workloads"},
+		{name: "traversal", path: "../escape"},
+		// A profile path is written rooted at the config, so a leading
+		// separator names that tree rather than the disk.
+		{name: "rooted at the config", path: "/work", want: "/root/work/workloads"},
+		{name: "rooted at the config, naming nothing in it", path: "/etc", want: "/root/etc/workloads"},
+		{name: "absolute and under the root", path: "/root/work", want: "/root/work/workloads"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := WorkloadsDir(root, tc.path)
+			if tc.want == "" {
+				require.ErrorIs(t, err, ErrUnsafePath)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// HOME is what the git root resolves from, so this test cannot run in
+// parallel.
+func TestGitDirPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	t.Run("keeps a clone under the git root", func(t *testing.T) {
+		got, err := GitDirPath("git@github.com:qubesome/dotfiles")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(GitRoot(), "github.com/qubesome/dotfiles"), got)
+	})
+
+	t.Run("refuses a url that leaves the git root", func(t *testing.T) {
+		for _, url := range []string{"../escape", "a/../../escape", ""} {
+			_, err := GitDirPath(url)
+			require.ErrorIs(t, err, ErrUnsafePath, "url %q", url)
+		}
+	})
+
+	t.Run("passes an absolute path through untouched", func(t *testing.T) {
+		got, err := GitDirPath("/srv/dotfiles")
+		require.NoError(t, err)
+		require.Equal(t, "/srv/dotfiles", got)
+	})
+}
+
+// A profile path is written rooted at the config, which is how every
+// profile in a real configuration is written, and it briefly stopped
+// working: replacing SecureJoin with a validating join refused the
+// leading separator, and starting a profile failed with
+// `unsafe path: "/personal" is absolute`.
+func TestJoinProfilePath(t *testing.T) {
+	t.Parallel()
+
+	const base = "/home/user/git/dotfiles/qubesome"
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "rooted at the config",
+			path: "/personal",
+			want: base + "/personal",
+		},
+		{
+			name: "rooted at the config, naming nothing within it",
+			path: "/etc/shadow",
+			want: base + "/etc/shadow",
+		},
+		{
+			name: "absolute and under the base",
+			path: base + "/work",
+			want: base + "/work",
+		},
+		{
+			name: "plainly relative",
+			path: "work",
+			want: base + "/work",
+		},
+		{
+			name: "empty is the base itself",
+			path: "",
+			want: base,
+		},
+		{name: "traversal", path: "../../etc"},
+		{name: "traversal below a rooted path", path: "/../../etc"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := JoinProfilePath(base, tc.path)
+			if tc.want == "" {
+				require.ErrorIs(t, err, ErrUnsafePath)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}

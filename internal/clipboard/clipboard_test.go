@@ -97,7 +97,7 @@ func TestCopyCommands(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			out, in := copyCommands(tc.from, tc.target, tc.contentType, tc.cookiePath)
+			out, in := copyCommands(tc.from, tc.target, tc.contentType, "", tc.cookiePath)
 
 			assert.Equal(t, append([]string{files.XclipBinary}, tc.wantOut...), out.Args)
 			assert.Equal(t, append([]string{files.XclipBinary}, tc.wantIn...), in.Args)
@@ -168,7 +168,7 @@ func TestCopyCommandsXauthorityTakesEffect(t *testing.T) {
 	t.Setenv("XAUTHORITY", "/from/the/environment")
 
 	const cookiePath = "/run/user/1000/qubesome/work.cookie"
-	_, in := copyCommands(0, 1, "", cookiePath)
+	_, in := copyCommands(0, 1, "", "", cookiePath)
 
 	// The value the child actually reads is what matters, not how many
 	// times the key appears in the slice: os/exec keeps the last one.
@@ -178,4 +178,49 @@ func TestCopyCommandsXauthorityTakesEffect(t *testing.T) {
 	out, err := echo.Output()
 	require.NoError(t, err)
 	assert.Equal(t, cookiePath, string(out))
+}
+
+// A copy between two profiles authenticates twice, against two different
+// displays. Only the writing end used to be given a cookie, so the read
+// authenticated with whatever the host happened to have, which is never a
+// profile's cookie, and every profile to profile copy failed with
+// "failed to copy clipboard: exit status 1".
+func TestCopyCommandsAuthenticatesBothEnds(t *testing.T) {
+	t.Setenv("XAUTHORITY", "/from/the/environment")
+
+	const (
+		fromCookie   = "/run/user/1000/qubesome/personal/.Xserver-cookie"
+		targetCookie = "/run/user/1000/qubesome/work/.Xserver-cookie"
+	)
+
+	out, in := copyCommands(1, 2, "", fromCookie, targetCookie)
+
+	assert.Equal(t, fromCookie, xauthorityOf(t, out.Env))
+	assert.Equal(t, targetCookie, xauthorityOf(t, in.Env))
+}
+
+// The host end has no cookie of qubesome's, so it keeps the environment
+// it was invoked with rather than being pointed at a file that is not
+// there.
+func TestCopyCommandsLeavesTheHostEndAlone(t *testing.T) {
+	t.Setenv("XAUTHORITY", "/from/the/environment")
+
+	out, in := copyCommands(1, 0, "", "/run/user/1000/qubesome/personal/.Xserver-cookie", "")
+
+	assert.Equal(t, "/run/user/1000/qubesome/personal/.Xserver-cookie", xauthorityOf(t, out.Env))
+	assert.Nil(t, in.Env, "an inherited environment is what the host end needs")
+}
+
+// xauthorityOf reports the XAUTHORITY a child would actually read, which
+// is the last of any duplicates rather than the first.
+func xauthorityOf(t *testing.T, env []string) string {
+	t.Helper()
+
+	echo := execabs.Command(files.ShBinary, "-c", "printf %s \"$XAUTHORITY\"") //nolint:gosec // fixed test command.
+	echo.Env = env
+
+	out, err := echo.Output()
+	require.NoError(t, err)
+
+	return string(out)
 }

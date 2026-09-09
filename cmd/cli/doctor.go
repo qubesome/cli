@@ -29,12 +29,6 @@ qubesome doctor work/chrome            - Also check the chrome workload of the w
 				Destination: &target,
 			},
 		},
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:        "runner",
-				Destination: &runner,
-			},
-		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			profile, workload := splitTarget(target)
 
@@ -43,7 +37,6 @@ qubesome doctor work/chrome            - Also check the chrome workload of the w
 
 			report := doctor.Run(doctor.NewOSEnv(), doctor.Options{
 				Config:   cfg,
-				Runner:   runner,
 				Profile:  profile,
 				Workload: workload,
 				Colour:   colour,
