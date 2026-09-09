@@ -3,6 +3,7 @@ package sandbox
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -32,7 +33,38 @@ func Args(s Spec, seccompFD int) ([]string, error) {
 		return nil, errors.New("sandbox: seccomp is enabled but no filter descriptor was given")
 	}
 
-	args := make([]string, 0, 37+3*len(s.Devices)+3*len(s.Mounts)+3*len(s.Env)+len(s.Args))
+	capHint := 37
+	addCap := func(v int) error {
+		if v < 0 || capHint > math.MaxInt-v {
+			return errors.New("sandbox: argument list too large")
+		}
+		capHint += v
+		return nil
+	}
+	addMulCap := func(multiplier, v int) error {
+		if multiplier < 0 || v < 0 {
+			return errors.New("sandbox: argument list too large")
+		}
+		if v != 0 && multiplier > math.MaxInt/v {
+			return errors.New("sandbox: argument list too large")
+		}
+		return addCap(multiplier * v)
+	}
+
+	if err := addMulCap(3, len(s.Devices)); err != nil {
+		return nil, err
+	}
+	if err := addMulCap(3, len(s.Mounts)); err != nil {
+		return nil, err
+	}
+	if err := addMulCap(3, len(s.Env)); err != nil {
+		return nil, err
+	}
+	if err := addCap(len(s.Args)); err != nil {
+		return nil, err
+	}
+
+	args := make([]string, 0, capHint)
 	args = append(args,
 		// The image is shared read-only and every write lands in a tmpfs
 		// that goes away with the sandbox.
