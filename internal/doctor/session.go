@@ -19,7 +19,8 @@ func Session(env Env, cfg *types.Config) []Check {
 		return []Check{checkNoGateway()}
 	}
 
-	holder, gateway := checkHolder(env), checkGateway(env)
+	holder := checkHolder(env)
+	gateway := checkGateway(env, holder.Status == OK)
 
 	checks := []Check{holder, gateway}
 	if gateway.Status == OK {
@@ -61,13 +62,17 @@ func checkHolder(env Env) Check {
 	path := files.SessionStatePath()
 
 	if !env.SandboxAlive(path) {
+		// Warn and not Fail. Both the holder and the gateway are started
+		// by the first launch that needs one, so a host that has simply
+		// not opened such a workload yet is idle rather than broken. The
+		// profile sandbox check reads the same way for the same reason.
 		return Check{
 			Name:   name,
-			Status: Fail,
+			Status: Warn,
 			Detail: fmt.Sprintf("no holder is recorded as running in %s", path),
 			Fix: "A workload on a gateway network is started inside the session's user namespace, " +
 				"and the holder is what keeps that namespace open. It is started by the first " +
-				"such launch, so run one and read the error if it does not come up.",
+				"such launch, so this is expected until one runs.",
 		}
 	}
 
@@ -83,19 +88,34 @@ func checkHolder(env Env) Check {
 // sandbox.Alive on the state file and not a look at the socket. A state
 // file outlives the process it names, and Alive records the start time
 // alongside the pid so one left behind by a crash reads as not running.
-func checkGateway(env Env) Check {
+// held says whether the session's user namespace holder is running, which
+// is what tells an idle session from a broken one. Both come up together
+// on the first launch that needs them, so neither running is a session
+// nobody has asked for. A holder without a gateway is the broken case:
+// something got far enough to open the namespace and then did not finish.
+func checkGateway(env Env, held bool) Check {
 	const name = "session gateway"
 
 	path := files.GatewayStatePath()
 
 	if !env.SandboxAlive(path) {
+		if !held {
+			return Check{
+				Name:   name,
+				Status: Warn,
+				Detail: fmt.Sprintf("a gateway is configured and none is running, recorded in %s", path),
+				Fix: "It comes up with the first workload on a gateway network, together with the " +
+					"session holder, and neither is running. This is expected until one is launched.",
+			}
+		}
+
 		return Check{
 			Name:   name,
 			Status: Fail,
-			Detail: fmt.Sprintf("a gateway is configured but none is recorded as running in %s", path),
-			Fix: "Every workload on a gateway network needs it, and a launch fails closed rather " +
-				"than giving one egress with no policy on it. The gateway comes up with the first " +
-				"such launch, so start one and read the error if it does not.",
+			Detail: fmt.Sprintf("the session is open but no gateway is recorded as running in %s", path),
+			Fix: "The session holder is up, so a launch got as far as opening the namespace and " +
+				"then did not bring the gateway up. Every workload on a gateway network fails " +
+				"closed until it is there. Start one and read the error.",
 		}
 	}
 

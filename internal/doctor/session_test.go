@@ -104,6 +104,10 @@ func TestSessionSkipsReadinessWithNoGateway(t *testing.T) {
 	}
 }
 
+// A holder that is not running is warned about and not failed. It comes
+// up with the first workload that needs a gateway address, so a host that
+// has not opened one is idle rather than broken, which is how the profile
+// sandbox check reads the same state.
 func TestSessionHolderNotRunning(t *testing.T) {
 	t.Parallel()
 
@@ -111,8 +115,26 @@ func TestSessionHolderNotRunning(t *testing.T) {
 	env.alive[files.SessionStatePath()] = false
 
 	holder := checkByName(t, Session(env, gatewayConfig()), "session holder")
-	assert.Equal(t, Fail, holder.Status)
+	assert.Equal(t, Warn, holder.Status)
 	assert.Contains(t, holder.Detail, files.SessionStatePath())
+}
+
+// Neither running is an idle session. A holder without a gateway is not:
+// something opened the namespace and then did not finish, and every
+// workload on a gateway network fails closed until it does.
+func TestSessionIdleIsNotAFailureButAHalfStartedOneIs(t *testing.T) {
+	t.Parallel()
+
+	idle := runningSession()
+	idle.alive[files.SessionStatePath()] = false
+	idle.alive[files.GatewayStatePath()] = false
+
+	assert.Equal(t, Warn, checkByName(t, Session(idle, gatewayConfig()), "session gateway").Status)
+
+	half := runningSession()
+	half.alive[files.GatewayStatePath()] = false
+
+	assert.Equal(t, Fail, checkByName(t, Session(half, gatewayConfig()), "session gateway").Status)
 }
 
 // A gateway whose sandbox is up but whose ruleset is not is the state a
