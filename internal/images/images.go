@@ -26,7 +26,7 @@ func Run(opts ...command.Option[Options]) error {
 }
 
 // RefreshExpired re-pulls every image in a config once the last check is
-// older than pullExpiration. It blocks, so it belongs on a goroutine of a
+// older than refreshExpiration. It blocks, so it belongs on a goroutine of a
 // process that outlives it.
 //
 // It is deliberately not called from a workload launch. It used to be,
@@ -59,7 +59,12 @@ func refreshExpired(s *Store, cfg *types.Config) {
 }
 
 var (
-	pullExpiration = 24 * time.Hour
+	// refreshExpiration is how stale the store may get before starting a
+	// profile refreshes it in the background. Three days rather than one
+	// because a refresh re-fetches every image the configuration names,
+	// which is minutes of network and disk, and because nothing about an
+	// image qubesome runs changes daily.
+	refreshExpiration = 72 * time.Hour
 )
 
 func pullExpired() (bool, error) {
@@ -79,7 +84,7 @@ func pullExpired() (bool, error) {
 		return true, nil
 	}
 
-	if fi.ModTime().Before(time.Now().Add(-pullExpiration)) {
+	if fi.ModTime().Before(time.Now().Add(-refreshExpiration)) {
 		if err := os.WriteFile(fn, []byte{}, files.FileMode); err != nil {
 			return false, fmt.Errorf("cannot update file %q: %w", fn, err)
 		}

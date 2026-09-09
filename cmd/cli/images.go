@@ -16,7 +16,12 @@ func imagesCommand() *cli.Command {
 		Usage:   "manage workload images",
 		Commands: []*cli.Command{
 			{
-				Name: "pull",
+				// Named for what it does rather than how. It re-fetches
+				// every image the config names whether or not the store
+				// already holds one, which is a refresh and not a pull,
+				// and a built image has nothing to pull at all.
+				Name:    "refresh",
+				Aliases: []string{"pull"},
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:        "profile",

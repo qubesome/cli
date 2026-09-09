@@ -116,7 +116,7 @@ func TestWarmStoreNeedsNoExec(t *testing.T) {
 	require.NoError(t, pullMissing(s, cfg))
 }
 
-// Refreshing is the exception: qubesome images pull exists to refetch, so
+// Refreshing is the exception: qubesome images refresh exists to refetch, so
 // it reaches skopeo for every image even on the warm store above.
 func TestPullAllRefreshesAWarmStore(t *testing.T) {
 	t.Parallel()

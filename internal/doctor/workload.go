@@ -278,7 +278,7 @@ func checkWorkloadImage(env Env, image string) Check {
 			Name:   "workload image",
 			Status: Warn,
 			Detail: fmt.Sprintf("%s is not in the image store", image),
-			Fix:    "It will be pulled on start, or pull it now with `qubesome images pull`.",
+			Fix:    "It will be pulled on start, or pull it now with `qubesome images refresh`.",
 		}
 	}
 
