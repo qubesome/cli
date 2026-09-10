@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/gateway"
 	"github.com/qubesome/cli/internal/session"
+	"github.com/qubesome/cli/internal/types"
 	"github.com/urfave/cli/v3"
 )
 
@@ -62,17 +64,82 @@ func gatewayStatusCommand() *cli.Command {
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			g := gateway.Current()
 
-			// The same route doctor takes to a config, and it may find
-			// none. The gateway is per session, so there is no profile to
-			// name here, and without a running profile or a user-level
-			// file there is nothing that says which image, policy or
-			// subnet a gateway was meant to have. Inspect reports that it
-			// could not tell rather than leaving the lines blank.
-			status := g.Inspect(session.Current(), profileConfigOrDefault(""), g.StatusReady)
+			cfg, problem := sessionConfig()
+
+			// Inspect reports that it could not tell rather than leaving
+			// the lines blank, so a config that could not be identified
+			// is passed on as none with the reason it could not.
+			status := g.Inspect(session.Current(), cfg, g.StatusReady)
+			if problem != "" {
+				status.ConfigProblem = problem
+			}
 
 			return status.Write(os.Stdout)
 		},
 	}
+}
+
+// sessionConfig returns the config describing this session's gateway, and
+// why it could not be told when it cannot.
+//
+// Not profileConfigOrDefault. That falls back to the user-level config as
+// soon as more than one profile is active, and the gateway is session
+// wide: it was started by whichever launch found none running, from that
+// profile's config, and may have come from any of them. Reporting the
+// user-level file's gateway block for it would name an image, a policy and
+// a subnet that the running gateway need not have anything to do with.
+//
+// Several active profiles are usually not an ambiguity at all, because one
+// qubesome config commonly defines several profiles and they were all
+// started from the same file. It is only profiles started from different
+// files that leave nothing here able to say which one the gateway came
+// from, and then saying so is the answer.
+func sessionConfig() (*types.Config, string) {
+	active := activeConfigs()
+
+	resolved := make([]string, 0, len(active))
+	for _, path := range active {
+		// The run dir holds a symlink per active profile, so two profiles
+		// sharing a config are two links to one file.
+		target, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			continue
+		}
+		resolved = append(resolved, target)
+	}
+
+	if path, ok := sessionConfigPath(resolved); ok {
+		if cfg := config(path); cfg != nil && len(cfg.Profiles) > 0 {
+			return cfg, ""
+		}
+	}
+
+	if len(resolved) > 1 {
+		return nil, fmt.Sprintf(
+			"%d profiles are active and were started from different configs, so which of them the "+
+				"running gateway came from cannot be told, and the image, policy and subnet it "+
+				"names are unknown", len(resolved))
+	}
+
+	// No profile running, or one whose config no longer reads. The
+	// user-level file is the only thing left that describes a gateway.
+	return profileConfigOrDefault(""), ""
+}
+
+// sessionConfigPath returns the one config file every active profile was
+// started from, and whether there was one.
+func sessionConfigPath(active []string) (string, bool) {
+	if len(active) == 0 {
+		return "", false
+	}
+
+	for _, path := range active[1:] {
+		if path != active[0] {
+			return "", false
+		}
+	}
+
+	return active[0], true
 }
 
 func gatewayStopCommand() *cli.Command {
