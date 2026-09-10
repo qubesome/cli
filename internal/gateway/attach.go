@@ -3,7 +3,9 @@ package gateway
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/netip"
+	"strconv"
 
 	"github.com/qubesome/cli/internal/types"
 )
@@ -65,6 +67,25 @@ func Attached(cfg *types.Config, network string) (*Attach, error) {
 	}
 
 	return &Attach{gateway: g, config: *cfg.Gateway, Addr: addr}, nil
+}
+
+// ProxyAddr returns the endpoint a workload asks for a tunnel on.
+//
+// The gateway's own address is already the workload's default route and
+// its resolver, so a workload could find it for itself. The port it could
+// not, so what it is told is the pair, ready to be used as it is.
+func (a *Attach) ProxyAddr() (string, error) {
+	subnet, err := a.config.SubnetPrefix()
+	if err != nil {
+		return "", err
+	}
+
+	addr, err := GatewayAddr(subnet)
+	if err != nil {
+		return "", err
+	}
+
+	return net.JoinHostPort(addr.String(), strconv.Itoa(inProxyPort)), nil
 }
 
 // Wire gives the sandbox at pid a link to the gateway, addressed at both

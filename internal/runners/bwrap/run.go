@@ -105,6 +105,16 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 		return err
 	}
 
+	// The endpoint the workload asks for a tunnel on, which is known here
+	// because the address was allocated before the sandbox was built.
+	if att != nil {
+		proxy, err := att.ProxyAddr()
+		if err != nil {
+			return err
+		}
+		in.GatewayProxy = proxy
+	}
+
 	spec, err := buildSpec(in)
 	if err != nil {
 		return err

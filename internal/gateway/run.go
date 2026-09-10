@@ -56,6 +56,17 @@ const (
 	// for the whole session, so unlike a workload's it carries no profile.
 	gatewayHostname = "qubesome-gateway"
 
+	// inProxyPort is the port the gateway image's proxy serves its
+	// plaintext listener on, which is also where it accepts CONNECT.
+	//
+	// It is here with the image's other constants, and carries the same
+	// caveat: it belongs to the gateway and not to qubesome, so the two
+	// have to be changed together. A workload is told the whole endpoint
+	// rather than only the address for exactly that reason, so that a
+	// port which is the gateway's business does not end up written into
+	// anybody's dotfiles.
+	inProxyPort = 3128
+
 	// pastaCommand is the uplink binary in the gateway image, where the
 	// passt package puts it.
 	pastaCommand = "/usr/bin/pasta"

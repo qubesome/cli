@@ -111,6 +111,11 @@ type input struct {
 	// created on the host.
 	Paths []sandbox.Mount
 
+	// GatewayProxy is where the workload asks the gateway for a tunnel to
+	// a host it may reach on a port the transparent path does not carry.
+	// Empty for a workload with no gateway, which has nowhere to ask.
+	GatewayProxy string
+
 	// HostEnv holds the host variables a workload on the host dbus reads.
 	// The container runners named them and let the runtime copy the
 	// values across. bwrap clears the environment instead, so the values
@@ -480,7 +485,7 @@ func workloadEnv(in input) []string {
 	wl := in.Workload.Workload
 	profile := in.Workload.Profile
 
-	const extra = 8
+	const extra = 9
 
 	env := make([]string, 0, len(in.Bundle.Env)+len(in.HostEnv)+extra)
 	env = append(env, in.Bundle.Env...)
@@ -489,6 +494,13 @@ func workloadEnv(in input) []string {
 		"XAUTHORITY=/tmp/.Xauthority",
 		"QUBESOME_PROFILE="+profile.Name,
 	)
+
+	// Only when there is one. An empty value would read as an endpoint
+	// that is there and is nothing, and a workload with no gateway has
+	// nowhere to ask for a tunnel at all.
+	if in.GatewayProxy != "" {
+		env = append(env, "QUBESOME_GATEWAY_PROXY="+in.GatewayProxy)
+	}
 
 	// A profile that names a timezone means it, whatever the host is set
 	// to. Otherwise the workload follows the host, which it used to do
