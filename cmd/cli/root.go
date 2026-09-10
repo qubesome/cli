@@ -48,6 +48,7 @@ func RootCommand() *cli.Command {
 			gpuCommand(),
 			superviseCommand(),
 			sessionHoldCommand(),
+			gatewayCommand(),
 			vmInitCommand(),
 			consoleCommand(),
 		},
