@@ -87,9 +87,62 @@ func Alive(path string) bool {
 	return st == s.StartTime
 }
 
+// Exited reports whether the sandbox recorded at path has finished.
+//
+// It is not the negation of Alive, and the difference is a process that
+// has been killed and not yet reaped. A zombie keeps its /proc entry and
+// its start time still matches, so Alive reads it as running when it is
+// only waiting to be collected. Nothing is being served by then, and
+// something waiting for a sandbox to go would otherwise wait on a parent
+// that may never come: the process that started a gateway is usually a
+// qubesome run that exited at its terminal long ago.
+//
+// No record, or one naming a process /proc no longer has, is exited too.
+// Both mean the same thing to a caller waiting for one to be gone.
+func Exited(path string) bool {
+	s, err := ReadState(path)
+	if err != nil {
+		return true
+	}
+
+	data, err := os.ReadFile(procStat(s.PID))
+	if err != nil {
+		return true
+	}
+
+	st, err := parseStartTime(string(data))
+	if err != nil || st != s.StartTime {
+		// A start time that no longer matches is a different process
+		// wearing the same pid, so the recorded one has gone.
+		return true
+	}
+
+	return parseZombie(string(data))
+}
+
+// parseZombie reports whether a stat line describes a process that has
+// exited and is waiting to be reaped.
+//
+// Field 3 is the state character, and is the first after the command name
+// for the reason parseStartTime counts from there.
+func parseZombie(line string) bool {
+	i := strings.LastIndex(line, ")")
+	if i < 0 {
+		return false
+	}
+
+	fields := strings.Fields(line[i+1:])
+
+	return len(fields) > 0 && fields[0] == "Z"
+}
+
+func procStat(pid int) string {
+	return "/proc/" + strconv.Itoa(pid) + "/stat"
+}
+
 // startTime returns the start time of a process in clock ticks since boot.
 func startTime(pid int) (uint64, error) {
-	path := "/proc/" + strconv.Itoa(pid) + "/stat"
+	path := procStat(pid)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
