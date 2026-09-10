@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -80,7 +81,7 @@ func TestXwaylandArgs(t *testing.T) {
 				"-tst",
 				"-nolisten", "tcp",
 				"--",
-				"env", "-u", "WAYLAND_DISPLAY",
+				"env", "-u", "WAYLAND_DISPLAY", "DISPLAY=:11",
 				"XDG_RUNTIME_DIR=/run/user/1000",
 				"XAUTHORITY=/home/xorg-user/.Xauthority",
 				"dbus-run-session", "awesome",
@@ -106,7 +107,7 @@ func TestXwaylandArgs(t *testing.T) {
 				"-nolisten", "tcp",
 				"-verbose", "9",
 				"--",
-				"env", "-u", "WAYLAND_DISPLAY",
+				"env", "-u", "WAYLAND_DISPLAY", "DISPLAY=:11",
 				"XDG_RUNTIME_DIR=/run/user/1000",
 				"XAUTHORITY=/home/xorg-user/.Xauthority",
 				"dbus-run-session", "awesome",
@@ -313,4 +314,33 @@ func TestCompositorStatusDistinguishesACleanExitFromStillRunning(t *testing.T) {
 		require.ErrorContains(t, err, "exit status 1")
 		require.Len(t, exit, 1)
 	})
+}
+
+// The profile container reaches the host X server: its DISPLAY names the
+// host session and the whole of /tmp/.X11-unix is mounted, which is how
+// the compositor presents the profile at all. The window manager must not
+// inherit that. It is given the profile's own display by name rather than
+// left to whatever xwayland-run happens to export, for the same reason it
+// is given the profile's cookie and has WAYLAND_DISPLAY taken away.
+func TestXwaylandArgsNamesTheProfileDisplay(t *testing.T) {
+	t.Parallel()
+
+	got, err := xwaylandArgs(DisplayParams{
+		Display:       11,
+		Geometry:      "1920x1080",
+		AuthFile:      "/home/xorg-user/.Xserver",
+		WindowManager: "exec awesome",
+	})
+	require.NoError(t, err)
+
+	// After the -- separator, so it is the window manager's environment
+	// and not an argument to Xwayland.
+	sep := slices.Index(got, "--")
+	require.NotEqual(t, -1, sep, "the window manager must be separated from the server arguments")
+	require.Contains(t, got[sep:], "DISPLAY=:11")
+
+	wm := slices.Index(got, "awesome")
+	require.NotEqual(t, -1, wm, "the window manager must still be run")
+	require.Less(t, slices.Index(got, "DISPLAY=:11"), wm,
+		"the display has to be set before the command, or env takes it as an argument")
 }
