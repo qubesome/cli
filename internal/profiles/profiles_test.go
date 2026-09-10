@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -57,7 +58,7 @@ func TestSandboxEnvNamesTheProfileUser(t *testing.T) {
 	t.Setenv("DISPLAY", ":0")
 
 	bundle := images.Bundle{Env: []string{"PATH=/usr/bin", "HOME=/root"}}
-	senv := sandboxEnv(bundle, []byte("ca"), []byte("cert"), []byte("key"))
+	senv := sandboxEnv(bundle, []byte("ca"), []byte("cert"), []byte("key"), "")
 
 	assert.Equal(t, []string{"PATH=/usr/bin", "HOME=/root"}, senv[:2],
 		"the image environment must come first")
@@ -72,10 +73,33 @@ func TestSandboxEnvNamesTheProfileUser(t *testing.T) {
 func TestSandboxEnvWithAnEmptyImageEnvironment(t *testing.T) {
 	t.Setenv("DISPLAY", ":0")
 
-	senv := sandboxEnv(images.Bundle{}, nil, nil, nil)
+	senv := sandboxEnv(images.Bundle{}, nil, nil, nil, "")
 
 	assert.Equal(t, "/home/xorg-user", lastEnv(senv, "HOME"))
 	assert.Equal(t, "xorg-user", lastEnv(senv, "USER"))
+}
+
+// The profile sandbox used to read the host timezone out of the
+// /etc/localtime shared with it. Nothing is mounted there any more, so
+// TZ is what carries it to the window manager's own clock.
+func TestSandboxEnvCarriesTheTimezone(t *testing.T) {
+	t.Setenv("DISPLAY", ":0")
+
+	senv := sandboxEnv(images.Bundle{}, nil, nil, nil, "Europe/London")
+
+	assert.Equal(t, "Europe/London", lastEnv(senv, "TZ"))
+}
+
+// An empty TZ is not the same as no TZ: a C library reads one as UTC,
+// so a host with no timezone to give must leave the image's alone.
+func TestSandboxEnvWithoutATimezone(t *testing.T) {
+	t.Setenv("DISPLAY", ":0")
+
+	senv := sandboxEnv(images.Bundle{}, nil, nil, nil, "")
+
+	assert.False(t, slices.ContainsFunc(senv, func(e string) bool {
+		return strings.HasPrefix(e, "TZ=")
+	}))
 }
 
 // lastEnv returns the value of the last assignment to name, which is the

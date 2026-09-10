@@ -21,6 +21,7 @@ import (
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/gpu"
+	"github.com/qubesome/cli/internal/util/tz"
 )
 
 // runUserDir is the runtime directory a workload sees. Every workload runs
@@ -88,10 +89,10 @@ type input struct {
 	// workload does not handle mime types.
 	HomeDir string
 
-	// Localtime is /etc/localtime and, when that is a symlink, the file it
-	// points at. Both are needed: the link alone resolves to nothing
-	// inside the sandbox.
-	Localtime []string
+	// Zone is the host's timezone. It is the zero value when the host
+	// has none to give, and it is ignored when the profile names a
+	// timezone of its own.
+	Zone tz.Zone
 
 	// VideoDevices are the /dev/video* nodes found on the host.
 	VideoDevices []string
@@ -354,8 +355,17 @@ func workloadMounts(in input) []sandbox.Mount {
 
 	var mounts []sandbox.Mount
 
-	for _, p := range in.Localtime {
-		mounts = append(mounts, sandbox.Mount{Src: p, Dst: p, ReadOnly: true})
+	// The zone file lands under its own name rather than on
+	// /etc/localtime, which an image ships as a symlink and bubblewrap
+	// 0.12.0 refuses to mount on. TZ below is what points the sandbox at
+	// it, so an image whose timezone database already holds the name
+	// only gains the host's copy of the same file.
+	if in.Zone.HostPath != "" {
+		mounts = append(mounts, sandbox.Mount{
+			Src:      in.Zone.HostPath,
+			Dst:      in.Zone.SandboxPath,
+			ReadOnly: true,
+		})
 	}
 
 	mounts = append(mounts, sandbox.Mount{Src: in.ShmDir, Dst: "/dev/shm"})
@@ -480,8 +490,15 @@ func workloadEnv(in input) []string {
 		"QUBESOME_PROFILE="+profile.Name,
 	)
 
-	if profile.Timezone != "" {
-		env = append(env, "TZ="+profile.Timezone)
+	// A profile that names a timezone means it, whatever the host is set
+	// to. Otherwise the workload follows the host, which it used to do
+	// by reading the /etc/localtime shared with it.
+	timezone := profile.Timezone
+	if timezone == "" {
+		timezone = in.Zone.TZ
+	}
+	if timezone != "" {
+		env = append(env, "TZ="+timezone)
 	}
 
 	env = append(env, in.HostEnv...)
