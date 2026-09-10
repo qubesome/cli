@@ -1127,10 +1127,17 @@ func (g Gateway) readAlloc(subnet netip.Prefix) (allocation, error) {
 		return allocation{}, fmt.Errorf("failed to parse the gateway addresses %q: %w", g.AllocPath, err)
 	}
 
+	// The opening clause is the one the status message uses, so the two
+	// describe the same thing in the same words. This one keeps the claim
+	// about a running gateway that the status message drops: Allocate is
+	// only reached after Up, so by here there is one, and it is the
+	// reason the remedy is a restart rather than an edit. A status is
+	// read in the state gateway stop leaves, where there is not.
 	if a.Subnet != subnet.String() {
 		return allocation{}, fmt.Errorf(
-			"this session's gateway hands addresses out of %s and the config now asks for %s: "+
-				"the running gateway holds the first address of the old range, so the session has to be restarted",
+			"this session has handed addresses out of %s and the config now asks for %s: "+
+				"the gateway running in it holds the first address of the old range, "+
+				"so the session has to be restarted before the new range is used",
 			a.Subnet, subnet)
 	}
 

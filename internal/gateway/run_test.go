@@ -467,3 +467,28 @@ func prefix(t *testing.T, s string) netip.Prefix {
 
 	return p
 }
+
+// A subnet changed under a session that has already handed addresses out
+// is refused, because the count belongs to the old range and a gateway in
+// the session holds its first address.
+//
+// The message opens the way the status one does, so the two describe the
+// same thing in the same words. It keeps the claim about a running
+// gateway that the status message drops: Allocate is only ever reached
+// after Up, so by here there is one, and it is why a restart is the
+// remedy rather than an edit.
+func TestAllocateRefusesAChangedSubnet(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+
+	_, err := g.Allocate(prefix(t, testSubnet))
+	require.NoError(t, err)
+
+	_, err = g.Allocate(prefix(t, "10.112.0.0/24"))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "this session has handed addresses out of 10.111.0.0/24")
+	assert.Contains(t, err.Error(), "the config now asks for 10.112.0.0/24")
+	assert.Contains(t, err.Error(), "the session has to be restarted")
+}
