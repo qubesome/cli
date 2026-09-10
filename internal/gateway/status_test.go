@@ -197,8 +197,15 @@ func TestStatusReportsOnlyTheGatewayAddressWithNoGatewayRunning(t *testing.T) {
 	assert.Contains(t, render(t, st), "addresses  10.111.0.1 is the gateway's own\n")
 }
 
-// A subnet changed under a running gateway is one of the things a status is
-// for, so it is reported rather than refused the way a launch refuses it.
+// A subnet changed under the record is one of the things a status is for,
+// so it is reported rather than refused the way a launch refuses it.
+//
+// What is reported describes the record and not a gateway. The record
+// outlives the gateway that wrote it, and gateway stop leaves exactly
+// that behind: no gateway running and a record of the addresses the last
+// one handed out. Saying a running gateway hands addresses out of
+// anything is false in the state this is most likely to be read in, and
+// this test is in it, since nothing is running here.
 func TestStatusReportsASubnetTheRecordDoesNotMatch(t *testing.T) {
 	t.Parallel()
 
@@ -207,8 +214,11 @@ func TestStatusReportsASubnetTheRecordDoesNotMatch(t *testing.T) {
 
 	st := g.Inspect(newTestSession(t), testConfig(unusableConfig()), failingReady(t))
 
-	assert.Contains(t, st.AddrProblem, "hands addresses out of 10.112.0.0/24")
-	assert.Contains(t, render(t, st), "addresses  the running gateway hands addresses out of 10.112.0.0/24")
+	require.False(t, st.Running, "the state this describes is one with no gateway in it")
+	assert.NotContains(t, st.AddrProblem, "running gateway",
+		"there is no running gateway to be handing anything out")
+	assert.Contains(t, st.AddrProblem, "10.112.0.0/24")
+	assert.Contains(t, render(t, st), "addresses  this session has handed addresses out of 10.112.0.0/24")
 }
 
 func TestStatusReportsAnUnusableSubnet(t *testing.T) {
