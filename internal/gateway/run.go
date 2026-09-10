@@ -416,7 +416,14 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 	}
 	// The sandbox has its own copy once it is started, and a launch that
 	// never got that far has nothing to write here either.
-	defer log.Close()
+	//
+	// The error is reported rather than deferred away. Nothing here ever
+	// writes through this descriptor, so unlike the write in replace
+	// there is no last part of one that reaches the filesystem at close
+	// and nothing to lose. What a failure here does say is that the
+	// filesystem holding the log is unwell, and the log is where a
+	// gateway that goes wrong explains itself, so it is worth a line.
+	defer closeLog(log)
 	cmd.Stdout = log
 	cmd.Stderr = log
 
@@ -722,7 +729,7 @@ func (h helper) start() (*execabs.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer log.Close()
+	defer closeLog(log)
 	cmd.Stdout = log
 	cmd.Stderr = log
 

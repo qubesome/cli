@@ -320,3 +320,18 @@ func TestShowLogsFollowsWithAFilter(t *testing.T) {
 	cancel()
 	require.NoError(t, <-done)
 }
+
+// A close that fails is reported and does not stop the caller. The
+// gateway it belongs to is already running by then, and a log qubesome
+// could not close is no reason to take one down.
+func TestCloseLogSurvivesAFailure(t *testing.T) {
+	t.Parallel()
+
+	f, err := openLog(filepath.Join(t.TempDir(), "gateway.log"))
+	require.NoError(t, err)
+
+	require.NoError(t, f.Close())
+
+	// The second close is the failure, since the descriptor is gone.
+	assert.NotPanics(t, func() { closeLog(f) })
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -244,4 +245,22 @@ func openLog(path string) (*os.File, error) {
 	}
 
 	return f, nil
+}
+
+// closeLog closes qubesome's own copy of the gateway log.
+//
+// The sandbox and the uplink are handed their own descriptors for it, so
+// this one is closed as soon as they are started and closing it loses
+// nothing: nothing here writes through it, so there is no buffered tail
+// of a write to fail to reach the disk.
+//
+// It is still not discarded. A close that fails says the filesystem the
+// log sits on is unwell, and that is worth knowing about the file a
+// gateway explains itself in. It is a warning and not an error because
+// the gateway it belongs to is already running by this point, and a log
+// qubesome could not close is no reason to take one down.
+func closeLog(f *os.File) {
+	if err := f.Close(); err != nil {
+		slog.Warn("failed to close the gateway log", "path", f.Name(), "error", err)
+	}
 }
