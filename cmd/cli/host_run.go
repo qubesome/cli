@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -26,10 +27,9 @@ import (
 // and the profile's X server refuses a connection that arrives without it,
 // saying only that no authorization protocol was specified.
 //
-// WAYLAND_DISPLAY is dropped because a toolkit that finds one connects to
-// it and ignores DISPLAY, which would open the window on the host desktop
-// rather than in the profile. The profile's own window manager is started
-// without it for the same reason.
+// What is dropped is the set of variables naming the session the command
+// was launched from, which is not the session it is about to appear in.
+// See launchingSession.
 //
 // The two entries are appended rather than substituted for the inherited
 // ones. os/exec keeps the last value of a repeated key, so these are the
@@ -37,7 +37,7 @@ import (
 func hostRunEnv(base []string, display uint8, cookie string) []string {
 	env := make([]string, 0, len(base)+2)
 	for _, e := range base {
-		if strings.HasPrefix(e, "WAYLAND_DISPLAY=") {
+		if namesTheLaunchingSession(e) {
 			continue
 		}
 		env = append(env, e)
@@ -47,6 +47,45 @@ func hostRunEnv(base []string, display uint8, cookie string) []string {
 		"DISPLAY=:"+strconv.Itoa(int(display)),
 		"XAUTHORITY="+cookie,
 	)
+}
+
+// launchingSession are the variables describing the display session the
+// command was typed or bound in, rather than the profile it is being sent
+// to. Each one is a handle on the host session, and the command is about
+// to connect to a different display server, so each is either ignored
+// there or acted on as if it meant something.
+//
+// WAYLAND_DISPLAY is a path to the host compositor. A toolkit that finds
+// one connects to it and ignores DISPLAY, opening the window on the host
+// desktop rather than in the profile. The profile's own window manager is
+// started without it for the same reason.
+//
+// DESKTOP_STARTUP_ID is an X11 startup notification handed out by
+// whatever launched qubesome. A window manager that spawns through
+// startup notification records the workspace it spawned from against that
+// id, and the application exports it to the next window it opens as
+// _NET_STARTUP_ID. The profile's window manager then reads an id for a
+// launch it never saw, and places the window by what that resolves to
+// rather than on the workspace being looked at. It is also single use: it
+// belongs to the launch that created it and to no later one.
+//
+// XDG_ACTIVATION_TOKEN is the Wayland spelling of the same thing, with
+// the same two problems.
+var launchingSession = []string{
+	"WAYLAND_DISPLAY",
+	"DESKTOP_STARTUP_ID",
+	"XDG_ACTIVATION_TOKEN",
+}
+
+// namesTheLaunchingSession reports whether an environment entry is one of
+// launchingSession.
+func namesTheLaunchingSession(entry string) bool {
+	name, _, ok := strings.Cut(entry, "=")
+	if !ok {
+		return false
+	}
+
+	return slices.Contains(launchingSession, name)
 }
 
 func hostRunCommand() *cli.Command {
