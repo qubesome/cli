@@ -1,12 +1,13 @@
 package gateway
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/qubesome/cli/internal/files"
@@ -14,23 +15,31 @@ import (
 
 // followInterval is how often a follow looks for more of the log.
 //
-// The gateway writes through a pipe to a file and nothing notifies a reader
-// of it, so this is a poll. It is short enough that a decision shows up
-// while the workload that caused it is still on screen, and long enough
-// that watching an idle gateway is not a busy loop.
+// The gateway writes through a descriptor to a file and nothing notifies a
+// reader of it, so this is a poll. It is short enough that a decision
+// shows up while the workload that caused it is still on screen, and long
+// enough that watching an idle gateway is not a busy loop.
 const followInterval = 200 * time.Millisecond
 
-// followChunk bounds a single read while following, so one write cannot
-// make the reader hold the whole of a chatty log in memory.
-const followChunk = 32 * 1024
+// maxLineLen bounds one log line, in the initial read and while
+// following. A gateway writing without newlines cannot make a reader of
+// its log hold the whole of it in memory.
+const maxLineLen = 1 << 20
 
 // LogOptions selects what ShowLogs prints.
 type LogOptions struct {
 	// Path is the log to read. Empty means the session's own gateway log.
 	Path string
 
-	// Last is how many of the log's final lines to print. Zero prints all
-	// of it.
+	// Profile and Workload narrow the log to the lines about one
+	// workload, one profile's workloads, or one workload wherever it
+	// runs. See selector for what each combination matches, and why
+	// naming both is the only exact question of the three.
+	Profile  string
+	Workload string
+
+	// Last is how many of the log's final matching lines to print. Zero
+	// prints all of them.
 	Last int
 
 	// Follow keeps printing what is appended, until the context is done.
@@ -50,8 +59,8 @@ func (o LogOptions) path() string {
 // The gateway is started by whichever qubesome run found none already
 // running, and it is put in a session of its own so that a Ctrl-C at that
 // terminal does not take the session's egress away with it. Its output
-// therefore has nowhere to go that anybody could still be looking at, which
-// is why it is written to a file and read back here.
+// therefore has nowhere to go that anybody could still be looking at,
+// which is why it is written to a file and read back here.
 func ShowLogs(ctx context.Context, w io.Writer, opts LogOptions) error {
 	path := opts.path()
 
@@ -65,7 +74,9 @@ func ShowLogs(ctx context.Context, w io.Writer, opts LogOptions) error {
 	}
 	defer f.Close()
 
-	if err := writeTail(w, f, opts.Last); err != nil {
+	selects := selector(opts.Profile, opts.Workload)
+
+	if err := writeTail(w, f, opts.Last, selects); err != nil {
 		return err
 	}
 
@@ -73,58 +84,80 @@ func ShowLogs(ctx context.Context, w io.Writer, opts LogOptions) error {
 		return nil
 	}
 
-	return follow(ctx, w, f)
+	return follow(ctx, w, f, selects)
 }
 
-// writeTail copies the log to w, from the start or from the last lines of
-// it. The file is left positioned at its end either way, which is where a
-// follow carries on from.
-func writeTail(w io.Writer, f *os.File, last int) error {
-	if last <= 0 {
-		if _, err := io.Copy(w, f); err != nil {
-			return fmt.Errorf("failed to read the gateway log: %w", err)
-		}
-
-		return nil
+// writeTail writes the lines of f that selects accepts: all of them, or
+// only the final few when last is set.
+//
+// The file is left positioned at its end either way, which is where a
+// follow carries on from: the scanner stops having consumed everything up
+// to EOF.
+func writeTail(w io.Writer, f *os.File, last int, selects func(string) bool) error {
+	// A ring of the last lines wanted, so a log far larger than the
+	// answer is not held in memory to produce it. Zero means every line
+	// is written as it is read and nothing is held at all.
+	var ring []string
+	if last > 0 {
+		ring = make([]string, 0, last)
 	}
 
-	// Read the whole file to find where its last lines begin. A gateway log
-	// is bounded by the life of one gateway rather than of the session, so
-	// this is a file a terminal was going to be shown anyway. Seeking
-	// backwards in chunks would be the answer if that stopped being true.
-	body, err := io.ReadAll(f)
-	if err != nil {
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), maxLineLen)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !selects(line) {
+			continue
+		}
+
+		if last <= 0 {
+			if err := writeLine(w, line); err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		if len(ring) == last {
+			ring = append(ring[:0], ring[1:]...)
+		}
+		ring = append(ring, line)
+	}
+	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("failed to read the gateway log: %w", err)
 	}
 
-	if _, err := w.Write(tail(body, last)); err != nil {
+	for _, line := range ring {
+		if err := writeLine(w, line); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func writeLine(w io.Writer, line string) error {
+	if _, err := io.WriteString(w, line+"\n"); err != nil {
 		return fmt.Errorf("failed to write the gateway log: %w", err)
 	}
 
 	return nil
 }
 
-// tail returns the last n lines of body.
-func tail(body []byte, n int) []byte {
-	// A trailing newline ends the last line rather than starting another,
-	// so it is not one of the separators being counted back through.
-	end := len(bytes.TrimSuffix(body, []byte("\n")))
-
-	for range n {
-		i := bytes.LastIndexByte(body[:end], '\n')
-		if i < 0 {
-			return body
-		}
-		end = i
-	}
-
-	return body[end+1:]
-}
-
-// follow prints what is appended to f until ctx is done.
-func follow(ctx context.Context, w io.Writer, f *os.File) error {
+// follow writes the lines appended to f that selects accepts, until ctx is
+// done.
+//
+// Only whole lines are written. A line is what carries the workload a
+// decision was about, so half of one cannot be matched against a filter,
+// and printing it unmatched would show another workload's log to someone
+// who asked not to see it.
+func follow(ctx context.Context, w io.Writer, f *os.File, selects func(string) bool) error {
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
+
+	reader := bufio.NewReader(f)
+	var pending strings.Builder
 
 	for {
 		select {
@@ -133,11 +166,48 @@ func follow(ctx context.Context, w io.Writer, f *os.File) error {
 			// that is not an error to report.
 			return nil
 		case <-ticker.C:
-			// Copied in bounded steps rather than to EOF in one call, so a
-			// gateway writing faster than this reads cannot keep it here.
-			if _, err := io.CopyN(w, f, followChunk); err != nil && !errors.Is(err, io.EOF) {
-				return fmt.Errorf("failed to read the gateway log: %w", err)
+			if err := followOnce(w, reader, &pending, selects); err != nil {
+				return err
 			}
+		}
+	}
+}
+
+// followOnce drains what the reader can give without blocking, writing
+// every whole line it completes. What is left over is kept in pending for
+// the next tick, which is how a line still being written is not printed
+// halfway.
+func followOnce(w io.Writer, reader *bufio.Reader, pending *strings.Builder, selects func(string) bool) error {
+	for {
+		chunk, err := reader.ReadString('\n')
+
+		// A read that stopped short of a newline is a line the gateway
+		// has not finished writing. It is held until it has.
+		if errors.Is(err, io.EOF) {
+			if pending.Len()+len(chunk) > maxLineLen {
+				pending.Reset()
+
+				return nil
+			}
+			pending.WriteString(chunk)
+
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read the gateway log: %w", err)
+		}
+
+		line := strings.TrimSuffix(chunk, "\n")
+		if pending.Len() > 0 {
+			line = pending.String() + line
+			pending.Reset()
+		}
+
+		if !selects(line) {
+			continue
+		}
+		if err := writeLine(w, line); err != nil {
+			return err
 		}
 	}
 }

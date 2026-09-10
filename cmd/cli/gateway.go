@@ -25,8 +25,9 @@ import (
 // not one per profile, because the policy it applies is keyed by workload
 // across every profile.
 var (
-	logsFollow bool
-	logsLast   int
+	logsFollow   bool
+	logsLast     int
+	logsWorkload string
 )
 
 func gatewayCommand() *cli.Command {
@@ -113,12 +114,22 @@ func gatewayLogsCommand() *cli.Command {
 		Usage: "show the session gateway's logs",
 		Description: `Examples:
 
-qubesome gateway logs             - Print the log of the gateway this session is running
-qubesome gateway logs -n 50       - Print its last 50 lines
-qubesome gateway logs -f          - Print it and keep printing what is added
+qubesome gateway logs                          - Print the log of the gateway this session is running
+qubesome gateway logs -n 50                    - Print its last 50 lines
+qubesome gateway logs -f                       - Print it and keep printing what is added
+qubesome gateway logs -profile work            - Only the lines about that profile's workloads
+qubesome gateway logs -workload chrome         - Only the lines about that workload, in any profile
+qubesome gateway logs -profile work -workload chrome
+                                               - Only the lines about that one workload
 
 The log covers the gateway that is running. Starting a gateway begins it
 afresh, so there is nothing here for a session that has not started one.
+
+The gateway knows a workload as its name and its profile's joined by a
+dash, and either half may hold a dash of its own, so naming only one of
+the two matches the other loosely. Naming both is exact. A line about no
+workload, such as the gateway's own startup, is not shown when either
+filter is given.
 `,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
@@ -127,18 +138,30 @@ afresh, so there is nothing here for a session that has not started one.
 				Usage:       "keep printing what is added to the log",
 				Destination: &logsFollow,
 			},
+			&cli.StringFlag{
+				Name:        "profile",
+				Usage:       "only the lines about the workloads of this profile",
+				Destination: &targetProfile,
+			},
+			&cli.StringFlag{
+				Name:        "workload",
+				Usage:       "only the lines about this workload",
+				Destination: &logsWorkload,
+			},
 			&cli.IntFlag{
 				Name:        "lines",
 				Aliases:     []string{"n"},
-				Usage:       "print only this many of the log's last lines",
+				Usage:       "print only this many of the log's last matching lines",
 				Destination: &logsLast,
 			},
 		},
 		Action: func(ctx context.Context, _ *cli.Command) error {
 			return gateway.ShowLogs(ctx, os.Stdout, gateway.LogOptions{
-				Path:   files.GatewayLogPath(),
-				Last:   logsLast,
-				Follow: logsFollow,
+				Path:     files.GatewayLogPath(),
+				Profile:  targetProfile,
+				Workload: logsWorkload,
+				Last:     logsLast,
+				Follow:   logsFollow,
 			})
 		},
 	}
