@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/gateway"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,6 +30,8 @@ type fakeEnv struct {
 	// error is a ready gateway, which is also the zero value, so only a
 	// test that wants a failure has to set it.
 	gatewayReady error
+	log          gateway.LogSummary
+	logErr       error
 }
 
 type fakeOutput struct {
@@ -126,6 +129,12 @@ func (f *fakeEnv) SandboxAlive(path string) bool {
 
 func (f *fakeEnv) GatewayReady() error {
 	return f.gatewayReady
+}
+
+// GatewayLog answers with a canned summary, so a test can drive a check
+// on what a gateway log said without writing one.
+func (f *fakeEnv) GatewayLog() (gateway.LogSummary, error) {
+	return f.log, f.logErr
 }
 
 type fakeFileInfo struct {

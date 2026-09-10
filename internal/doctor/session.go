@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/types"
@@ -33,10 +34,10 @@ func Session(env Env, cfg *types.Config) []Check {
 
 	checks := []Check{holder, gateway}
 	if gateway.Status == OK {
-		// Readiness only says something once there is a gateway to ask.
-		// Piling a second failure on top of the same cause would bury
-		// the one worth reading.
-		checks = append(checks, checkGatewayReady(env))
+		// Readiness and egress only say something once there is a
+		// gateway to ask about. Piling a second failure on top of the
+		// same cause would bury the one worth reading.
+		checks = append(checks, checkGatewayReady(env), checkGatewayEgress(env))
 	}
 
 	return checks
@@ -165,8 +166,8 @@ func checkGatewayReady(env Env) Check {
 			Name:   name,
 			Status: Fail,
 			Detail: fmt.Sprintf("the gateway is running but did not report itself ready: %s", firstLine(err.Error())),
-			Fix: "Its resolver, proxy or netfilter ruleset did not come up. Check the gateway's own " +
-				"output, and the policy file the gateway block names.",
+			Fix: "Its resolver, proxy or netfilter ruleset did not come up. Read `qubesome gateway " +
+				"logs` for what it said, and check the policy file the gateway block names.",
 		}
 	}
 
@@ -175,4 +176,69 @@ func checkGatewayReady(env Env) Check {
 		Status: OK,
 		Detail: "the gateway reports its resolver, proxy and ruleset are up",
 	}
+}
+
+// checkGatewayEgress reports what the gateway has been doing with the
+// connections its workloads made.
+//
+// A refused connection and a failed one are not the same finding. A
+// denial is the policy doing what it says, so it is reported without
+// being called a fault, and the hosts are named because "why can I not
+// reach this" is what brings someone here. An error is something the
+// gateway tried to do and could not, which is worth a warning.
+func checkGatewayEgress(env Env) Check {
+	const name = "gateway egress"
+
+	summary, err := env.GatewayLog()
+	if err != nil {
+		return Check{
+			Name:   name,
+			Status: Warn,
+			Detail: fmt.Sprintf("the gateway is running but what it has said cannot be read: %s",
+				firstLine(err.Error())),
+			Fix: "A gateway started before qubesome kept a log has none. Restart the session to " +
+				"get one, or read the terminal the gateway was started from.",
+		}
+	}
+
+	if summary.Errors > 0 {
+		return Check{
+			Name:   name,
+			Status: Warn,
+			Detail: fmt.Sprintf("the gateway reported %s, most recently %q",
+				plural(summary.Errors, "error"), summary.LastError),
+			Fix: "Read `qubesome gateway logs` for the whole of it. `-workload` and `-profile` " +
+				"narrow it to one workload.",
+		}
+	}
+
+	if summary.Denied == 0 {
+		return Check{
+			Name:   name,
+			Status: OK,
+			Detail: fmt.Sprintf("the gateway classified %s and refused none",
+				plural(summary.Decisions, "connection")),
+		}
+	}
+
+	return Check{
+		Name:   name,
+		Status: OK,
+		Detail: fmt.Sprintf("the gateway classified %s and refused %d, to %s",
+			plural(summary.Decisions, "connection"),
+			summary.Denied, strings.Join(summary.DeniedHosts, ", ")),
+		Fix: "This is the policy being applied, and is only a problem if one of those hosts was " +
+			"meant to be reachable. A workload reaches a host named under egress.allowed or " +
+			"dns.allowed for it, and the gateway mirrors one onto the other when only one is set.",
+	}
+}
+
+// plural renders a count with its noun, so a report reads as a sentence
+// rather than as a field.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+
+	return fmt.Sprintf("%d %ss", n, noun)
 }

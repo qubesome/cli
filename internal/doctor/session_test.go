@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/gateway"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,4 +171,97 @@ func TestRunReportsTheSessionWithoutAProfile(t *testing.T) {
 
 	checks := sectionByPrefix(t, report, "Session")
 	assert.Equal(t, OK, checkByName(t, checks, "session gateway").Status)
+}
+
+// A denial is the policy working, so it is reported without being called
+// a fault. It is also the answer to why a workload cannot reach
+// something, which is what brings someone to doctor in the first place,
+// so the hosts are named.
+func TestSessionReportsDeniedHosts(t *testing.T) {
+	t.Parallel()
+
+	env := runningSession()
+	env.log = gateway.LogSummary{
+		Decisions:   9,
+		Denied:      2,
+		DeniedHosts: []string{"ads.example.com", "telemetry.example.com"},
+	}
+
+	check := egressCheck(t, Session(env, gatewayConfig()))
+
+	assert.Equal(t, OK, check.Status, "a policy refusing a host is not a broken gateway")
+	assert.Contains(t, check.Detail, "2")
+	assert.Contains(t, check.Detail, "ads.example.com")
+	assert.Contains(t, check.Detail, "telemetry.example.com")
+}
+
+// An error is not a denial. Something the gateway tried to do did not
+// work, and that is worth warning about.
+func TestSessionWarnsOnGatewayErrors(t *testing.T) {
+	t.Parallel()
+
+	env := runningSession()
+	env.log = gateway.LogSummary{
+		Decisions: 4,
+		Errors:    3,
+		LastError: "splice dial failed",
+	}
+
+	check := egressCheck(t, Session(env, gatewayConfig()))
+
+	assert.Equal(t, Warn, check.Status)
+	assert.Contains(t, check.Detail, "splice dial failed")
+	assert.Contains(t, check.Fix, "qubesome gateway logs")
+}
+
+func TestSessionEgressWithAQuietGateway(t *testing.T) {
+	t.Parallel()
+
+	env := runningSession()
+	env.log = gateway.LogSummary{Decisions: 12}
+
+	check := egressCheck(t, Session(env, gatewayConfig()))
+
+	assert.Equal(t, OK, check.Status)
+	assert.Contains(t, check.Detail, "12")
+}
+
+// A gateway from before qubesome kept its log has none to read. That is
+// not a fault of the session, and it must not be reported as one.
+func TestSessionEgressWithoutALog(t *testing.T) {
+	t.Parallel()
+
+	env := runningSession()
+	env.logErr = errors.New("no gateway log at /run/session/gateway.log")
+
+	check := egressCheck(t, Session(env, gatewayConfig()))
+
+	assert.Equal(t, Warn, check.Status)
+	assert.Contains(t, check.Detail, "no gateway log")
+}
+
+// A session with no gateway running has no egress to diagnose, and
+// stacking a second answer on the same cause buries the one worth reading.
+func TestSessionEgressIsNotAskedWithoutAGateway(t *testing.T) {
+	t.Parallel()
+
+	env := &fakeEnv{alive: map[string]bool{files.SessionStatePath(): true}}
+
+	for _, c := range Session(env, gatewayConfig()) {
+		assert.NotEqual(t, "gateway egress", c.Name,
+			"there is no gateway, so there is nothing to say about its egress")
+	}
+}
+
+func egressCheck(t *testing.T, checks []Check) Check {
+	t.Helper()
+
+	for _, c := range checks {
+		if c.Name == "gateway egress" {
+			return c
+		}
+	}
+	t.Fatalf("no gateway egress check in %v", checks)
+
+	return Check{}
 }
