@@ -394,8 +394,20 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 	// session whose gateway ended at the first Ctrl-C would take the egress
 	// of every workload still running with it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// Not this process's stdout. The gateway outlives the launch, so what
+	// it says would go to a terminal that is not necessarily still there,
+	// interleaved with the output of the workload that happened to start
+	// it. qubesome gateway logs reads this back.
+	log, err := openLog(files.GatewayLogPath())
+	if err != nil {
+		return err
+	}
+	// The sandbox has its own copy once it is started, and a launch that
+	// never got that far has nothing to write here either.
+	defer log.Close()
+	cmd.Stdout = log
+	cmd.Stderr = log
 
 	err = cmd.Start()
 
@@ -691,8 +703,17 @@ func (h helper) start() (*execabs.Cmd, error) {
 	// Ctrl-C at the terminal that started a workload is not a request to
 	// take it away.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// The gateway's log, which the sandbox's launch has already begun by
+	// the time an uplink is put in its namespace. It goes there for the
+	// reason the gateway's own output does: it outlives the launch.
+	log, err := appendLog(files.GatewayLogPath())
+	if err != nil {
+		return nil, err
+	}
+	defer log.Close()
+	cmd.Stdout = log
+	cmd.Stderr = log
 
 	if err := cmd.Start(); err != nil {
 		return nil, err

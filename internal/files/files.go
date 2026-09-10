@@ -245,6 +245,18 @@ func GatewayStatePath() string {
 	return filepath.Join(SessionDir(), "sandbox-gateway.json")
 }
 
+// GatewayLogPath returns where the session's gateway writes what it says.
+//
+// The gateway is started by whichever launch found none running, and it is
+// put in a session of its own so that a Ctrl-C at that terminal does not
+// take the session's egress with it. Its stdout is therefore a terminal
+// nobody is necessarily still watching, and the audit line behind a denied
+// connection is the one thing a user needs when a workload cannot reach
+// something. It goes here instead, and qubesome gateway logs reads it back.
+func GatewayLogPath() string {
+	return filepath.Join(SessionDir(), "gateway.log")
+}
+
 // GatewaySocketDir returns the host directory the gateway's control socket
 // is created in.
 //
