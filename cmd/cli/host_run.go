@@ -85,10 +85,21 @@ qubesome host-run -profile <profile> firefox     - Run firefox on the host and d
 
 			c := exec.Command(commandName, cmd.Args().Slice()...) //nolint
 			c.Env = hostRunEnv(os.Environ(), prof.Display, cookie)
-			out, err := c.CombinedOutput()
-			fmt.Println(string(out))
 
-			return err
+			// This returns while the command keeps running, as launching
+			// a workload does, so the terminal it was typed at is free
+			// again. Its stdin is left closed rather than pointed at that
+			// terminal, which the shell has taken back. Its output still
+			// goes there, because a command that fails to reach the
+			// profile's display says why on it.
+			c.Stdout = os.Stdout
+			c.Stderr = os.Stderr
+
+			if err := c.Start(); err != nil {
+				return fmt.Errorf("failed to start %q: %w", commandName, err)
+			}
+
+			return nil
 		},
 	}
 	return cmd
