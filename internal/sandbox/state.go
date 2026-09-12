@@ -18,16 +18,32 @@ import (
 type State struct {
 	PID       int    `json:"pid"`
 	StartTime uint64 `json:"startTime"`
+
+	// Address is the workload's address on the session gateway, and is
+	// empty for a workload that has none.
+	//
+	// It is recorded because it is the other thing every later question
+	// needs and nothing else writes it down. The gateway is told which
+	// workload holds which address and qubesome tells it, but neither end
+	// keeps a note a third process could read, so a diagnostic asking what
+	// a running sandbox is on the gateway has only this record to go on.
+	Address string `json:"address,omitempty"`
 }
 
 // WriteState records a running sandbox at path.
 func WriteState(path string, pid int) error {
+	return WriteStateAddr(path, pid, "")
+}
+
+// WriteStateAddr records a running sandbox and the gateway address it was
+// given, which is empty for a sandbox that was given none.
+func WriteStateAddr(path string, pid int, addr string) error {
 	st, err := startTime(pid)
 	if err != nil {
 		return err
 	}
 
-	return writeState(path, State{PID: pid, StartTime: st})
+	return writeState(path, State{PID: pid, StartTime: st, Address: addr})
 }
 
 func writeState(path string, s State) error {
