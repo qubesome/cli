@@ -131,3 +131,30 @@ func (a *Attach) Unregister(name string) {
 		slog.Debug("failed to unregister a workload", "workload", name, "error", err)
 	}
 }
+
+// WireVM gives the microVM sandbox at pid a bridged link to the gateway, a
+// tap for its VMM to open, and the guard that pins its address.
+//
+// pid is the sandbox's own init process in the host's pid namespace, which
+// is what bwrap reports on its info descriptor.
+func (a *Attach) WireVM(pid int) error {
+	return a.gateway.WireVM(a.config, a.Addr, pid)
+}
+
+// GuestMAC is the hardware address the machine description gives the
+// guest. The guard pins the same value, so both come from one place.
+func (a *Attach) GuestMAC() (string, error) {
+	return GuestMAC(a.Addr)
+}
+
+// GatewayAddr is the address a guest defaults through and resolves at. A
+// sandbox is told it by having its resolv.conf written for it, and a guest
+// is told it in the init configuration composed into its image.
+func (a *Attach) GatewayAddr() (netip.Addr, error) {
+	subnet, err := a.config.SubnetPrefix()
+	if err != nil {
+		return netip.Addr{}, err
+	}
+
+	return GatewayAddr(subnet)
+}
