@@ -11,7 +11,8 @@ import (
 
 func flatpakCommand() *cli.Command {
 	cmd := &cli.Command{
-		Name: "flatpak",
+		Name:  "flatpak",
+		Usage: "runs and installs Flatpak workloads in a qubesome profile",
 		Commands: []*cli.Command{
 			{
 				Name:  "run",
