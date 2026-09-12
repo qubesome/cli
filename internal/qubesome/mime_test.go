@@ -177,7 +177,7 @@ func Test_HandleMime(t *testing.T) {
 			called := 0
 
 			q := New()
-			q.runner = func(wi WorkloadInfo, _ string, _ bool) error {
+			q.runner = func(wi WorkloadInfo, _ string, _, _ bool) error {
 				actual = &wi
 				called++
 				return nil
@@ -213,7 +213,7 @@ func Test_HandleMimeExistingFile(t *testing.T) {
 
 	var actual *WorkloadInfo
 	q := New()
-	q.runner = func(wi WorkloadInfo, _ string, _ bool) error {
+	q.runner = func(wi WorkloadInfo, _ string, _, _ bool) error {
 		actual = &wi
 		return nil
 	}
@@ -243,7 +243,7 @@ func Test_HandleMimeUnreadableFile(t *testing.T) {
 
 	called := 0
 	q := New()
-	q.runner = func(WorkloadInfo, string, bool) error {
+	q.runner = func(WorkloadInfo, string, bool, bool) error {
 		called++
 		return nil
 	}

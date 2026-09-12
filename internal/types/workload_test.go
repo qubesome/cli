@@ -1359,3 +1359,70 @@ func TestApplyProfileLeavesTheMicroVMAlone(t *testing.T) {
 	assert.Equal(t, w.MicroVM, w.ApplyProfile(p).Workload.MicroVM)
 	assert.Equal(t, "dev", console.ApplyProfile(p).Workload.AttachVM)
 }
+
+// Limited is the escape hatch, so what matters about it is that it takes
+// away and never gives. Everything a workload could reach the host or the
+// network through is gone, whatever the config said.
+func TestLimitedDropsEverythingThatReachesOut(t *testing.T) {
+	t.Parallel()
+
+	ew := EffectiveWorkload{
+		Name: "terminal-work",
+		Workload: Workload{
+			Runner:   "firecracker",
+			AttachVM: "dev",
+			HostAccess: HostAccess{
+				Network:    "qubesome",
+				Dbus:       true,
+				Camera:     true,
+				Microphone: true,
+				Speakers:   true,
+				Bluetooth:  true,
+				VarRunUser: true,
+				Mime:       true,
+				Gpus:       "all",
+				USBDevices: []string{"1050:0407"},
+				Devices:    []string{"/dev/dri/renderD128"},
+				CapsAdd:    []string{"CAP_NET_ADMIN"},
+			},
+		},
+	}
+
+	got := Limited(ew)
+
+	// "none" and not empty: empty is what a workload that said nothing
+	// has, and the profile's network is applied over it.
+	assert.Equal(t, "none", got.Workload.HostAccess.Network)
+	assert.False(t, GatewayNetwork(got.Workload.HostAccess.Network))
+
+	assert.False(t, got.Workload.HostAccess.Dbus)
+	assert.False(t, got.Workload.HostAccess.Camera)
+	assert.False(t, got.Workload.HostAccess.Microphone)
+	assert.False(t, got.Workload.HostAccess.Speakers)
+	assert.False(t, got.Workload.HostAccess.Bluetooth)
+	assert.False(t, got.Workload.HostAccess.VarRunUser)
+	assert.False(t, got.Workload.HostAccess.Mime)
+	assert.Empty(t, got.Workload.HostAccess.Gpus)
+	assert.Empty(t, got.Workload.HostAccess.USBDevices)
+	assert.Empty(t, got.Workload.HostAccess.Devices)
+	assert.Empty(t, got.Workload.HostAccess.CapsAdd)
+
+	// A machine is unreachable when the gateway is what is broken, and a
+	// guest is not somewhere the host's profile can be looked at from.
+	assert.Empty(t, got.Workload.Runner)
+	assert.Empty(t, got.Workload.AttachVM)
+}
+
+// The paths are what the config being repaired is reached through. A
+// rescue shell that cannot see the file it was opened to fix is not one.
+func TestLimitedKeepsTheMappedPaths(t *testing.T) {
+	t.Parallel()
+
+	ew := EffectiveWorkload{
+		Workload: Workload{
+			HostAccess: HostAccess{Paths: []string{"${HOME}/git:/git"}},
+		},
+	}
+
+	assert.Equal(t, []string{"${HOME}/git:/git"}, Limited(ew).Workload.HostAccess.Paths)
+}

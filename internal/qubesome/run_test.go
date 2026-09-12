@@ -45,7 +45,7 @@ func TestRunnerWorkloadNameStaysInTheWorkloadsDir(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false)
+			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false, false)
 			require.ErrorIs(t, err, ErrWorkloadConfigNotFound)
 		})
 	}
@@ -95,7 +95,7 @@ func TestRunnerSelection(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, tc.runner, false)
+			err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, tc.runner, false, false)
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
@@ -170,7 +170,7 @@ func TestRunnerRefusesAnAttachVMThatNamesNoMachine(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false)
+			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false, false)
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}

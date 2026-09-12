@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/qubesome/cli/internal/command"
 	"github.com/qubesome/cli/internal/qubesome"
 	"github.com/urfave/cli/v3"
 )
@@ -47,6 +48,11 @@ used, as qubesome run does.
 				Usage:       "override the runner the workload or profile asks for",
 				Destination: &runner,
 			},
+			&cli.BoolFlag{
+				Name:        "limited",
+				Usage:       "drop the gateway, host devices, the gpu, the bus and mime handling",
+				Destination: &limited,
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// A named config is used as it is given. Anything else here
@@ -78,14 +84,20 @@ used, as qubesome run does.
 				}
 			}
 
-			return qubesome.Run(
+			opts := []command.Option[qubesome.Options]{
 				qubesome.WithHeadless(),
 				qubesome.WithWorkload(workload),
 				qubesome.WithProfile(targetProfile),
 				qubesome.WithConfig(cfg),
 				qubesome.WithRunner(runner),
 				qubesome.WithExtraArgs(cmd.Args().Slice()),
-			)
+			}
+
+			if limited {
+				opts = append(opts, qubesome.WithLimited())
+			}
+
+			return qubesome.Run(opts...)
 		},
 	}
 	return cmd

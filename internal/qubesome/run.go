@@ -77,10 +77,10 @@ func Run(opts ...command.Option[Options]) error {
 	// Nothing config-wide happens here. Refreshing every image the
 	// configuration names belongs to starting a profile, which is a
 	// process that stays up, not to opening one app.
-	return runner(in, o.Runner, o.Headless)
+	return runner(in, o.Runner, o.Headless, o.Limited)
 }
 
-func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
+func runner(in WorkloadInfo, runnerOverride string, headless, limited bool) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
@@ -182,6 +182,7 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	// reported once here rather than at every validation of it.
 	types.WarnIgnoredNetwork(ew.Name, ew.Workload.HostAccess.Network, in.Config.Gateway != nil)
 	types.WarnIgnoredMicroVMFields(ew.Name, ew.Workload)
+	types.WarnConsoleTakesItsOwnAddress(ew.Name, ew.Workload, in.Config.Gateway != nil)
 
 	// A workload that could renumber its own interface could claim another
 	// workload's policy and another workload's injected credentials, so the
@@ -211,6 +212,16 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	if headless {
 		// In headless mode, Mime handling is not supported.
 		ew.Workload.HostAccess.Mime = false
+	}
+
+	// Last, and after the runner override, so that nothing applied above
+	// can hand back something this took away. A limited launch is the one
+	// that has to be true whatever the config said.
+	if limited {
+		ew = types.Limited(ew)
+
+		slog.Warn("running in limited mode: no gateway, no devices, no gpu, no bus and no mime handling",
+			"workload", ew.Name)
 	}
 
 	// Every branch is named. Workloads run under bwrap, and the only
