@@ -7,8 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/session"
 	"github.com/qubesome/cli/internal/types"
@@ -70,6 +74,33 @@ type Status struct {
 
 	// AddrProblem says why the addresses are not in the report.
 	AddrProblem string
+
+	// Wired are the workloads this session has given an address to, read
+	// from the records their launches wrote. It is empty when none has.
+	//
+	// A workload that has since gone is listed as gone rather than
+	// dropped. An address is never handed out twice within a session, so
+	// what the record names is still true of the session even when the
+	// sandbox it named is not there any more.
+	Wired []WiredWorkload
+}
+
+// WiredWorkload is one workload the session has given an address to.
+//
+// It comes from the sandbox records the launches wrote and not from the
+// gateway, for Inspect's reason: a status has to be able to answer for a
+// gateway that has stopped answering.
+type WiredWorkload struct {
+	Profile string
+	Name    string
+	Address string
+
+	// Runner distinguishes a machine from a sandbox. It is not in the
+	// record, so it is empty unless a caller that knows it fills it in,
+	// and an empty one is rendered as nothing rather than as a gap.
+	Runner string
+
+	Running bool
 }
 
 // Inspect gathers what is known about the session's gateway.
@@ -111,6 +142,8 @@ func (g Gateway) Inspect(s session.Session, cfg *types.Config, ready func() erro
 
 	g.inspectConfig(&st, cfg)
 
+	st.Wired = wiredWorkloads(cfg)
+
 	if st.Running && ready != nil {
 		if err := ready(); err != nil {
 			st.ReadyErr = err.Error()
@@ -118,6 +151,61 @@ func (g Gateway) Inspect(s session.Session, cfg *types.Config, ready func() erro
 	}
 
 	return st
+}
+
+// wiredWorkloads reads every sandbox record that names a gateway address.
+//
+// The records are the source rather than the gateway, for Inspect's
+// reason. A record with no address belongs to a workload that was launched
+// without one, and it is left out: there is nothing about it a gateway
+// status would say.
+//
+// Nothing here fails. A directory that cannot be read and a record that
+// does not parse are both a workload this cannot report, and a status that
+// refused to print because one file was malformed would be useless in
+// exactly the situation it is run in.
+func wiredWorkloads(cfg *types.Config) []WiredWorkload {
+	if cfg == nil {
+		return nil
+	}
+
+	profiles := make([]string, 0, len(cfg.Profiles))
+	for name := range cfg.Profiles {
+		profiles = append(profiles, name)
+	}
+	sort.Strings(profiles)
+
+	var out []WiredWorkload
+
+	for _, profile := range profiles {
+		paths, err := filepath.Glob(filepath.Join(files.ProfileDir(profile), "sandbox-*.json"))
+		if err != nil {
+			continue
+		}
+		sort.Strings(paths)
+
+		for _, path := range paths {
+			rec, err := sandbox.ReadState(path)
+			if err != nil || rec.Address == "" {
+				continue
+			}
+
+			out = append(out, WiredWorkload{
+				Profile: profile,
+				Name:    workloadOfRecord(path),
+				Address: rec.Address,
+				Running: sandbox.Alive(path),
+			})
+		}
+	}
+
+	return out
+}
+
+// workloadOfRecord returns the workload a sandbox record belongs to. The
+// name is in the filename, which is what StatePath built it from.
+func workloadOfRecord(path string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "sandbox-"), ".json")
 }
 
 // inspectConfig fills in what the config says a gateway should be, and the
@@ -287,7 +375,30 @@ func (s Status) lines() []statusLine {
 		out = append(out, statusLine{"addresses", line})
 	}
 
+	for _, w := range s.Wired {
+		out = append(out, statusLine{"wired", w.line()})
+	}
+
 	return out
+}
+
+// line words one wired workload.
+//
+// The address comes straight after the name because it is the identity the
+// gateway classifies by, and the runner comes last because it only
+// distinguishes a machine from a sandbox.
+func (w WiredWorkload) line() string {
+	state := "gone"
+	if w.Running {
+		state = "running"
+	}
+
+	line := fmt.Sprintf("%s/%s at %s, %s", w.Profile, w.Name, w.Address, state)
+	if w.Runner != "" {
+		line += " (" + w.Runner + ")"
+	}
+
+	return line
 }
 
 // alive words the liveness of one recorded process. The record is named in
