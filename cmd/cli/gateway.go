@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/gateway"
+	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/session"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/urfave/cli/v3"
@@ -82,64 +82,43 @@ func gatewayStatusCommand() *cli.Command {
 // sessionConfig returns the config describing this session's gateway, and
 // why it could not be told when it cannot.
 //
-// Not profileConfigOrDefault. That falls back to the user-level config as
-// soon as more than one profile is active, and the gateway is session
-// wide: it was started by whichever launch found none running, from that
-// profile's config, and may have come from any of them. Reporting the
-// user-level file's gateway block for it would name an image, a policy and
-// a subnet that the running gateway need not have anything to do with.
+// It is read from the record the gateway's own launch wrote rather than
+// inferred from whichever profiles happen to be active. Inference answered
+// wrongly exactly when it mattered: a gateway is session wide and outlives
+// the profile that started it, so once that profile has stopped there is
+// nothing left among the active ones to point at, and the nearest config
+// is a guess that names an image, a policy and a subnet the running
+// gateway need have nothing to do with.
 //
-// Several active profiles are usually not an ambiguity at all, because one
-// qubesome config commonly defines several profiles and they were all
-// started from the same file. It is only profiles started from different
-// files that leave nothing here able to say which one the gateway came
-// from, and then saying so is the answer.
+// Not profileConfigOrDefault, for the same reason. Its fallbacks are right
+// for a launch, which is choosing a config to act on, and wrong here,
+// where the question is which config something already running came from.
+//
+// With no record and no gateway running, the user-level file is the
+// answer: there is nothing whose provenance could be got wrong, and what a
+// status then describes is the gateway this host would start.
 func sessionConfig() (*types.Config, string) {
-	active := activeConfigs()
+	g := gateway.Current()
 
-	resolved := make([]string, 0, len(active))
-	for _, path := range active {
-		// The run dir holds a symlink per active profile, so two profiles
-		// sharing a config are two links to one file.
-		target, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			continue
-		}
-		resolved = append(resolved, target)
-	}
-
-	if path, ok := sessionConfigPath(resolved); ok {
-		if cfg := config(path); cfg != nil && len(cfg.Profiles) > 0 {
+	if path, ok := g.RecordedConfig(); ok {
+		if cfg := config(path); cfg != nil {
 			return cfg, ""
 		}
-	}
 
-	if len(resolved) > 1 {
 		return nil, fmt.Sprintf(
-			"%d profiles are active and were started from different configs, so which of them the "+
-				"running gateway came from cannot be told, and the image, policy and subnet it "+
-				"names are unknown", len(resolved))
+			"the running gateway was started from %s, which no longer reads as a config, "+
+				"so the image, policy and subnet it names are unknown", path)
 	}
 
-	// No profile running, or one whose config no longer reads. The
-	// user-level file is the only thing left that describes a gateway.
+	// A gateway with no record is one started before qubesome kept one, or
+	// one whose record could not be written. Either way nothing here can
+	// say where it came from, and a nearby config would be a guess.
+	if sandbox.Alive(files.GatewayStatePath()) {
+		return nil, "the running gateway has no record of the config it was started from, " +
+			"so the image, policy and subnet it names are unknown"
+	}
+
 	return profileConfigOrDefault(""), ""
-}
-
-// sessionConfigPath returns the one config file every active profile was
-// started from, and whether there was one.
-func sessionConfigPath(active []string) (string, bool) {
-	if len(active) == 0 {
-		return "", false
-	}
-
-	for _, path := range active[1:] {
-		if path != active[0] {
-			return "", false
-		}
-	}
-
-	return active[0], true
 }
 
 func gatewayStopCommand() *cli.Command {

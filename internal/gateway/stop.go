@@ -3,6 +3,7 @@ package gateway
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"syscall"
 	"time"
@@ -53,6 +54,8 @@ func (g Gateway) Stop() (int, error) {
 			return 0, fmt.Errorf("failed to remove the gateway state %q: %w", g.StatePath, err)
 		}
 
+		g.forgetConfig()
+
 		return 0, nil
 	}
 
@@ -90,7 +93,24 @@ func (g Gateway) Stop() (int, error) {
 		return st.PID, fmt.Errorf("failed to remove the gateway state %q: %w", g.StatePath, err)
 	}
 
+	g.forgetConfig()
+
 	return st.PID, nil
+}
+
+// forgetConfig drops the note of which config the gateway came from.
+//
+// It goes with the state file, because the two describe the same gateway
+// and a record that outlived it would name the provenance of something
+// that is no longer running. A failure is a warning: the next gateway to
+// start overwrites this, so what is left behind is a stale path that only
+// a status asked between the two would read, and saying so is better than
+// failing a stop that otherwise worked.
+func (g Gateway) forgetConfig() {
+	if err := os.Remove(g.ConfigPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("failed to remove the gateway's config record",
+			"path", g.ConfigPath, "error", err)
+	}
 }
 
 const (

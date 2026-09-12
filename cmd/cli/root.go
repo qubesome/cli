@@ -108,6 +108,7 @@ func config(path string) *types.Config {
 	if err != nil {
 		return nil
 	}
+	cfg.Source = path
 	cfg.RootDir = filepath.Dir(path)
 
 	return cfg

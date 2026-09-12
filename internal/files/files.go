@@ -294,6 +294,25 @@ func GatewayAllocPath() string {
 	return filepath.Join(SessionDir(), "gateway-addresses.json")
 }
 
+// GatewayConfigPath returns the record of which qubesome config the
+// running gateway was started from.
+//
+// It sits beside the gateway's state file because it has the same
+// lifetime, and that lifetime is the whole point of it. A gateway
+// describes itself with the image, policy and subnet one config named, and
+// once the profile that started it has stopped there is nothing left on
+// the host to say which config that was. Inferring it from whichever
+// profiles happen to be active answers wrongly exactly when it matters:
+// after things have gone quiet.
+//
+// It is not in the home directory for the same reason. A record that
+// outlives the session outlives the gateway it describes, so after a
+// reboot it would name a config from a session that no longer exists,
+// which is a guess wearing the clothes of a fact.
+func GatewayConfigPath() string {
+	return filepath.Join(SessionDir(), "gateway-config")
+}
+
 // GatewayCredsPath returns the client half of the control channel's mTLS
 // material.
 //

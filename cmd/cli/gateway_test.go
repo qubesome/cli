@@ -1,60 +1,55 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/qubesome/cli/internal/gateway"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// The gateway belongs to the session and not to a profile, so its status
-// has no profile to be told which config to read. Every active profile
-// naming the same file is the ordinary case, since one qubesome config
-// usually defines several profiles, and that file is the answer. Two
-// profiles started from different files is the case that has no answer.
-func TestSessionConfigPath(t *testing.T) {
+// The gateway belongs to the session and not to a profile, and it outlives
+// the profile that started it, so its provenance is read from the record
+// that launch wrote rather than inferred from whichever profiles happen to
+// be active now.
+func TestRecordedConfigReadsBackWhatWasWritten(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name    string
-		active  []string
-		want    string
-		wantOne bool
-	}{
-		{
-			name:   "nothing active",
-			active: nil,
-		},
-		{
-			name:    "one profile",
-			active:  []string{"/home/u/dotfiles/qubesome.yaml"},
-			want:    "/home/u/dotfiles/qubesome.yaml",
-			wantOne: true,
-		},
-		{
-			name: "several profiles from one config",
-			active: []string{
-				"/home/u/dotfiles/qubesome.yaml",
-				"/home/u/dotfiles/qubesome.yaml",
-			},
-			want:    "/home/u/dotfiles/qubesome.yaml",
-			wantOne: true,
-		},
-		{
-			name: "profiles from different configs",
-			active: []string{
-				"/home/u/dotfiles/qubesome.yaml",
-				"/home/u/work/qubesome.yaml",
-			},
-		},
-	}
+	dir := t.TempDir()
+	g := gateway.Gateway{ConfigPath: filepath.Join(dir, "gateway-config")}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+	require.NoError(t, os.WriteFile(g.ConfigPath, []byte("/home/u/dotfiles/qubesome.yaml\n"), 0o600))
 
-			got, ok := sessionConfigPath(tc.active)
-			assert.Equal(t, tc.wantOne, ok)
-			assert.Equal(t, tc.want, got)
-		})
-	}
+	got, ok := g.RecordedConfig()
+	assert.True(t, ok)
+	assert.Equal(t, "/home/u/dotfiles/qubesome.yaml", got)
+}
+
+// No record is not an empty answer. A caller has to tell the two apart,
+// because one means the provenance is unknown and the other would name a
+// config called "".
+func TestRecordedConfigWithNoRecord(t *testing.T) {
+	t.Parallel()
+
+	g := gateway.Gateway{ConfigPath: filepath.Join(t.TempDir(), "gateway-config")}
+
+	got, ok := g.RecordedConfig()
+	assert.False(t, ok)
+	assert.Empty(t, got)
+}
+
+// A record that was created but never filled in says nothing, and must not
+// read as a config whose path is empty.
+func TestRecordedConfigWithAnEmptyRecord(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	g := gateway.Gateway{ConfigPath: filepath.Join(dir, "gateway-config")}
+
+	require.NoError(t, os.WriteFile(g.ConfigPath, []byte("\n"), 0o600))
+
+	_, ok := g.RecordedConfig()
+	assert.False(t, ok)
 }

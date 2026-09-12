@@ -103,7 +103,7 @@ func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 
 	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
 
-	require.NoError(t, g.Up(unusableConfig(), t.TempDir()))
+	require.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
 
 	assert.Equal(t, 1, gw.reloaded())
 }
@@ -122,7 +122,7 @@ func TestUpAcceptsAGatewayThatCannotReload(t *testing.T) {
 
 	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
 
-	assert.NoError(t, g.Up(unusableConfig(), t.TempDir()))
+	assert.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
 }
 
 // A state file outlives the process it names, so a gateway that crashed must
@@ -138,7 +138,7 @@ func TestUpStartsAGatewayWhenTheStateIsStale(t *testing.T) {
 	state := fmt.Sprintf(`{"pid":%d,"startTime":1}`, os.Getpid())
 	require.NoError(t, os.WriteFile(g.StatePath, []byte(state), 0o600))
 
-	err := g.Up(unusableConfig(), t.TempDir())
+	err := g.Up(unusableConfig(), t.TempDir(), "")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "gateway.yml")

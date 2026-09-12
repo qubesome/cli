@@ -104,6 +104,7 @@ type Gateway struct {
 	StatePath  string
 	AllocPath  string
 	CredsPath  string
+	ConfigPath string
 	Socket     string
 	SocketDir  string
 	SecretsDir string
@@ -117,6 +118,7 @@ func Current() Gateway {
 		StatePath:  files.GatewayStatePath(),
 		AllocPath:  files.GatewayAllocPath(),
 		CredsPath:  files.GatewayCredsPath(),
+		ConfigPath: files.GatewayConfigPath(),
 		Socket:     files.GatewaySocket(),
 		SocketDir:  files.GatewaySocketDir(),
 		SecretsDir: files.GatewaySecretsDir(),
@@ -126,10 +128,10 @@ func Current() Gateway {
 // Up makes sure the session's gateway is running and returns once it is
 // ready to police traffic.
 //
-// cfg is the gateway block of the qubesome config and root is the directory
+// cfg is the gateway block of the qubesome config, root is the directory
 // that config was read from, which is what the policy file path is resolved
-// against.
-func (g Gateway) Up(cfg types.GatewayConfig, root string) error {
+// against, and source is the config file itself.
+func (g Gateway) Up(cfg types.GatewayConfig, root, source string) error {
 	if err := os.MkdirAll(g.Dir, files.DirMode); err != nil {
 		return fmt.Errorf("failed to create the session dir %q: %w", g.Dir, err)
 	}
@@ -137,6 +139,15 @@ func (g Gateway) Up(cfg types.GatewayConfig, root string) error {
 	started, err := g.startOnce(cfg, root)
 	if err != nil {
 		return err
+	}
+
+	// Only when this launch created the gateway. A launch that found one
+	// running reuses it whatever config it itself came from, so recording
+	// its own here would rename a gateway that has not changed. That is
+	// the whole difference between the config a gateway came from and the
+	// last config anything opened.
+	if started {
+		g.recordConfig(source)
 	}
 
 	if err := g.ready(); err != nil {
@@ -259,6 +270,51 @@ func (g Gateway) startOnce(cfg types.GatewayConfig, root string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// recordConfig notes which config the gateway now running was started
+// from.
+//
+// A failure is a warning and nothing more. The gateway is up by this point
+// and policing traffic, and a record qubesome could not write is a status
+// command that has to say it cannot name the config. That is a worse
+// report, not a broken session, and it is not worth refusing a launch the
+// user asked for.
+//
+// An empty source writes nothing. A config that was never read from a file
+// has no path to record, and an empty record would read as one that could
+// not be written rather than as one that never applied.
+func (g Gateway) recordConfig(source string) {
+	if source == "" {
+		return
+	}
+
+	if err := os.WriteFile(g.ConfigPath, []byte(source+"\n"), files.FileMode); err != nil {
+		slog.Warn("failed to record which config the gateway was started from",
+			"path", g.ConfigPath, "config", source, "error", err)
+	}
+}
+
+// RecordedConfig returns the config the running gateway was started from,
+// and whether there is a record of one.
+//
+// It is the only thing on the host that can answer, once the profile that
+// started the gateway has stopped. A caller that gets false has to say the
+// provenance is unknown rather than reach for whichever config is nearest:
+// a gateway describes itself with an image, a policy and a subnet, and
+// naming the wrong config names three wrong things.
+func (g Gateway) RecordedConfig() (string, bool) {
+	data, err := os.ReadFile(g.ConfigPath)
+	if err != nil {
+		return "", false
+	}
+
+	path := strings.TrimSpace(string(data))
+	if path == "" {
+		return "", false
+	}
+
+	return path, true
 }
 
 // acquire takes the gateway lock and returns the file that holds it.

@@ -54,7 +54,7 @@ func Attached(cfg *types.Config, network string) (*Attach, error) {
 	}
 
 	g := Current()
-	if err := g.Up(*cfg.Gateway, cfg.RootDir); err != nil {
+	if err := g.Up(*cfg.Gateway, cfg.RootDir, cfg.Source); err != nil {
 		return nil, err
 	}
 
