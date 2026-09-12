@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -23,6 +24,13 @@ type Attach struct {
 	// identity to the gateway rather than merely where it can be reached,
 	// which is why nothing inside the sandbox can change it.
 	Addr netip.Addr
+
+	// policy is the policy file the gateway was configured with, resolved
+	// against the directory the qubesome config was read from. It is
+	// carried only so that a registration the gateway refuses can name
+	// the file the answer is in, and it is empty when it could not be
+	// resolved.
+	policy string
 }
 
 // Attached prepares the gateway side of a launch, and returns nil when the
@@ -66,7 +74,18 @@ func Attached(cfg *types.Config, network string) (*Attach, error) {
 		return nil, err
 	}
 
-	return &Attach{gateway: g, config: *cfg.Gateway, Addr: addr}, nil
+	// Not an error. This is for a message, the gateway is already up and
+	// running on whatever this would have named, and failing a launch
+	// over the provenance of an error that has not happened would be the
+	// wrong trade.
+	policy, err := cfg.Gateway.ConfigPath(cfg.RootDir)
+	if err != nil {
+		slog.Debug("[gateway] cannot resolve the gateway policy path", "error", err)
+
+		policy = ""
+	}
+
+	return &Attach{gateway: g, config: *cfg.Gateway, Addr: addr, policy: policy}, nil
 }
 
 // ProxyAddr returns the endpoint a workload asks for a tunnel on.
@@ -109,7 +128,35 @@ func (a *Attach) Register(name string) error {
 		return err
 	}
 
-	return c.Register(context.Background(), name, a.Addr.String())
+	if err := c.Register(context.Background(), name, a.Addr.String()); err != nil {
+		return a.refused(name, err)
+	}
+
+	return nil
+}
+
+// refused says where the answer to a refused registration is.
+//
+// The gateway's own message names the workload and says it is not in the
+// loaded policy, which is true and complete and still leaves the reader
+// looking for a file. The policy is not the qubesome config, it is not in
+// the profile, and the name it wants is the effective one: the workload
+// and the profile joined, which is not what is written at the top of the
+// workload's own file. All three are things the launch knows and the
+// gateway does not.
+//
+// It is added to every refusal and not only to that one. What the gateway
+// refuses a registration for is its own to decide and may grow, and a
+// message that named the policy for one reason and not another would be
+// worth less than one that always does.
+func (a *Attach) refused(name string, err error) error {
+	if a.policy == "" {
+		return err
+	}
+
+	return fmt.Errorf("%w: the gateway's policy is %s, and it has to name this workload as %q; "+
+		"a workload the policy does not name is refused an address rather than let out unclassified",
+		err, a.policy, name)
 }
 
 // Unregister drops the workload's address from the gateway's map.
