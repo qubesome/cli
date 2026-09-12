@@ -13,6 +13,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/netip"
@@ -23,9 +24,11 @@ import (
 	"testing"
 
 	"github.com/qubesome/cli/internal/sandbox"
+	"github.com/qubesome/cli/internal/session"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/execabs"
 )
 
 const testSubnet = "10.111.0.0/24"
@@ -101,7 +104,7 @@ func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 	gw := newGateway(closedChan())
 	listenOn(t, gw, creds, g.Socket)
 
-	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
+	runningGateway(t, g)
 
 	require.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
 
@@ -120,7 +123,7 @@ func TestUpAcceptsAGatewayThatCannotReload(t *testing.T) {
 	gw.noReload = true
 	listenOn(t, gw, creds, g.Socket)
 
-	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
+	runningGateway(t, g)
 
 	assert.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
 }
@@ -446,7 +449,30 @@ func newSessionGateway(t *testing.T) Gateway {
 		Socket:     filepath.Join(dir, "control.sock"),
 		SocketDir:  dir,
 		SecretsDir: filepath.Join(dir, "secrets"),
+		Session: session.Session{
+			Dir:       dir,
+			LockPath:  filepath.Join(dir, "session.lock"),
+			StatePath: filepath.Join(dir, "holder.json"),
+		},
 	}
+}
+
+// runningGateway records a gateway this session can use: a process that
+// is alive, and the user namespace of a holder that is running.
+//
+// Both halves are needed. A gateway is only this session's gateway when
+// the namespace it was started in is the one being held, and the test
+// process stands in for both the holder and the gateway because it is a
+// live process in a namespace it can name.
+func runningGateway(t *testing.T, g Gateway) {
+	t.Helper()
+
+	require.NoError(t, sandbox.WriteState(g.Session.StatePath, os.Getpid()))
+
+	held, err := g.Session.UsernsID()
+	require.NoError(t, err)
+
+	require.NoError(t, sandbox.WriteStateSession(g.StatePath, os.Getpid(), held))
 }
 
 // unusableConfig names a policy file that is not there, so anything that
@@ -491,4 +517,155 @@ func TestAllocateRefusesAChangedSubnet(t *testing.T) {
 	assert.Contains(t, err.Error(), "this session has handed addresses out of 10.111.0.0/24")
 	assert.Contains(t, err.Error(), "the config now asks for 10.112.0.0/24")
 	assert.Contains(t, err.Error(), "the session has to be restarted")
+}
+
+// A gateway is started inside the session holder's user namespace, so a
+// gateway whose namespace is not the one being held now is one the
+// session cannot wire anything to. Its pid says nothing about that.
+func TestAGatewayOfAnotherSessionIsStranded(t *testing.T) {
+	t.Parallel()
+
+	err := strandedBy(
+		sandbox.State{PID: 42, Session: 4026531837},
+		sandbox.State{PID: 7, StartTime: 100},
+		4026532200, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "4026531837")
+	assert.Contains(t, err.Error(), "4026532200")
+}
+
+// The namespace being held is the one the gateway was started in, so
+// there is nothing wrong with it.
+func TestAGatewayOfThisSessionIsNotStranded(t *testing.T) {
+	t.Parallel()
+
+	assert.NoError(t, strandedBy(
+		sandbox.State{PID: 42, Session: 4026532200},
+		sandbox.State{PID: 7, StartTime: 100},
+		4026532200, nil))
+}
+
+// A gateway was started inside some holder's namespace, so one running
+// with no holder anywhere is one whose holder has gone.
+func TestAGatewayWithNoHolderIsStranded(t *testing.T) {
+	t.Parallel()
+
+	err := strandedBy(
+		sandbox.State{PID: 42, Session: 4026532200},
+		sandbox.State{},
+		0, session.ErrNoHolder)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, session.ErrNoHolder)
+}
+
+// A gateway a previous release started records no namespace. Only one
+// holder runs at a time and a gateway is always started inside the one
+// that is running, so a gateway that started after this holder did is
+// this holder's gateway however little its record says. Killing it would
+// take the egress from a session that was working.
+func TestAGatewayOlderThanTheRecordButNewerThanTheHolderIsNotStranded(t *testing.T) {
+	t.Parallel()
+
+	assert.NoError(t, strandedBy(
+		sandbox.State{PID: 42, StartTime: 200},
+		sandbox.State{PID: 7, StartTime: 100},
+		4026532200, nil))
+}
+
+// One that started before this holder did belongs to a holder that has
+// since gone, whatever its pid says.
+func TestAGatewayOlderThanTheHolderIsStranded(t *testing.T) {
+	t.Parallel()
+
+	err := strandedBy(
+		sandbox.State{PID: 42, StartTime: 100},
+		sandbox.State{PID: 7, StartTime: 200},
+		4026532200, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "started before this session's holder")
+}
+
+// With no holder record there is nothing to date it against, and a
+// gateway that cannot be shown to be this session's is not treated as
+// one.
+func TestAGatewayWithNoSessionAndNoHolderRecordIsStranded(t *testing.T) {
+	t.Parallel()
+
+	assert.Error(t, strandedBy(sandbox.State{PID: 42, StartTime: 200}, sandbox.State{}, 4026532200, nil))
+}
+
+// A gateway of a session that has gone is alive, so nothing about its pid
+// says it cannot be used. It is taken down and a fresh one is started,
+// which here is the start path failing on the unusable config.
+func TestUpReplacesAGatewayOfASessionThatHasGone(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := execabs.CommandContext(ctx, "sleep", "60")
+	require.NoError(t, cmd.Start())
+	defer func() { _ = cmd.Wait() }()
+
+	// A holder is running, and the gateway names a namespace that is not
+	// the one it is holding. The gateway is the younger of the two
+	// processes, so it is the recorded namespace and nothing else that
+	// makes this one stranded.
+	require.NoError(t, sandbox.WriteState(g.Session.StatePath, os.Getpid()))
+	require.NoError(t, sandbox.WriteStateSession(g.StatePath, cmd.Process.Pid, 1))
+
+	err := g.Up(unusableConfig(), t.TempDir(), "")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "gateway.yml", "the start path must have been taken")
+	assert.NoFileExists(t, g.StatePath, "the stranded gateway's record must not be left behind")
+}
+
+// Nothing wires to a gateway of a session that has gone. The veth would
+// be refused by the kernel with a message that names nothing, so the
+// refusal is here, where it can say what is wrong.
+func TestSandboxPIDRefusesAGatewayOfASessionThatHasGone(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+
+	require.NoError(t, sandbox.WriteState(g.Session.StatePath, os.Getpid()))
+	require.NoError(t, sandbox.WriteStateSession(g.StatePath, os.Getpid(), 1))
+
+	_, err := g.SandboxPID()
+
+	require.ErrorIs(t, err, ErrNoGateway)
+	assert.Contains(t, err.Error(), "a session that has gone")
+}
+
+// A profile started by a previous release leaves a gateway whose record
+// names no namespace. It is this session's gateway, and a launch from a
+// newer binary has to go on using it rather than taking the egress from
+// the workloads already running on it.
+func TestUpReusesAGatewayFromAReleaseThatRecordedNoSession(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+
+	creds := newCreds(t)
+	require.NoError(t, g.writeCreds(creds))
+	gw := newGateway(closedChan())
+	listenOn(t, gw, creds, g.Socket)
+
+	// The holder started before the gateway did, which is the only order
+	// the two can ever be in, and the gateway's record names no
+	// namespace, which is what a previous release wrote. The parent
+	// process stands in for the holder because it is a live process that
+	// started before this one.
+	require.NoError(t, sandbox.WriteState(g.Session.StatePath, os.Getppid()))
+	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
+
+	require.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
+
+	assert.Equal(t, 1, gw.reloaded(), "the gateway that was running must have been reused")
 }

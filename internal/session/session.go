@@ -208,7 +208,18 @@ func (s Session) Start() error {
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 
-	return s.wait(exited)
+	if err := s.wait(exited); err != nil {
+		return err
+	}
+
+	// Only when this call started one. A launch that found a holder
+	// running says nothing, so this line marks the beginning of a session
+	// and not merely the use of one.
+	if id, err := s.UsernsID(); err == nil {
+		slog.Info("[session] started a session", "session", id)
+	}
+
+	return nil
 }
 
 // wait blocks until the holder records itself, exits, or runs out of
@@ -282,6 +293,46 @@ func (s Session) Open(fd int) (*Namespace, error) {
 	}
 
 	return &Namespace{f: f, fd: fd}, nil
+}
+
+// ID identifies the namespace this handle is open on.
+//
+// It is the inode the kernel names a namespace by: unique for as long as
+// the namespace exists, and not handed out again while anything is
+// holding it. It is read from the open handle rather than from the path
+// it was opened through, so it is the identity of the namespace actually
+// being handed to bwrap rather than of whatever is at that path by the
+// time somebody asks again.
+func (n *Namespace) ID() (uint64, error) {
+	fi, err := n.f.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("failed to identify the session user namespace: %w", err)
+	}
+
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, errors.New("session: the user namespace has no inode to identify it by")
+	}
+
+	return st.Ino, nil
+}
+
+// UsernsID identifies the user namespace this session's holder is keeping
+// open, and reports ErrNoHolder when there is no holder to ask.
+//
+// It is what tells a gateway of this session from one left behind by a
+// session that has gone. Both are a pid that is still alive, and only the
+// namespace says which is which.
+func (s Session) UsernsID() (uint64, error) {
+	// The descriptor number decides nothing here. Nothing is being handed
+	// to a child, and Open takes one because its usual caller is.
+	ns, err := s.Open(3)
+	if err != nil {
+		return 0, err
+	}
+	defer ns.Close()
+
+	return ns.ID()
 }
 
 // File returns the descriptor to pass in exec.Cmd.ExtraFiles. It has to
