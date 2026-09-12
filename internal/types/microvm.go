@@ -258,6 +258,38 @@ func validateMicroVMSizes(m MicroVM) error {
 // Callers invoke this once per launch, for the same reason
 // WarnIgnoredNetwork says: Validate runs several times for a single
 // launch and would otherwise warn repeatedly.
+// WarnConsoleTakesItsOwnAddress reports a workload that attaches to a
+// machine and is also given an address of its own on the gateway.
+//
+// A console reaches its machine over a vsock socket bound into its
+// sandbox, not over the network, so it needs no address to do the job it
+// exists for. It usually has one anyway: a profile's network is applied
+// to every workload that does not say hostAccess.network: none, so a
+// console written with nothing at all in its hostAccess inherits one.
+//
+// What that costs is a second egress path into the same workspace. The
+// guest's traffic leaves under the guard, which pins it to one address
+// and one MAC; the console's leaves beside it under a policy of its own,
+// with none of that in front of it. It is a thing somebody may well want,
+// which is why this is a warning and not a refusal, but it is almost
+// never a thing somebody asked for.
+//
+// It is also where the launch would otherwise stop with nothing useful
+// to say. An address means the gateway is told which workload holds it,
+// and a name its policy does not carry is refused, so a console that
+// inherited a network fails on the policy file rather than on anything
+// to do with the machine.
+func WarnConsoleTakesItsOwnAddress(name string, w Workload, gateway bool) {
+	if !gateway || w.AttachVM == "" || !GatewayNetwork(w.HostAccess.Network) {
+		return
+	}
+
+	slog.Warn("this workload attaches to a microVM and is also taking an address of its own on the gateway; "+
+		"a console reaches its machine over vsock and needs no network, and the gateway's policy has to name "+
+		"it separately from the machine. Set hostAccess.network to none to leave it with no egress of its own",
+		"name", name, "attachVM", w.AttachVM, "network", w.HostAccess.Network)
+}
+
 func WarnIgnoredMicroVMFields(name string, w Workload) {
 	if w.Runner != firecrackerRunner {
 		return
