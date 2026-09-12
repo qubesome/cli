@@ -1,7 +1,6 @@
 package clipboard
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -147,15 +146,32 @@ func pipe(out, in *execabs.Cmd) error {
 	// authenticate to and a selection that is empty alike. Without this
 	// the caller is told "exit status 1" and has no way to tell those
 	// apart.
-	var outLog, inLog bytes.Buffer
-	out.Stderr = &outLog
-	in.Stderr = &inLog
+	outLog, err := newSaid()
+	if err != nil {
+		_ = w.Close()
+		_ = r.Close()
+
+		return err
+	}
+	defer outLog.Close()
+
+	inLog, err := newSaid()
+	if err != nil {
+		_ = w.Close()
+		_ = r.Close()
+
+		return err
+	}
+	defer inLog.Close()
+
+	out.Stderr = outLog.File()
+	in.Stderr = inLog.File()
 
 	defer func() {
-		if s := strings.TrimSpace(outLog.String()); s != "" {
+		if s := outLog.String(); s != "" {
 			slog.Error("clipboard read", "display", displayOf(out), "error", s)
 		}
-		if s := strings.TrimSpace(inLog.String()); s != "" {
+		if s := inLog.String(); s != "" {
 			slog.Error("clipboard write", "display", displayOf(in), "error", s)
 		}
 	}()
@@ -181,16 +197,78 @@ func pipe(out, in *execabs.Cmd) error {
 	// Both are reported. When the reading command fails, the writer sees
 	// a broken pipe, and returning only that would hide the failure that
 	// caused it behind its own symptom.
-	return errors.Join(withStderr(inErr, &inLog), withStderr(outErr, &outLog))
+	return errors.Join(withStderr(inErr, inLog), withStderr(outErr, outLog))
+}
+
+// said collects what one end of the copy wrote to its standard error.
+//
+// It is a file, and that is the difference between a copy that returns
+// and one that never does. os/exec makes a pipe for any writer that is
+// not a file and has Wait wait for a goroutine copying out of it, and
+// xclip -i forks a process to own the selection which inherits that pipe
+// and holds it open for as long as it owns one. Waiting for the end of
+// that is waiting for the user's next copy, which is how a from-host copy
+// came to freeze. A file is handed to the child directly, so there is no
+// goroutine and Wait waits only for the process it started.
+type said struct {
+	f *os.File
+}
+
+// newSaid opens somewhere for one end to write its complaints.
+//
+// The file is unlinked as soon as it is open. The descriptor is the whole
+// of the handle from then on, so nothing else can read or replace what a
+// command said, and the file goes with this process by any route out.
+func newSaid() (*said, error) {
+	f, err := os.CreateTemp("", "qubesome-clipboard-")
+	if err != nil {
+		return nil, fmt.Errorf("cannot collect what the clipboard commands say: %w", err)
+	}
+
+	if err := os.Remove(f.Name()); err != nil {
+		_ = f.Close()
+
+		return nil, fmt.Errorf("cannot collect what the clipboard commands say: %w", err)
+	}
+
+	return &said{f: f}, nil
+}
+
+// File is what the command writes to.
+func (s *said) File() *os.File {
+	return s.f
+}
+
+// String is what it wrote, or nothing at all when it wrote nothing or
+// when reading it back failed. There is no error to return here: this is
+// the explanation of another failure, and a missing explanation must not
+// become a second one.
+func (s *said) String() string {
+	if _, err := s.f.Seek(0, io.SeekStart); err != nil {
+		return ""
+	}
+
+	data, err := io.ReadAll(s.f)
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(data))
+}
+
+// Close releases the file. Whatever the forked xclip writes to it
+// afterwards goes nowhere, which is the right place for it.
+func (s *said) Close() {
+	_ = s.f.Close()
 }
 
 // withStderr attaches what a command said to why it failed.
-func withStderr(err error, log *bytes.Buffer) error {
+func withStderr(err error, log *said) error {
 	if err == nil {
 		return nil
 	}
 
-	if s := strings.TrimSpace(log.String()); s != "" {
+	if s := log.String(); s != "" {
 		return fmt.Errorf("%w: %s", err, s)
 	}
 

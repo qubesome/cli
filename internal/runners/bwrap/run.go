@@ -15,6 +15,7 @@ import (
 	"github.com/qubesome/cli/internal/keyring"
 	"github.com/qubesome/cli/internal/keyring/backend"
 	"github.com/qubesome/cli/internal/runners/util/container"
+	"github.com/qubesome/cli/internal/runners/util/launch"
 	"github.com/qubesome/cli/internal/runners/util/mime"
 	"github.com/qubesome/cli/internal/runners/util/usb"
 	"github.com/qubesome/cli/internal/sandbox"
@@ -25,10 +26,6 @@ import (
 	"github.com/qubesome/cli/internal/util/tz"
 	"golang.org/x/sys/execabs"
 )
-
-// firstExtraFD is the descriptor os/exec puts the first ExtraFiles entry
-// on in the child.
-const firstExtraFD = 3
 
 // hostEnvPassthrough are the host variables a workload sharing the host
 // dbus reads. The container runners named them and let the runtime copy
@@ -124,13 +121,13 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 		return err
 	}
 
-	l, err := launch(spec, att != nil)
+	l, err := launch.New(spec, att != nil)
 	if err != nil {
 		return err
 	}
-	defer l.close()
+	defer l.Close()
 
-	if err := l.start(); err != nil {
+	if err := l.Start(); err != nil {
 		return err
 	}
 
@@ -142,18 +139,27 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 			// run instead would be a workload with a policy that is not
 			// being applied to it, which is the one outcome this stage
 			// exists to prevent.
-			return l.stop(err)
+			return l.Stop(err)
 		}
 	}
 
-	if err := sandbox.WriteState(statePath, l.cmd.Process.Pid); err != nil {
+	// The address goes into the record beside the pid. It is the workload's
+	// identity to the gateway, and this is the only place it is written
+	// down, so a diagnostic asking what a running sandbox is on the gateway
+	// has somewhere to read it.
+	var addr string
+	if att != nil {
+		addr = att.Addr.String()
+	}
+
+	if err := sandbox.WriteStateAddr(statePath, l.Cmd().Process.Pid, addr); err != nil {
 		// The state file is how a second launch of a single instance
 		// workload finds this one, so a sandbox that cannot be recorded
 		// must not keep running under a name nothing can reach.
-		return l.stop(fmt.Errorf("failed to record sandbox state: %w", err))
+		return l.Stop(fmt.Errorf("failed to record sandbox state: %w", err))
 	}
 
-	go reap(l.cmd, statePath, att, ew.Name)
+	go reap(l.Cmd(), statePath, att, ew.Name)
 
 	return nil
 }
@@ -178,8 +184,8 @@ type attacher interface {
 //
 // Every step before the release stops the launch when it fails, and the
 // caller kills the sandbox. Nothing has run inside it yet.
-func attach(l *launcher, att attacher, ew types.EffectiveWorkload) error {
-	pid, err := l.childPID()
+func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload) error {
+	pid, err := l.ChildPID()
 	if err != nil {
 		return err
 	}
@@ -197,11 +203,11 @@ func attach(l *launcher, att attacher, ew types.EffectiveWorkload) error {
 		return err
 	}
 
-	if err := release(socket); err != nil {
+	if err := launch.Release(socket); err != nil {
 		return fmt.Errorf("failed to release workload %q into its sandbox: %w", ew.Name, err)
 	}
 
-	slog.Debug("gave a workload its gateway address", "workload", ew.Name, "pid", pid)
+	slog.Info("started a workload on the session gateway", "workload", ew.Name, "pid", pid)
 
 	return nil
 }
@@ -231,26 +237,6 @@ func reap(cmd *execabs.Cmd, statePath string, att *gateway.Attach, name string) 
 
 	if att != nil {
 		att.Unregister(name)
-	}
-}
-
-// release opens a gated supervisor's gate, waiting for a sandbox that is
-// still starting.
-//
-// The wait is spawn's, and for the same reason: between the sandbox
-// existing and the supervisor binding its socket there is a bwrap setup
-// and an exec. Here the sandbox is known to exist, since its pid was read
-// from bwrap, so what is being waited for is only the socket.
-func release(socket string) error {
-	deadline := time.Now().Add(startupGrace)
-
-	for {
-		err := sandbox.Release(socket)
-		if !errors.Is(err, sandbox.ErrNoSupervisor) || time.Now().After(deadline) {
-			return err
-		}
-
-		time.Sleep(startupPoll)
 	}
 }
 
@@ -303,25 +289,13 @@ func handOver(ew types.EffectiveWorkload, statePath string) (bool, error) {
 	return true, fmt.Errorf("failed to hand %q to its running sandbox: %w", ew.Name, err)
 }
 
-const (
-	// startupGrace bounds the wait for a sandbox that was recorded a
-	// moment ago to reach the point of listening. Between the host
-	// recording the sandbox and the supervisor binding its socket there is
-	// a bwrap setup and an exec, and a launch that gave up inside that
-	// window would start a second sandbox because the first was not quite
-	// up yet.
-	startupGrace = 2 * time.Second
-
-	startupPoll = 50 * time.Millisecond
-)
-
 // spawn hands argv over, waiting for a sandbox that is still starting.
 //
 // Only a sandbox the state file still calls alive is waited for, so a
 // sandbox that goes away during the wait ends it rather than running it
 // out.
 func spawn(socket string, argv []string, statePath string) error {
-	deadline := time.Now().Add(startupGrace)
+	deadline := time.Now().Add(launch.StartupGrace)
 
 	for {
 		err := sandbox.Spawn(socket, argv)
@@ -332,7 +306,7 @@ func spawn(socket string, argv []string, statePath string) error {
 			return err
 		}
 
-		time.Sleep(startupPoll)
+		time.Sleep(launch.StartupPoll)
 	}
 }
 

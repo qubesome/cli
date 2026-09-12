@@ -98,6 +98,54 @@ type HostAccess struct {
 	Devices []string `yaml:"devices"`
 }
 
+// Limited strips a workload down to a window and nothing else.
+//
+// It is the escape hatch. When the session gateway will not start, or a
+// profile is half up, every launch fails at a stage that has nothing to
+// do with the workload being launched, and the one thing needed to
+// diagnose that is a workload. This gives one: a sandbox with its own
+// empty network namespace, no device of the host's, no gpu, no mime
+// handler and no bus.
+//
+// It only ever drops. Nothing here turns anything on, so a limited launch
+// reaches strictly less than the same workload would have reached,
+// whatever the profile allows. That is what makes it safe to offer on any
+// workload at any time, including one the user did not write.
+//
+// The profile's mapped paths are kept. They are what the dotfiles and the
+// config being repaired are reached through, and a rescue shell that
+// cannot see the file it was opened to fix is not one.
+func Limited(ew EffectiveWorkload) EffectiveWorkload {
+	ha := &ew.Workload.HostAccess
+
+	// "none" and not the empty string. Empty is what a workload that said
+	// nothing has, and the profile's own network is applied over it, so
+	// it is not a refusal. This is.
+	ha.Network = "none"
+
+	ha.Dbus = false
+	ha.Camera = false
+	ha.Microphone = false
+	ha.Speakers = false
+	ha.Bluetooth = false
+	ha.VarRunUser = false
+	ha.Mime = false
+	ha.Gpus = ""
+	ha.USBDevices = nil
+	ha.Devices = nil
+	ha.CapsAdd = nil
+
+	// A machine is a kernel, a root filesystem built for the boot and a
+	// wire to the gateway, and none of that is reachable when the gateway
+	// is the thing being debugged. A guest is also not somewhere the
+	// host's profile can be looked at from. So it runs under bwrap, like
+	// everything else, and attaches to no machine.
+	ew.Workload.Runner = ""
+	ew.Workload.AttachVM = ""
+
+	return ew
+}
+
 type EffectiveWorkload struct {
 	// Name combines the name of both the workload and the profile
 	// in which it will be executed under.

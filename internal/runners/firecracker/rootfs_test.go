@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/env"
@@ -139,7 +140,7 @@ func TestInitConfig(t *testing.T) {
 			Command: "/bin/bash",
 			Args:    []string{"-l"},
 		},
-	})
+	}, nil)
 
 	assert.Equal(t, []string{"/bin/bash", "-l"}, cfg.Argv)
 	assert.Equal(t, []string{"PATH=/usr/bin", "LANG=C.UTF-8", "QUBESOME_PROFILE=personal"}, cfg.Env)
@@ -152,7 +153,7 @@ func TestInitConfig(t *testing.T) {
 func TestInitConfigWithoutACommand(t *testing.T) {
 	t.Parallel()
 
-	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"})
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"}, nil)
 
 	assert.Empty(t, cfg.Argv)
 	assert.Empty(t, cfg.Env)
@@ -166,7 +167,7 @@ func TestWriteInitConfig(t *testing.T) {
 	require.NoError(t, writeInitConfig(path, images.Bundle{Cwd: "/root"}, types.EffectiveWorkload{
 		Name:     "dev-personal",
 		Workload: types.Workload{Command: "/bin/sh"},
-	}))
+	}, nil))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -237,4 +238,146 @@ func TestWarnImageUser(t *testing.T) {
 	assert.Contains(t, out, "docker.io/library/nginx:latest")
 	assert.Contains(t, out, "uid=101")
 	assert.Contains(t, out, "root")
+}
+
+func TestInitConfigCarriesTheNetwork(t *testing.T) {
+	t.Parallel()
+
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"},
+		&NetworkConfig{Address: "10.111.0.2", Gateway: "10.111.0.1"})
+
+	require.NotNil(t, cfg.Network)
+	assert.Equal(t, "10.111.0.2", cfg.Network.Address)
+	assert.Equal(t, "10.111.0.1", cfg.Network.Gateway)
+}
+
+// A machine with no gateway carries no network block at all, so the guest
+// knows there is nothing to configure rather than having to read it out of
+// empty strings.
+func TestInitConfigWithoutAGatewayCarriesNoNetwork(t *testing.T) {
+	t.Parallel()
+
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"}, nil)
+
+	assert.Nil(t, cfg.Network)
+}
+
+// The written file is what the guest reads, so the block has to survive
+// the round trip and not only the struct.
+func TestWriteInitConfigCarriesTheNetwork(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), initConfigFile)
+
+	require.NoError(t, writeInitConfig(path, images.Bundle{}, types.EffectiveWorkload{
+		Name:     "dev-personal",
+		Workload: types.Workload{Command: "/bin/sh"},
+	}, &NetworkConfig{Address: "10.111.0.2", Gateway: "10.111.0.1"}))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var got InitConfig
+	require.NoError(t, json.Unmarshal(data, &got))
+	require.NotNil(t, got.Network)
+	assert.Equal(t, "10.111.0.2", got.Network.Address)
+}
+
+// The gateway drops every port but 80, 443 and 53, so ssh cannot connect
+// out of a guest at all. A sandbox is told where to ask in its
+// environment; a guest has no environment the host can reach into, so the
+// endpoint goes in the file the guest init reads and the init puts it
+// back into the environment of everything it starts.
+func TestInitConfigCarriesTheProxyEndpoint(t *testing.T) {
+	t.Parallel()
+
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"},
+		&NetworkConfig{Address: "10.111.0.2", Gateway: "10.111.0.1", Proxy: "10.111.0.1:3128"})
+
+	assert.Contains(t, cfg.Env, "QUBESOME_GATEWAY_PROXY=10.111.0.1:3128")
+}
+
+// A machine with no gateway has nothing to ask, and a variable naming an
+// endpoint that is not there would have ssh fail for a reason that has
+// nothing to do with the network.
+func TestInitConfigWithoutAGatewayCarriesNoProxyEndpoint(t *testing.T) {
+	t.Parallel()
+
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"}, nil)
+
+	for _, v := range cfg.Env {
+		assert.NotContains(t, v, "QUBESOME_GATEWAY_PROXY")
+	}
+}
+
+// The command is the guest init's own path. There is no
+// /usr/local/bin/qubesome inside a machine: the binary is composed in
+// once, as the init, and that is the one everything in there runs.
+func TestTheGuestSSHConfigRunsTheGuestInit(t *testing.T) {
+	t.Parallel()
+
+	got := guestSSHGatewayConfig()
+
+	assert.Contains(t, got, "ProxyCommand "+guestInit+" tunnel %h %p")
+	assert.NotContains(t, got, files.InProfileBinary,
+		"the sandbox's path for the binary does not exist in a guest")
+}
+
+func TestWriteSSHConfigWritesTheDropIn(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	path, err := writeSSHConfig(dir, &NetworkConfig{Proxy: "10.111.0.1:3128"})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, sshConfigFile), path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "ProxyCommand")
+}
+
+// A machine with no gateway has nothing to tunnel through, and the build
+// composes no drop-in at all.
+func TestWriteSSHConfigWritesNothingWithoutAGateway(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	path, err := writeSSHConfig(dir, nil)
+	require.NoError(t, err)
+	assert.Empty(t, path)
+	assert.NoFileExists(t, filepath.Join(dir, sshConfigFile))
+}
+
+// The drop-in has to land where a system ssh_config already includes
+// from, or the image would have to be changed to read it.
+func TestRootfsArgsComposeTheSSHDropIn(t *testing.T) {
+	t.Parallel()
+
+	args := rootfsArgs(rootfsBuild{
+		Rootfs:      "/images/sha256-abc/rootfs",
+		Target:      "/run/vm/rootfs.ext4",
+		SizeMiB:     4096,
+		QubesomeBin: "/usr/local/bin/qubesome",
+		InitConfig:  "/run/vm/init.json",
+		SSHConfig:   "/run/vm/ssh_gateway.conf",
+	})
+
+	assert.Contains(t, args, composedRoot+guestSSHConfig)
+	assert.Contains(t, args, "/run/vm/ssh_gateway.conf")
+}
+
+func TestRootfsArgsComposeNoSSHDropInWithoutOne(t *testing.T) {
+	t.Parallel()
+
+	args := rootfsArgs(rootfsBuild{
+		Rootfs:      "/images/sha256-abc/rootfs",
+		Target:      "/run/vm/rootfs.ext4",
+		SizeMiB:     4096,
+		QubesomeBin: "/usr/local/bin/qubesome",
+		InitConfig:  "/run/vm/init.json",
+	})
+
+	assert.NotContains(t, args, composedRoot+guestSSHConfig)
 }

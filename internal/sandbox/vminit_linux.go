@@ -74,6 +74,19 @@ type vmConfig struct {
 	// DataMount is where the persistent disk goes, and is empty when the
 	// workload configured none.
 	DataMount string `json:"dataMount,omitempty"`
+
+	// Network is the machine's place on the session gateway, and is nil
+	// for a machine that has none, which then configures no interface at
+	// all.
+	Network *vmNetwork `json:"network,omitempty"`
+}
+
+// vmNetwork is the reading half of NetworkConfig in
+// internal/runners/firecracker/rootfs.go, written out twice for the reason
+// vmConfig gives.
+type vmNetwork struct {
+	Address string `json:"address"`
+	Gateway string `json:"gateway"`
 }
 
 // readVMConfig reads what the guest was booted to run.
@@ -619,6 +632,15 @@ func vmInit() error {
 	}
 
 	if err := applyIdentity(cfg); err != nil {
+		return err
+	}
+
+	// Before anything runs in the machine and before any console is
+	// served, so a workload's first name lookup cannot precede the
+	// resolver it is meant to reach. That is the ordering guarantee the
+	// bwrap side makes by wiring a sandbox before opening its gate, and it
+	// is kept here rather than left to chance.
+	if err := configureGuestNetwork(cfg.Network); err != nil {
 		return err
 	}
 

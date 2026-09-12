@@ -1,6 +1,8 @@
 package types
 
 import (
+	"bytes"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -291,4 +293,76 @@ func TestWarnIgnoredMicroVMFields(t *testing.T) {
 	assert.Contains(t, out, "noGpuArgs")
 	assert.Contains(t, out, "mimeApps")
 	assert.Contains(t, out, "dev-personal")
+}
+
+// A console reaches its machine over vsock, so an address on the gateway
+// is a second egress path it did not ask for: a profile's network is
+// applied to every workload that does not refuse one.
+func TestAConsoleWithAnInheritedNetworkIsWarnedAbout(t *testing.T) {
+	// No t.Parallel: captureWarnings swaps the default logger, which
+	// every other test in this package shares.
+	var buf bytes.Buffer
+	restore := captureWarnings(t, &buf)
+	defer restore()
+
+	WarnConsoleTakesItsOwnAddress("term-personal",
+		Workload{AttachVM: "firecracker", HostAccess: HostAccess{Network: "qubesome"}}, true)
+
+	assert.Contains(t, buf.String(), "attaches to a microVM")
+	assert.Contains(t, buf.String(), "hostAccess.network to none")
+}
+
+// A console that refused the network has nothing to be told.
+func TestAConsoleWithNoNetworkIsNotWarnedAbout(t *testing.T) {
+	// No t.Parallel: captureWarnings swaps the default logger, which
+	// every other test in this package shares.
+	var buf bytes.Buffer
+	restore := captureWarnings(t, &buf)
+	defer restore()
+
+	WarnConsoleTakesItsOwnAddress("term-personal",
+		Workload{AttachVM: "firecracker", HostAccess: HostAccess{Network: "none"}}, true)
+
+	assert.Empty(t, buf.String())
+}
+
+// A workload that attaches to nothing is an ordinary workload, and an
+// address is exactly what it is for.
+func TestAWorkloadThatAttachesToNoMachineIsNotWarnedAbout(t *testing.T) {
+	// No t.Parallel: captureWarnings swaps the default logger, which
+	// every other test in this package shares.
+	var buf bytes.Buffer
+	restore := captureWarnings(t, &buf)
+	defer restore()
+
+	WarnConsoleTakesItsOwnAddress("chrome-personal",
+		Workload{HostAccess: HostAccess{Network: "qubesome"}}, true)
+
+	assert.Empty(t, buf.String())
+}
+
+// With no gateway block a named network is an empty namespace, so there
+// is no address and no policy to name it in.
+func TestAConsoleWithNoGatewayConfiguredIsNotWarnedAbout(t *testing.T) {
+	// No t.Parallel: captureWarnings swaps the default logger, which
+	// every other test in this package shares.
+	var buf bytes.Buffer
+	restore := captureWarnings(t, &buf)
+	defer restore()
+
+	WarnConsoleTakesItsOwnAddress("term-personal",
+		Workload{AttachVM: "firecracker", HostAccess: HostAccess{Network: "qubesome"}}, false)
+
+	assert.Empty(t, buf.String())
+}
+
+// captureWarnings points the default logger at buf for the length of one
+// test, and hands back what puts it right again.
+func captureWarnings(t *testing.T, buf *bytes.Buffer) func() {
+	t.Helper()
+
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	return func() { slog.SetDefault(previous) }
 }

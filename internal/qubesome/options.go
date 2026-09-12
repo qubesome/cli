@@ -14,6 +14,10 @@ type Options struct {
 	Runner    string
 	ExtraArgs []string
 	Headless  bool
+
+	// Limited strips the workload down to a window and nothing else. See
+	// types.Limited for what that means and why it is offered.
+	Limited bool
 }
 
 func WithExtraArgs(args []string) command.Option[Options] {
@@ -48,6 +52,12 @@ func WithConfig(cfg *types.Config) command.Option[Options] {
 func WithHeadless() command.Option[Options] {
 	return func(o *Options) {
 		o.Headless = true
+	}
+}
+
+func WithLimited() command.Option[Options] {
+	return func(o *Options) {
+		o.Limited = true
 	}
 }
 

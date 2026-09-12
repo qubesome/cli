@@ -18,16 +18,59 @@ import (
 type State struct {
 	PID       int    `json:"pid"`
 	StartTime uint64 `json:"startTime"`
+
+	// Session is the user namespace the session holder was keeping open
+	// when this was recorded, as the inode the kernel names it by. It is
+	// zero for a sandbox that was recorded without one.
+	//
+	// It is here because a pid that is still alive does not make a
+	// sandbox usable. A gateway outlives the launch that started it, and
+	// when the holder goes and a later launch starts a fresh one the
+	// surviving gateway's namespaces are owned by what is now a dead
+	// sibling of the session. Nothing can be wired to it any more, and
+	// nothing about the pid says so.
+	Session uint64 `json:"session,omitempty"`
+
+	// Address is the workload's address on the session gateway, and is
+	// empty for a workload that has none.
+	//
+	// It is recorded because it is the other thing every later question
+	// needs and nothing else writes it down. The gateway is told which
+	// workload holds which address and qubesome tells it, but neither end
+	// keeps a note a third process could read, so a diagnostic asking what
+	// a running sandbox is on the gateway has only this record to go on.
+	Address string `json:"address,omitempty"`
 }
 
 // WriteState records a running sandbox at path.
 func WriteState(path string, pid int) error {
+	return WriteStateAddr(path, pid, "")
+}
+
+// WriteStateAddr records a running sandbox and the gateway address it was
+// given, which is empty for a sandbox that was given none.
+func WriteStateAddr(path string, pid int, addr string) error {
 	st, err := startTime(pid)
 	if err != nil {
 		return err
 	}
 
-	return writeState(path, State{PID: pid, StartTime: st})
+	return writeState(path, State{PID: pid, StartTime: st, Address: addr})
+}
+
+// WriteStateSession records a running sandbox and the session user
+// namespace it was started under.
+//
+// It is the gateway's writer. A workload sandbox is wired during its own
+// launch, while the session that is wiring it is the one holding it, so
+// there is nothing for it to disagree with later.
+func WriteStateSession(path string, pid int, session uint64) error {
+	st, err := startTime(pid)
+	if err != nil {
+		return err
+	}
+
+	return writeState(path, State{PID: pid, StartTime: st, Session: session})
 }
 
 func writeState(path string, s State) error {

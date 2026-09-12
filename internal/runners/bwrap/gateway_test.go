@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/runners/util/launch"
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -123,7 +124,7 @@ func (f *fakeAttach) Register(string) error {
 //
 // The pid is set rather than read, since there is no bwrap here to report
 // one. What the launch does with it is Wire's business and this fake's.
-func gatedLaunch(t *testing.T, ew types.EffectiveWorkload, argv []string) *launcher {
+func gatedLaunch(t *testing.T, ew types.EffectiveWorkload, argv []string) *launch.Launcher {
 	t.Helper()
 
 	dir, err := files.WorkloadAgentDir(ew.Profile.Name, ew.Workload.Name)
@@ -135,7 +136,7 @@ func gatedLaunch(t *testing.T, ew types.EffectiveWorkload, argv []string) *launc
 
 	go func() { _ = sandbox.Supervise(socket, argv, true) }()
 
-	return &launcher{pid: os.Getpid()}
+	return launch.ForTest(os.Getpid())
 }
 
 // The whole ordering. The sandbox exists, the veth is built and addressed,

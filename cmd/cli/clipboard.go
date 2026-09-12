@@ -164,7 +164,6 @@ qubesome clip to-host -profile <name>        - Copy clipboard contents from a sp
 					}
 
 					if typ := c.String("type"); typ != "" {
-						fmt.Println(typ)
 						opts = append(opts, clipboard.WithContentType(typ))
 					}
 

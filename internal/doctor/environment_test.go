@@ -9,6 +9,8 @@ import (
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/gateway"
+	"github.com/qubesome/cli/internal/sandbox"
+	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,6 +34,13 @@ type fakeEnv struct {
 	gatewayReady error
 	log          gateway.LogSummary
 	logErr       error
+
+	// records is what SandboxRecord answers, and wiring what
+	// MicroVMWiring does. The zero VMWiring is a namespace with nothing
+	// in it, which is what a test that does not care gets.
+	records   map[string]sandbox.State
+	wiring    gateway.VMWiring
+	wiringErr error
 }
 
 type fakeOutput struct {
@@ -545,4 +554,16 @@ func TestEnvironment(t *testing.T) {
 		require.NotEmpty(t, c.Name)
 		require.NotEmpty(t, c.Detail)
 	}
+}
+
+func (f *fakeEnv) SandboxRecord(path string) (sandbox.State, error) {
+	if s, ok := f.records[path]; ok {
+		return s, nil
+	}
+
+	return sandbox.State{}, os.ErrNotExist
+}
+
+func (f *fakeEnv) MicroVMWiring(types.GatewayConfig, int) (gateway.VMWiring, error) {
+	return f.wiring, f.wiringErr
 }

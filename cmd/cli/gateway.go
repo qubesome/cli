@@ -34,9 +34,16 @@ var (
 
 func gatewayCommand() *cli.Command {
 	cmd := &cli.Command{
-		Name:   "gateway",
-		Hidden: true,
-		Usage:  "inspects and stops the session gateway",
+		Name: "gateway",
+		// Not hidden. It was, on the reasoning that a launch starts and
+		// reuses the gateway on its own so there is nothing here for a
+		// user to do. That reasoning covers stop and it does not cover
+		// status and logs, which are the only two things that answer
+		// "every launch is failing and the message names no file I own".
+		// A session whose gateway was left behind by a holder that has
+		// gone presents exactly that way, and the command that says so
+		// was one nothing listed.
+		Usage: "inspects and stops the session gateway",
 		Description: `qubesome starts, reuses and reloads the session gateway on its own,
 so this is for the cases where that is not enough:
 
