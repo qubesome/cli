@@ -229,18 +229,32 @@ printf '   CAP_NET_ADMIN, on purpose: a process that escaped the machine\n'
 printf '   could otherwise dissolve the bridge and unload the guard that\n'
 printf '   pins the guest address. So the tap has to be made from outside\n'
 printf '   and handed over by uid, which is what this asks.\n'
+printf '\n'
+printf '   The outer namespace maps the invoking uid and not zero, because\n'
+printf '   that is what bwrap --unshare-user maps and the session holder is\n'
+printf '   nothing else. TUNSETOWNER resolves its argument there, so a\n'
+printf '   check that mapped zero would measure a uid map no part of\n'
+printf '   qubesome ever creates and would pass on an owner the kernel\n'
+printf '   refuses in production with EINVAL. It did.\n'
 if ! command -v ip >/dev/null 2>&1; then
     printf '   SKIP  ip is not installed\n\n'
 elif [ ! -e /dev/net/tun ]; then
     printf '   SKIP  /dev/net/tun is not present\n\n'
 else
-    unshare --user --map-root-user --net sh -c '
+    unshare --user --map-user="$(id -u)" --map-group="$(id -g)" --net sh -c '
+        # Written in this namespace, which stands for the session holder.
+        # The child below maps its own 0 back to these, the way the VMM
+        # sandbox does, so this is how the holder spells the uid
+        # firecracker will hold.
+        owner=$(id -u)
+        group=$(id -g)
+
         unshare --user --map-root-user --net sleep 5 &
         child=$!
         sleep 1
 
         if nsenter --net=/proc/"$child"/ns/net \
-               ip tuntap add qtap0 mode tap user 0 group 0 2>&1; then
+               ip tuntap add qtap0 mode tap user "$owner" group "$group" 2>&1; then
             echo "   created qtap0 in the descendant namespace"
             rc=0
         else
@@ -291,9 +305,14 @@ except OSError as e:
 
 print("   attached to qtap0 with an empty capability set")
 PROBE_EOF
-    unshare --user --map-root-user --net sh -c '
+    unshare --user --map-user="$(id -u)" --map-group="$(id -g)" --net sh -c '
         probe=$1
         ready=$(mktemp -d)
+
+        # See check 9: the owner is written in this namespace, which maps
+        # the invoking uid and not zero.
+        owner=$(id -u)
+        group=$(id -g)
 
         # The child holds the namespace the tap goes in. It waits for the
         # tap to exist before trying to open it, because firecracker is
@@ -314,7 +333,7 @@ PROBE_EOF
         sleep 1
 
         nsenter --net=/proc/"$child"/ns/net \
-            ip tuntap add qtap0 mode tap user 0 group 0 2>&1 || {
+            ip tuntap add qtap0 mode tap user "$owner" group "$group" 2>&1 || {
             kill "$child" 2>/dev/null
             rm -rf "$ready"
             exit 1

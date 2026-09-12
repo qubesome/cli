@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"net/netip"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -73,11 +75,14 @@ func TestVMWorkloadScriptBridgesRatherThanAddresses(t *testing.T) {
 func TestVMTapScriptCreatesAndEnslavesTheTap(t *testing.T) {
 	t.Parallel()
 
+	uid := strconv.Itoa(os.Getuid())
+	gid := strconv.Itoa(os.Getgid())
+
 	assert.Equal(t, []string{
-		"tuntap add tap0 mode tap user 0 group 0",
+		"tuntap add tap0 mode tap user " + uid + " group " + gid,
 		"link set tap0 master br0",
 		"link set tap0 up",
-	}, vmTapScript())
+	}, vmTapScript(uid, gid))
 }
 
 // Nothing in the middle holds an address, a route or a forwarding flag.
@@ -86,7 +91,7 @@ func TestVMTapScriptCreatesAndEnslavesTheTap(t *testing.T) {
 func TestVMScriptsAddressNothing(t *testing.T) {
 	t.Parallel()
 
-	for _, line := range append(vmWorkloadScript(), vmTapScript()...) {
+	for _, line := range append(vmWorkloadScript(), vmTapScript(tapOwner())...) {
 		assert.NotContains(t, line, "addr add", "the middle must hold no address")
 		assert.NotContains(t, line, "route add", "the middle must hold no route")
 	}
@@ -203,4 +208,52 @@ func TestSpoofedCountRefusesARulesetWithoutTheCounter(t *testing.T) {
 
 	_, err := parseSpoofed([]byte(`{"nftables":[{"metainfo":{"version":"1.0.9"}}]}`))
 	require.Error(t, err)
+}
+
+// The tap is the only step of a wire that opens a device rather than only
+// talking netlink. ip tuntap opens /dev/net/tun, and bwrap's --dev makes no
+// /dev/net at all, so without the node ip fails on the first line of the
+// batch with "open: No such file or directory" and the machine never gets
+// an interface.
+func TestTheTapHelperIsGivenTheTunDevice(t *testing.T) {
+	t.Parallel()
+
+	w := wiring{rootfs: "/images/gateway/rootfs", workloadPID: 4242}
+
+	assert.Equal(t, []string{tunDevice}, w.tapHelper().Devices)
+}
+
+// The steps either side of it only talk netlink, so they are given no
+// device node at all.
+func TestConfiguringAnEndIsGivenNoDevice(t *testing.T) {
+	t.Parallel()
+
+	w := wiring{rootfs: "/images/gateway/rootfs", workloadPID: 4242}
+
+	assert.Empty(t, w.configureHelper(w.workloadPID, vmWorkloadScript()).Devices)
+}
+
+// TUNSETOWNER resolves its argument through the user namespace of the
+// process making the call, which here is the helper. A helper joins the
+// session holder's namespace, and that one maps the user's own uid and
+// nothing else, so a zero there is not a uid at all and the kernel
+// answers EINVAL. The uid the guest's VMM holds is spelled as the user's
+// own in that namespace, which is what has to be written.
+func TestTheTapIsHandedToTheUIDTheSessionNamespaceMaps(t *testing.T) {
+	t.Parallel()
+
+	uid := strconv.Itoa(os.Getuid())
+	gid := strconv.Itoa(os.Getgid())
+
+	assert.Equal(t,
+		"tuntap add "+vmTap+" mode tap user "+uid+" group "+gid,
+		vmTapScript(tapOwner())[0])
+}
+
+// A zero would be the uid firecracker holds inside its own sandbox, which
+// is the namespace below the one the tap is created from.
+func TestTheTapIsNotHandedToZero(t *testing.T) {
+	t.Parallel()
+
+	assert.NotContains(t, vmTapScript(tapOwner())[0], "user 0 ")
 }

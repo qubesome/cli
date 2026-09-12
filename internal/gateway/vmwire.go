@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/qubesome/cli/internal/images"
@@ -59,17 +61,47 @@ const (
 	// success. It is why the tap is made before the VMM starts and why
 	// doctor checks that it is a bridge port.
 	vmTap = "tap0"
-
-	// vmTapOwner is the uid the tap is handed to, inside the fc sandbox's
-	// own user namespace. The sandbox runs as 0 there, which is not host
-	// root.
-	//
-	// Handing it over by uid is what lets firecracker attach holding no
-	// capability at all, and that is what keeps a process that escaped the
-	// machine from dissolving the bridge or unloading the guard. Measured
-	// as checks 9 and 10 of hack/verify-sandbox-reentry.sh.
-	vmTapOwner = "0"
 )
+
+// tapOwner is who the tap is handed to, written the way the namespace
+// creating it spells them.
+//
+// Handing the tap over by uid is what lets firecracker attach to it
+// holding no capability at all, and that is what keeps a process that
+// escaped the machine from dissolving the bridge or unloading the guard.
+//
+// Which namespace the numbers are written in is the whole subtlety, and
+// getting it wrong is not a permission failure but an EINVAL. TUNSETOWNER
+// resolves its argument through the user namespace of the process making
+// the call. That process is a helper, which joins the session holder's
+// user namespace and then enters only the microVM sandbox's network
+// namespace, so the numbers have to mean something in the holder's.
+//
+// The holder is bwrap --unshare-user with no --uid, which maps the user's
+// own uid to itself and nothing else:
+//
+//	$ bwrap --unshare-user --dev-bind / / -- cat /proc/self/uid_map
+//	      1000       1000          1
+//
+// So a zero there is not a uid at all, and the kernel refuses it. The VMM
+// sandbox nested below maps its own 0 back to that same uid, which makes
+// the user's own uid the holder's spelling of the uid firecracker will
+// hold, and therefore the one the tap has to be handed to. The kernel
+// compares the two as kuids when firecracker attaches, so they meet.
+//
+// Both halves are in drivers/net/tun.c. TUNSETOWNER is
+// make_kuid(current_user_ns(), arg), which is why the number is written
+// here in the helper's namespace, and tun_not_capable compares
+// cred->euid against tun->owner with uid_eq, which is why a kuid reached
+// by two different spellings still lets firecracker attach holding
+// nothing.
+//
+// hack/verify-sandbox-reentry.sh checks 9 and 10 measure this, and used
+// to measure it with unshare --map-root-user, which maps a zero no part
+// of qubesome ever maps. That is why a zero here passed a check.
+func tapOwner() (uid, gid string) {
+	return strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid())
+}
 
 // VMTapDevice is the tap firecracker is told to open. It is exported
 // because the machine description has to name the same string the wiring
@@ -102,9 +134,13 @@ func vmWorkloadScript() []string {
 // because the order matters across a process boundary. This has to have
 // run before firecracker starts, and the veth has to exist before the
 // bridge it is enslaved to carries anything.
-func vmTapScript() []string {
+//
+// uid and gid are who the tap is handed to. See tapOwner for which
+// namespace they are written in, which is the one thing about this line
+// that is easy to get wrong.
+func vmTapScript(uid, gid string) []string {
 	return []string{
-		"tuntap add " + vmTap + " mode tap user " + vmTapOwner + " group " + vmTapOwner,
+		"tuntap add " + vmTap + " mode tap user " + uid + " group " + gid,
 		"link set " + vmTap + " master " + vmBridge,
 		"link set " + vmTap + " up",
 	}
@@ -193,33 +229,60 @@ func (g Gateway) WireVM(cfg types.GatewayConfig, addr netip.Addr, sandboxPID int
 		return err
 	}
 
+	w.starting("microVM")
+
 	// OwnNet for the reason Wire gives: a netlink request is authorised
 	// against the namespace the caller stands in, not the ones the ends
 	// are bound for.
 	if err := (helper{Rootfs: w.rootfs, Caps: wireCaps, Args: linkArgs(w), OwnNet: true}).run(); err != nil {
-		return fmt.Errorf("failed to create the veth to microVM %s: %w", addr, err)
+		return w.failed("create the veth", w.workloadPID, err)
 	}
 
 	if err := w.configure(w.gatewayPID, gatewayScript(w)); err != nil {
-		return fmt.Errorf("failed to configure the gateway end of the veth to %s: %w", addr, err)
+		return w.failed("configure the gateway end of the veth", w.gatewayPID, err)
 	}
 
 	if err := w.configure(w.workloadPID, vmWorkloadScript()); err != nil {
-		return fmt.Errorf("failed to bridge the microVM end of the veth to %s: %w", addr, err)
+		return w.failed("bridge the microVM end of the veth", w.workloadPID, err)
 	}
 
-	if err := w.configure(w.workloadPID, vmTapScript()); err != nil {
-		return fmt.Errorf("failed to create the tap for microVM %s: %w", addr, err)
+	if err := w.tap(); err != nil {
+		return w.failed("create the tap", w.workloadPID, err)
 	}
 
 	if err := w.guard(addr); err != nil {
 		return err
 	}
 
-	slog.Debug("[gateway] wired a microVM to the gateway",
+	slog.Info("[gateway] wired a microVM to the gateway",
 		"address", addr, "link", w.gatewayLink, "tap", vmTap, "pid", sandboxPID)
 
 	return nil
+}
+
+// tap creates the guest's tap and makes it the bridge's second port.
+//
+// It has a helper of its own rather than being a third configure call
+// because it is the only step of a wire that opens a device. ip tuntap
+// opens /dev/net/tun, and bwrap's --dev makes no /dev/net at all, so the
+// helper is given the node the way pasta and the VMM's own sandbox are.
+// Without it ip fails on the first line of the batch with "open: No such
+// file or directory", which fails the launch before the guard is loaded
+// and leaves the machine with no interface to attach to.
+func (w wiring) tap() error {
+	return w.tapHelper().run()
+}
+
+// tapHelper is the helper tap runs. See configureHelper for why the
+// building and the running are apart.
+func (w wiring) tapHelper() helper {
+	return helper{
+		Rootfs:  w.rootfs,
+		Caps:    wireCaps,
+		Devices: []string{tunDevice},
+		Args:    nsenterArgs(w.workloadPID),
+		Stdin:   strings.NewReader(batch(vmTapScript(tapOwner()))),
+	}
 }
 
 // guard loads the ruleset into the microVM's network namespace.
