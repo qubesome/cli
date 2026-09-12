@@ -68,7 +68,10 @@ func ShowLogs(ctx context.Context, w io.Writer, opts LogOptions) error {
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("there is no gateway log at %s: this session has not started a gateway", path)
+			// Not "no gateway has been started". A gateway from an
+			// older qubesome runs without writing this file, so what
+			// can be said is that the log is not there to read.
+			return fmt.Errorf("there is no gateway log at %s to read", path)
 		}
 
 		return fmt.Errorf("failed to open the gateway log %q: %w", path, err)
@@ -77,7 +80,11 @@ func ShowLogs(ctx context.Context, w io.Writer, opts LogOptions) error {
 
 	selects := selector(opts.Profile, opts.Workload)
 
-	if err := writeTail(w, f, opts.Last, selects); err != nil {
+	// The tail is whatever the gateway was in the middle of writing. It
+	// is not printed here and not thrown away either: a follow joins it
+	// to the rest when the rest is written.
+	tail, err := writeTail(w, f, opts.Last, selects)
+	if err != nil {
 		return err
 	}
 
@@ -85,57 +92,122 @@ func ShowLogs(ctx context.Context, w io.Writer, opts LogOptions) error {
 		return nil
 	}
 
-	return follow(ctx, w, f, selects)
+	return follow(ctx, w, f, selects, tail)
 }
 
 // writeTail writes the lines of f that selects accepts: all of them, or
-// only the final few when last is set.
+// only the final few when last is set. It returns the unterminated line
+// the gateway was still writing, which it does not print.
 //
 // The file is left positioned at its end either way, which is where a
-// follow carries on from: the scanner stops having consumed everything up
-// to EOF.
-func writeTail(w io.Writer, f *os.File, last int, selects func(string) bool) error {
+// follow carries on from.
+func writeTail(w io.Writer, f *os.File, last int, selects func(string) bool) (string, error) {
+	reader := bufio.NewReader(f)
+
 	// A ring of the last lines wanted, so a log far larger than the
-	// answer is not held in memory to produce it. Zero means every line
-	// is written as it is read and nothing is held at all.
+	// answer is not held in memory to produce it. It grows as lines are
+	// read rather than being sized to last: that number is typed at a
+	// terminal, and reserving it before a line has been read turns a
+	// large enough -n into a way to bring qubesome down.
+	//
+	// next is where the oldest line sits once the ring is full, which is
+	// also where the next one overwrites it. Nothing is shifted along.
 	var ring []string
-	if last > 0 {
-		ring = make([]string, 0, last)
-	}
+	var next int
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), maxLineLen)
+	var tail string
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !selects(line) {
+	for {
+		line, terminated, ok, err := readLine(reader)
+		if err != nil {
+			return "", fmt.Errorf("failed to read the gateway log: %w", err)
+		}
+
+		if !terminated {
+			if ok {
+				tail = line
+			}
+
+			break
+		}
+
+		// A line too long to hold was discarded as it was read, so there
+		// is nothing to match a filter against or to print.
+		if !ok || !selects(line) {
 			continue
 		}
 
 		if last <= 0 {
 			if err := writeLine(w, line); err != nil {
-				return err
+				return "", err
 			}
 
 			continue
 		}
 
-		if len(ring) == last {
-			ring = append(ring[:0], ring[1:]...)
+		if len(ring) < last {
+			ring = append(ring, line)
+
+			continue
 		}
-		ring = append(ring, line)
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("failed to read the gateway log: %w", err)
+
+		ring[next] = line
+		next = (next + 1) % last
 	}
 
-	for _, line := range ring {
-		if err := writeLine(w, line); err != nil {
-			return err
+	for i := range ring {
+		// next is 0 until the ring has filled, so this is the order the
+		// lines were read in either way.
+		if err := writeLine(w, ring[(next+i)%len(ring)]); err != nil {
+			return "", err
 		}
 	}
 
-	return nil
+	return tail, nil
+}
+
+// readLine returns the next line of r, without its newline.
+//
+// terminated is false when the line has no newline yet, which means the
+// gateway is still writing it: what comes back is the part written so
+// far, and the rest arrives on a later read.
+//
+// ok is false when the line was longer than maxLineLen. Such a line is
+// discarded as it is read rather than returned, so a gateway writing
+// without newlines cannot make a reader of its log hold the whole of it.
+func readLine(r *bufio.Reader) (line string, terminated, ok bool, err error) {
+	var b strings.Builder
+
+	held := true
+
+	for {
+		// ReadSlice stops at the end of the buffer rather than growing
+		// one, so what is read in a turn is bounded whatever the writer
+		// is doing.
+		chunk, err := r.ReadSlice('\n')
+
+		if len(chunk) > 0 {
+			if held && b.Len()+len(chunk) > maxLineLen {
+				held = false
+
+				b.Reset()
+			}
+			if held {
+				b.Write(chunk)
+			}
+		}
+
+		switch {
+		case err == nil:
+			return strings.TrimSuffix(b.String(), "\n"), true, held, nil
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF):
+			return b.String(), false, held, nil
+		default:
+			return "", false, false, err
+		}
+	}
 }
 
 func writeLine(w io.Writer, line string) error {
@@ -153,12 +225,22 @@ func writeLine(w io.Writer, line string) error {
 // decision was about, so half of one cannot be matched against a filter,
 // and printing it unmatched would show another workload's log to someone
 // who asked not to see it.
-func follow(ctx context.Context, w io.Writer, f *os.File, selects func(string) bool) error {
+func follow(ctx context.Context, w io.Writer, f *os.File, selects func(string) bool, tail string) error {
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
 
 	reader := bufio.NewReader(f)
+
 	var pending strings.Builder
+	pending.WriteString(tail)
+
+	// What the log had been grown to by the time the initial read
+	// finished. A log shorter than this later is a different log: the
+	// next gateway truncated this same path and started again.
+	size, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return fmt.Errorf("failed to find the end of the gateway log: %w", err)
+	}
 
 	for {
 		select {
@@ -167,11 +249,51 @@ func follow(ctx context.Context, w io.Writer, f *os.File, selects func(string) b
 			// that is not an error to report.
 			return nil
 		case <-ticker.C:
+			restarted, err := rewound(f, size)
+			if err != nil {
+				return err
+			}
+			if restarted {
+				// Nothing of the old log is worth carrying over, least
+				// of all half a line of it.
+				reader.Reset(f)
+				pending.Reset()
+			}
+
 			if err := followOnce(w, reader, &pending, selects); err != nil {
 				return err
 			}
+
+			if size, err = f.Seek(0, io.SeekCurrent); err != nil {
+				return fmt.Errorf("failed to find the end of the gateway log: %w", err)
+			}
 		}
 	}
+}
+
+// rewound reports whether the log has been replaced by a shorter one, and
+// puts f back at the start when it has.
+//
+// A gateway truncates the log it inherits rather than writing to a new
+// path, so a follow that outlives one gateway is reading the next one's
+// log through a descriptor still positioned at the end of the last one.
+// Everything the new gateway said before it had said as much as the old
+// one did would be stepped over.
+func rewound(f *os.File, size int64) (bool, error) {
+	fi, err := f.Stat()
+	if err != nil {
+		return false, fmt.Errorf("failed to look at the gateway log: %w", err)
+	}
+
+	if fi.Size() >= size {
+		return false, nil
+	}
+
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false, fmt.Errorf("failed to go back to the start of the gateway log: %w", err)
+	}
+
+	return true, nil
 }
 
 // followOnce drains what the reader can give without blocking, writing
@@ -180,31 +302,30 @@ func follow(ctx context.Context, w io.Writer, f *os.File, selects func(string) b
 // halfway.
 func followOnce(w io.Writer, reader *bufio.Reader, pending *strings.Builder, selects func(string) bool) error {
 	for {
-		chunk, err := reader.ReadString('\n')
-
-		// A read that stopped short of a newline is a line the gateway
-		// has not finished writing. It is held until it has.
-		if errors.Is(err, io.EOF) {
-			if pending.Len()+len(chunk) > maxLineLen {
-				pending.Reset()
-
-				return nil
-			}
-			pending.WriteString(chunk)
-
-			return nil
-		}
+		line, terminated, ok, err := readLine(reader)
 		if err != nil {
 			return fmt.Errorf("failed to read the gateway log: %w", err)
 		}
 
-		line := strings.TrimSuffix(chunk, "\n")
+		// A read that stopped short of a newline is a line the gateway
+		// has not finished writing. It is held until it has.
+		if !terminated {
+			if !ok || pending.Len()+len(line) > maxLineLen {
+				pending.Reset()
+
+				return nil
+			}
+			pending.WriteString(line)
+
+			return nil
+		}
+
 		if pending.Len() > 0 {
 			line = pending.String() + line
 			pending.Reset()
 		}
 
-		if !selects(line) {
+		if !ok || !selects(line) {
 			continue
 		}
 		if err := writeLine(w, line); err != nil {
@@ -239,7 +360,12 @@ func appendLog(path string) (*os.File, error) {
 // every host it was allowed or refused, which is a record of what the user
 // was doing.
 func openLog(path string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, files.FileMode)
+	// O_APPEND as well as O_TRUNC. The uplink writes to this same file
+	// through a descriptor of its own, and a write that is not an append
+	// goes to wherever this descriptor's offset has reached, which is
+	// behind whatever the uplink has added since. Both writers append, so
+	// neither lands on the other.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|os.O_APPEND, files.FileMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open the gateway log %q: %w", path, err)
 	}

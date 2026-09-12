@@ -3,8 +3,10 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -334,4 +336,97 @@ func TestCloseLogSurvivesAFailure(t *testing.T) {
 
 	// The second close is the failure, since the descriptor is gone.
 	assert.NotPanics(t, func() { closeLog(f) })
+}
+
+// -n is a number a user types, and holding a slice of that size before a
+// line has been read makes the log unreadable by asking for it.
+func TestShowLogsDoesNotAllocateWhatWasAskedFor(t *testing.T) {
+	t.Parallel()
+
+	path := writeLog(t, "one", "two", "three")
+
+	var buf bytes.Buffer
+	err := ShowLogs(t.Context(), &buf, LogOptions{Path: path, Last: math.MaxInt})
+	require.NoError(t, err)
+
+	assert.Equal(t, "one\ntwo\nthree\n", buf.String())
+}
+
+// The last line of a log being written has no newline yet. Printing it and
+// then carrying on from the end splits one record into two, so it is held
+// back and joined to the rest when the rest arrives.
+func TestShowLogsHoldsALineStillBeingWritten(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "gateway.log")
+	require.NoError(t, os.WriteFile(path, []byte("whole\npart"), 0o600))
+
+	var buf bytes.Buffer
+	require.NoError(t, ShowLogs(t.Context(), &buf, LogOptions{Path: path}))
+
+	assert.Equal(t, "whole\n", buf.String())
+}
+
+// A follow that outlives one gateway reads the next one's log, which
+// starts again at nothing. Staying at the old offset skips everything the
+// new gateway said until it has said as much as the old one did.
+func TestShowLogsFollowsAcrossARestart(t *testing.T) {
+	t.Parallel()
+
+	path := writeLog(t, "old one", "old two", "old three")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	buf := &syncBuffer{}
+
+	done := make(chan error, 1)
+	go func() { done <- ShowLogs(ctx, buf, LogOptions{Path: path, Follow: true}) }()
+
+	require.Eventually(t, func() bool {
+		return strings.Contains(buf.String(), "old three")
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// What a new gateway does to the log it inherits.
+	f, err := openLog(path)
+	require.NoError(t, err)
+	_, err = f.WriteString("fresh\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	require.Eventually(t, func() bool {
+		return strings.Contains(buf.String(), "fresh")
+	}, 3*time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+// Both writers have to append. The sandbox's descriptor carries its own
+// offset, so without it the uplink's lines are overwritten by whatever the
+// sandbox says next.
+func TestOpenLogAppends(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "gateway.log")
+
+	sandboxLog, err := openLog(path)
+	require.NoError(t, err)
+	defer sandboxLog.Close()
+
+	_, err = sandboxLog.WriteString("from the sandbox\n")
+	require.NoError(t, err)
+
+	uplink, err := appendLog(path)
+	require.NoError(t, err)
+	_, err = uplink.WriteString("from the uplink\n")
+	require.NoError(t, err)
+	require.NoError(t, uplink.Close())
+
+	_, err = sandboxLog.WriteString("from the sandbox again\n")
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "from the sandbox\nfrom the uplink\nfrom the sandbox again\n", string(got))
 }
