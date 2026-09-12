@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/env"
@@ -280,4 +281,103 @@ func TestWriteInitConfigCarriesTheNetwork(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &got))
 	require.NotNil(t, got.Network)
 	assert.Equal(t, "10.111.0.2", got.Network.Address)
+}
+
+// The gateway drops every port but 80, 443 and 53, so ssh cannot connect
+// out of a guest at all. A sandbox is told where to ask in its
+// environment; a guest has no environment the host can reach into, so the
+// endpoint goes in the file the guest init reads and the init puts it
+// back into the environment of everything it starts.
+func TestInitConfigCarriesTheProxyEndpoint(t *testing.T) {
+	t.Parallel()
+
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"},
+		&NetworkConfig{Address: "10.111.0.2", Gateway: "10.111.0.1", Proxy: "10.111.0.1:3128"})
+
+	assert.Contains(t, cfg.Env, "QUBESOME_GATEWAY_PROXY=10.111.0.1:3128")
+}
+
+// A machine with no gateway has nothing to ask, and a variable naming an
+// endpoint that is not there would have ssh fail for a reason that has
+// nothing to do with the network.
+func TestInitConfigWithoutAGatewayCarriesNoProxyEndpoint(t *testing.T) {
+	t.Parallel()
+
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"}, nil)
+
+	for _, v := range cfg.Env {
+		assert.NotContains(t, v, "QUBESOME_GATEWAY_PROXY")
+	}
+}
+
+// The command is the guest init's own path. There is no
+// /usr/local/bin/qubesome inside a machine: the binary is composed in
+// once, as the init, and that is the one everything in there runs.
+func TestTheGuestSSHConfigRunsTheGuestInit(t *testing.T) {
+	t.Parallel()
+
+	got := guestSSHGatewayConfig()
+
+	assert.Contains(t, got, "ProxyCommand "+guestInit+" tunnel %h %p")
+	assert.NotContains(t, got, files.InProfileBinary,
+		"the sandbox's path for the binary does not exist in a guest")
+}
+
+func TestWriteSSHConfigWritesTheDropIn(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	path, err := writeSSHConfig(dir, &NetworkConfig{Proxy: "10.111.0.1:3128"})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, sshConfigFile), path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "ProxyCommand")
+}
+
+// A machine with no gateway has nothing to tunnel through, and the build
+// composes no drop-in at all.
+func TestWriteSSHConfigWritesNothingWithoutAGateway(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	path, err := writeSSHConfig(dir, nil)
+	require.NoError(t, err)
+	assert.Empty(t, path)
+	assert.NoFileExists(t, filepath.Join(dir, sshConfigFile))
+}
+
+// The drop-in has to land where a system ssh_config already includes
+// from, or the image would have to be changed to read it.
+func TestRootfsArgsComposeTheSSHDropIn(t *testing.T) {
+	t.Parallel()
+
+	args := rootfsArgs(rootfsBuild{
+		Rootfs:      "/images/sha256-abc/rootfs",
+		Target:      "/run/vm/rootfs.ext4",
+		SizeMiB:     4096,
+		QubesomeBin: "/usr/local/bin/qubesome",
+		InitConfig:  "/run/vm/init.json",
+		SSHConfig:   "/run/vm/ssh_gateway.conf",
+	})
+
+	assert.Contains(t, args, composedRoot+guestSSHConfig)
+	assert.Contains(t, args, "/run/vm/ssh_gateway.conf")
+}
+
+func TestRootfsArgsComposeNoSSHDropInWithoutOne(t *testing.T) {
+	t.Parallel()
+
+	args := rootfsArgs(rootfsBuild{
+		Rootfs:      "/images/sha256-abc/rootfs",
+		Target:      "/run/vm/rootfs.ext4",
+		SizeMiB:     4096,
+		QubesomeBin: "/usr/local/bin/qubesome",
+		InitConfig:  "/run/vm/init.json",
+	})
+
+	assert.NotContains(t, args, composedRoot+guestSSHConfig)
 }

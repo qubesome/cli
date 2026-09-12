@@ -320,7 +320,7 @@ func vmAttach(pid int, att vmAttacher, name string, release func() error) error 
 		return fmt.Errorf("failed to release the microVM %q into its sandbox: %w", name, err)
 	}
 
-	slog.Debug("gave a microVM its gateway address", "workload", name, "pid", pid)
+	slog.Info("started a microVM on the session gateway", "workload", name, "pid", pid)
 
 	return nil
 }
@@ -493,7 +493,16 @@ func guestNetwork(att *gateway.Attach) (*NetworkConfig, error) {
 		return nil, err
 	}
 
-	return &NetworkConfig{Address: att.Addr.String(), Gateway: gw.String()}, nil
+	// The endpoint a client asks to carry what the gateway will not
+	// route. Resolved here rather than inside the guest because it is the
+	// gateway's own address and port, and neither is knowable from in
+	// there.
+	proxy, err := att.ProxyAddr()
+	if err != nil {
+		return nil, err
+	}
+
+	return &NetworkConfig{Address: att.Addr.String(), Gateway: gw.String(), Proxy: proxy}, nil
 }
 
 // vmSandboxFor gathers what the VMM's sandbox needs from the host.
