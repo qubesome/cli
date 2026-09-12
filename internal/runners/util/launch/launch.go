@@ -114,8 +114,6 @@ func New(spec sandbox.Spec, gated bool) (*Launcher, error) {
 		return nil, err
 	}
 
-	slog.Debug("exec", "binary", files.BwrapBinary, "args", container.RedactEnvArgs(args))
-
 	// A mime enabled workload carries the profile's mTLS private key in
 	// its environment, and a command line is world readable through
 	// /proc. Only the descriptor holding the options, and the command,
@@ -136,6 +134,20 @@ func New(spec sandbox.Spec, gated bool) (*Launcher, error) {
 			return nil, err
 		}
 	}
+
+	// After the nesting and not before it, because a gated launch is two
+	// bwraps and the inner one is not what is executed here. Logged
+	// before, this line showed a command with no --userns, no outer bwrap
+	// and no info descriptor: the arguments of a sandbox that was never
+	// started. It sent a reading of these logs after the arguments of the
+	// wrong process for as long as it took to notice.
+	//
+	// The sandbox's own arguments are still worth having, so both are
+	// here, named for which is which.
+	slog.Debug("exec", "binary", files.BwrapBinary,
+		"args", container.RedactEnvArgs(outer),
+		"sandbox", container.RedactEnvArgs(args),
+		"gated", gated)
 
 	l.cmd = execabs.Command(files.BwrapBinary, outer...) //nolint:gosec // the arguments are built from the workload config.
 	l.cmd.ExtraFiles = l.files
@@ -172,6 +184,14 @@ func (l *Launcher) nest(args []string) ([]string, error) {
 		return nil, err
 	}
 	l.files = append(l.files, ns.File())
+
+	// The namespace this sandbox is about to be nested in, named so that
+	// a launch that later cannot be wired can be told apart from one that
+	// was nested somewhere else. It is the one fact that distinguishes
+	// the two and it is not otherwise recoverable from the logs.
+	if id, err := ns.ID(); err == nil {
+		slog.Debug("[session] nesting the sandbox in the session user namespace", "session", id)
+	}
 
 	info, report, err := os.Pipe()
 	if err != nil {

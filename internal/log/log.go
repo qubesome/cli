@@ -31,11 +31,20 @@ var (
 	lookupEnv = os.LookupEnv
 )
 
-func Configure(level string, toStdout, toFile, toSyslog bool) error {
+// Configure points the default logger at the writers asked for.
+//
+// toStderr and not stdout, which is what this used to write to. A
+// qubesome command's stdout is read by something other than a person:
+// tunnel puts an ssh connection through it, completion is eval'd by a
+// shell, and clipboard writes back what was pasted. A log line there is
+// read as the far end talking, as shell input, or as part of the paste.
+// It is the reason the Wayland warning moved, and it applies to every
+// line of a log at least as much.
+func Configure(level string, toStderr, toFile, toSyslog bool) error {
 	writers := []io.Writer{}
 
-	if toStdout {
-		writers = append(writers, os.Stdout)
+	if toStderr {
+		writers = append(writers, os.Stderr)
 	}
 
 	if toFile {

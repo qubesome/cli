@@ -207,7 +207,7 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload) error 
 		return fmt.Errorf("failed to release workload %q into its sandbox: %w", ew.Name, err)
 	}
 
-	slog.Debug("gave a workload its gateway address", "workload", ew.Name, "pid", pid)
+	slog.Info("started a workload on the session gateway", "workload", ew.Name, "pid", pid)
 
 	return nil
 }
