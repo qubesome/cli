@@ -69,6 +69,37 @@ type InitConfig struct {
 	// empty when the workload configured none. It is also how the guest
 	// knows there is a second drive to mount at all.
 	DataMount string `json:"dataMount,omitempty"`
+
+	// Network is the machine's place on the session gateway, and is nil
+	// for a machine that has none.
+	//
+	// It goes here rather than on the kernel command line for the reason
+	// this whole file exists: the command line is bounded and is world
+	// readable inside the guest through /proc/cmdline, and the tree is
+	// being composed anyway.
+	Network *NetworkConfig `json:"network,omitempty"`
+}
+
+// NetworkConfig is the machine's network, as the guest is told it.
+//
+// It is a pointer on InitConfig and nil for a machine with no gateway,
+// which is how the guest knows there is nothing to configure rather than
+// having to infer it from empty strings.
+type NetworkConfig struct {
+	// Address is the workload's address on the gateway's subnet. The guest
+	// takes it as a /32, for the reason gateway.workloadScript gives: the
+	// subnet is not a shared link, and each workload has a point to point
+	// wire to the gateway and no path at all to a sibling.
+	//
+	// The guest is free to renumber the interface, since it is root on a
+	// kernel of its own. What stops that mattering is the guard on the
+	// tap rather than anything here.
+	Address string `json:"address"`
+
+	// Gateway is both the default route and the resolver, which are one
+	// address. The gateway's own ruleset redirects 53 to its resolver,
+	// because resolv.conf has no way to name a port.
+	Gateway string `json:"gateway"`
 }
 
 // roPath is one host path composed into the guest tree. Both sides are
@@ -206,10 +237,15 @@ func rootfsArgs(b rootfsBuild) []string {
 // composition is a bwrap overlay and mkfs.ext4 -d walks it, inside a user
 // namespace where the invoking uid is 0 so the inodes come out root owned.
 //
+// net is the machine's place on the session gateway, and is nil for a
+// machine with no gateway, which then configures no interface at all. It
+// is composed in with everything else rather than handed over later,
+// because a guest has to be on the network before it runs anything.
+//
 // It is rebuilt on every boot and discarded on shutdown, which is what
 // makes the read-only paths free. On the target host that cost 2.5 s over
 // a 926M bundle, recorded in the header of hack/verify-microvm-rootfs.sh.
-func BuildRootfs(bundle images.Bundle, ew types.EffectiveWorkload, target string) error {
+func BuildRootfs(bundle images.Bundle, ew types.EffectiveWorkload, target string, net *NetworkConfig) error {
 	m := ew.Workload.MicroVM.WithDefaults()
 
 	warnImageUser(ew.Workload.Image, bundle.UID)
@@ -223,7 +259,7 @@ func BuildRootfs(bundle images.Bundle, ew types.EffectiveWorkload, target string
 	}
 
 	cfg := filepath.Join(filepath.Dir(target), initConfigFile)
-	if err := writeInitConfig(cfg, bundle, ew); err != nil {
+	if err := writeInitConfig(cfg, bundle, ew, net); err != nil {
 		return err
 	}
 
@@ -298,8 +334,8 @@ func createSparse(target string, size int64) error {
 // It is written on the host and bound into the composed tree, so it is
 // part of the image the guest boots rather than something handed over at
 // runtime.
-func writeInitConfig(path string, bundle images.Bundle, ew types.EffectiveWorkload) error {
-	data, err := json.Marshal(initConfig(bundle, ew))
+func writeInitConfig(path string, bundle images.Bundle, ew types.EffectiveWorkload, net *NetworkConfig) error {
+	data, err := json.Marshal(initConfig(bundle, ew, net))
 	if err != nil {
 		return fmt.Errorf("failed to encode the guest init configuration: %w", err)
 	}
@@ -317,7 +353,7 @@ func writeInitConfig(path string, bundle images.Bundle, ew types.EffectiveWorklo
 // runner, so the argv is the workload's command. A firecracker workload is
 // allowed to leave it empty, because a machine's reason to exist is the
 // consoles that attach to it and those bring their own argv.
-func initConfig(bundle images.Bundle, ew types.EffectiveWorkload) InitConfig {
+func initConfig(bundle images.Bundle, ew types.EffectiveWorkload, net *NetworkConfig) InitConfig {
 	wl := ew.Workload
 
 	var argv []string
@@ -342,6 +378,7 @@ func initConfig(bundle images.Bundle, ew types.EffectiveWorkload) InitConfig {
 		Cwd:       bundle.Cwd,
 		Hostname:  ew.Name,
 		DataMount: dataMount,
+		Network:   net,
 	}
 }
 

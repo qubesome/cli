@@ -139,7 +139,7 @@ func TestInitConfig(t *testing.T) {
 			Command: "/bin/bash",
 			Args:    []string{"-l"},
 		},
-	})
+	}, nil)
 
 	assert.Equal(t, []string{"/bin/bash", "-l"}, cfg.Argv)
 	assert.Equal(t, []string{"PATH=/usr/bin", "LANG=C.UTF-8", "QUBESOME_PROFILE=personal"}, cfg.Env)
@@ -152,7 +152,7 @@ func TestInitConfig(t *testing.T) {
 func TestInitConfigWithoutACommand(t *testing.T) {
 	t.Parallel()
 
-	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"})
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"}, nil)
 
 	assert.Empty(t, cfg.Argv)
 	assert.Empty(t, cfg.Env)
@@ -166,7 +166,7 @@ func TestWriteInitConfig(t *testing.T) {
 	require.NoError(t, writeInitConfig(path, images.Bundle{Cwd: "/root"}, types.EffectiveWorkload{
 		Name:     "dev-personal",
 		Workload: types.Workload{Command: "/bin/sh"},
-	}))
+	}, nil))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -237,4 +237,47 @@ func TestWarnImageUser(t *testing.T) {
 	assert.Contains(t, out, "docker.io/library/nginx:latest")
 	assert.Contains(t, out, "uid=101")
 	assert.Contains(t, out, "root")
+}
+
+func TestInitConfigCarriesTheNetwork(t *testing.T) {
+	t.Parallel()
+
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"},
+		&NetworkConfig{Address: "10.111.0.2", Gateway: "10.111.0.1"})
+
+	require.NotNil(t, cfg.Network)
+	assert.Equal(t, "10.111.0.2", cfg.Network.Address)
+	assert.Equal(t, "10.111.0.1", cfg.Network.Gateway)
+}
+
+// A machine with no gateway carries no network block at all, so the guest
+// knows there is nothing to configure rather than having to read it out of
+// empty strings.
+func TestInitConfigWithoutAGatewayCarriesNoNetwork(t *testing.T) {
+	t.Parallel()
+
+	cfg := initConfig(images.Bundle{}, types.EffectiveWorkload{Name: "dev-personal"}, nil)
+
+	assert.Nil(t, cfg.Network)
+}
+
+// The written file is what the guest reads, so the block has to survive
+// the round trip and not only the struct.
+func TestWriteInitConfigCarriesTheNetwork(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), initConfigFile)
+
+	require.NoError(t, writeInitConfig(path, images.Bundle{}, types.EffectiveWorkload{
+		Name:     "dev-personal",
+		Workload: types.Workload{Command: "/bin/sh"},
+	}, &NetworkConfig{Address: "10.111.0.2", Gateway: "10.111.0.1"}))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var got InitConfig
+	require.NoError(t, json.Unmarshal(data, &got))
+	require.NotNil(t, got.Network)
+	assert.Equal(t, "10.111.0.2", got.Network.Address)
 }
