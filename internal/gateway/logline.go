@@ -1,6 +1,9 @@
 package gateway
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // The gateway writes its log with slog's text handler, so a line is a
 // sequence of key=value pairs and a value holding a space is quoted. This
@@ -49,24 +52,34 @@ func logField(line, key string) string {
 func logValue(rest string) string {
 	if strings.HasPrefix(rest, `"`) {
 		// A quoted value ends at the next quote that is not escaped.
-		// slog quotes a value holding a space, and escapes a quote
-		// within it.
-		var b strings.Builder
+		// slog quotes a value holding a space, and escapes what it
+		// cannot write plainly within it.
 		for i := 1; i < len(rest); i++ {
 			switch rest[i] {
 			case '\\':
-				if i+1 < len(rest) {
-					i++
-					b.WriteByte(rest[i])
-				}
+				// Whatever follows a backslash is part of the escape and
+				// cannot end the value, whether it is a quote or another
+				// backslash.
+				i++
 			case '"':
-				return b.String()
-			default:
-				b.WriteByte(rest[i])
+				token := rest[:i+1]
+
+				// Undone rather than copied through. The escapes are
+				// Go's own, so a value holding a newline is written as
+				// one holding a backslash and an n, and passing that on
+				// would report a different message than was logged.
+				if v, err := strconv.Unquote(token); err == nil {
+					return v
+				}
+
+				// A token slog did not write, or one this cut short.
+				// What is between the quotes is the best left to say.
+				return token[1:i]
 			}
 		}
 
-		return b.String()
+		// No closing quote, so there is no value here to read.
+		return ""
 	}
 
 	if i := strings.IndexByte(rest, ' '); i >= 0 {

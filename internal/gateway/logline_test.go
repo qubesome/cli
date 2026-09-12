@@ -43,6 +43,48 @@ func TestLogField(t *testing.T) {
 // may hold a dash themselves, so the pair cannot be split back apart with
 // any certainty. Naming both is therefore the exact question, and naming
 // one alone is a prefix or a suffix of it.
+// slog escapes a value it quotes, so what is between the quotes is not
+// the value: a message holding a newline reads as one holding an n until
+// the escapes are undone.
+func TestLogFieldUndoesEscapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{
+			name: "a newline",
+			line: `time=1 level=ERROR msg="dial failed\nretry" host=example.com`,
+			want: "dial failed\nretry",
+		},
+		{
+			name: "a tab",
+			line: `time=1 level=ERROR msg="one\ttwo"`,
+			want: "one\ttwo",
+		},
+		{
+			name: "an escaped quote",
+			line: `time=1 level=ERROR msg="he said \"no\"" host=example.com`,
+			want: `he said "no"`,
+		},
+		{
+			name: "a backslash",
+			line: `time=1 level=ERROR msg="one\\two"`,
+			want: `one\two`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, logField(tc.line, "msg"))
+		})
+	}
+}
+
 func TestSelects(t *testing.T) {
 	t.Parallel()
 
