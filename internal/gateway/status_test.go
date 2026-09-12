@@ -339,3 +339,34 @@ func TestWorkloadOfRecordReadsTheName(t *testing.T) {
 
 	assert.Equal(t, "dev-personal", workloadOfRecord("/run/x/personal/sandbox-dev-personal.json"))
 }
+
+// A gateway of a session that has gone is alive, has a pid, and answers
+// nothing about why every launch is failing. Saying so is the whole point
+// of the line.
+func TestStatusSaysWhenTheGatewayIsStranded(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+
+	require.NoError(t, sandbox.WriteState(g.Session.StatePath, os.Getpid()))
+	require.NoError(t, sandbox.WriteStateSession(g.StatePath, os.Getpid(), 1))
+
+	st := g.Inspect(g.Session, nil, nil)
+
+	assert.True(t, st.Running)
+	assert.NotEmpty(t, st.Stranded)
+	var b bytes.Buffer
+	require.NoError(t, st.Write(&b))
+	assert.Contains(t, b.String(), "a session that has gone")
+}
+
+// The ordinary case says nothing, so the line only ever appears when
+// there is something wrong.
+func TestStatusIsQuietWhenTheGatewayIsThisSessions(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+	runningGateway(t, g)
+
+	assert.Empty(t, g.Inspect(g.Session, nil, nil).Stranded)
+}

@@ -65,6 +65,15 @@ type Status struct {
 	// empty both when it did and when there was no gateway to ask.
 	ReadyErr string
 
+	// Stranded says why a gateway that is running cannot serve this
+	// session, and is empty when it can or when none is running.
+	//
+	// It is the one thing a status could not say before, and it is the
+	// state that presents as every launch in the session failing at the
+	// veth with Operation not permitted while this same report showed a
+	// holder running and a gateway running. See Gateway.stranded.
+	Stranded string
+
 	// GatewayAddr is the address the gateway holds on every veth. Allocated
 	// is how many workload addresses have been handed out since it started,
 	// and LastAddr is the highest of them.
@@ -137,6 +146,13 @@ func (g Gateway) Inspect(s session.Session, cfg *types.Config, ready func() erro
 	if st.Running {
 		if rec, err := sandbox.ReadState(g.StatePath); err == nil {
 			st.PID = rec.PID
+		}
+
+		// Asked of the session being reported on rather than of this
+		// gateway's own, so that a status driven against a session
+		// outside the user's run directory answers for that one.
+		if why := (Gateway{StatePath: g.StatePath, Session: s}).stranded(); why != nil {
+			st.Stranded = why.Error()
 		}
 	}
 
@@ -366,6 +382,12 @@ func (s Status) lines() []statusLine {
 		statusLine{"holder", alive(s.HolderRunning, s.HolderPID, s.HolderPath)},
 		statusLine{"gateway", alive(s.Running, s.PID, s.StatePath)},
 	)
+
+	if s.Stranded != "" {
+		out = append(out, statusLine{"stranded",
+			"this gateway belongs to a session that has gone, so nothing can be wired to it: " +
+				s.Stranded + "; the next launch replaces it"})
+	}
 
 	if s.Running {
 		out = append(out, statusLine{"readiness", s.readiness()})
