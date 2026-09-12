@@ -824,6 +824,35 @@ func (h helper) run() error {
 	return nil
 }
 
+// output runs the helper to completion and returns what it wrote, for the
+// callers that want the answer rather than only whether it worked.
+//
+// Standard error is kept apart from standard output here, unlike run,
+// because the answer is parsed. A warning the tool wrote would otherwise
+// land in the middle of the JSON a caller is about to decode.
+func (h helper) output() ([]byte, error) {
+	cmd, ns, err := h.command()
+	if err != nil {
+		return nil, err
+	}
+	defer ns.Close()
+
+	var out, said bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &said
+
+	if err := cmd.Run(); err != nil {
+		reason := strings.TrimSpace(said.String())
+		if reason == "" {
+			return nil, fmt.Errorf("%s: %w", h.Args[0], err)
+		}
+
+		return nil, fmt.Errorf("%s: %w: %s", h.Args[0], err, reason)
+	}
+
+	return out.Bytes(), nil
+}
+
 // bwrapArgs renders the helper into bwrap arguments.
 //
 // usernsFD is the descriptor the session's user namespace has in the child,

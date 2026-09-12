@@ -129,3 +129,78 @@ func TestGuardRulesetRefusesAnAddressItCannotDerive(t *testing.T) {
 	_, err := guardRuleset(netip.MustParseAddr("fd00::2"))
 	require.Error(t, err)
 }
+
+// The one failure of this topology that looks like success: a tap
+// firecracker created for itself because ours was not there. It exists,
+// it is up, and it is a port of nothing.
+func TestVMWiringReadsAnUnenslavedTapAsBroken(t *testing.T) {
+	t.Parallel()
+
+	w, err := parseVMWiring([]byte(`[
+	  {"ifname":"eth0","operstate":"UP","master":"br0"},
+	  {"ifname":"br0","operstate":"UP"},
+	  {"ifname":"tap0","operstate":"UP"}
+	]`))
+	require.NoError(t, err)
+
+	assert.True(t, w.BridgeUp)
+	assert.True(t, w.VethEnslaved)
+	assert.False(t, w.TapEnslaved)
+	assert.False(t, w.OK())
+}
+
+func TestVMWiringReadsAHealthyBridge(t *testing.T) {
+	t.Parallel()
+
+	w, err := parseVMWiring([]byte(`[
+	  {"ifname":"eth0","operstate":"UP","master":"br0"},
+	  {"ifname":"br0","operstate":"UNKNOWN"},
+	  {"ifname":"tap0","operstate":"UP","master":"br0"}
+	]`))
+	require.NoError(t, err)
+	assert.True(t, w.OK(), "a bridge with no carrier reports UNKNOWN and is up")
+}
+
+// A tap enslaved to something that is not our bridge is not our tap.
+func TestVMWiringReadsAForeignMasterAsBroken(t *testing.T) {
+	t.Parallel()
+
+	w, err := parseVMWiring([]byte(`[
+	  {"ifname":"eth0","operstate":"UP","master":"br0"},
+	  {"ifname":"br0","operstate":"UP"},
+	  {"ifname":"tap0","operstate":"UP","master":"somethingelse"}
+	]`))
+	require.NoError(t, err)
+	assert.False(t, w.OK())
+}
+
+func TestVMWiringReadsADownBridgeAsBroken(t *testing.T) {
+	t.Parallel()
+
+	w, err := parseVMWiring([]byte(`[
+	  {"ifname":"eth0","operstate":"UP","master":"br0"},
+	  {"ifname":"br0","operstate":"DOWN"},
+	  {"ifname":"tap0","operstate":"UP","master":"br0"}
+	]`))
+	require.NoError(t, err)
+	assert.False(t, w.OK())
+}
+
+func TestSpoofedCountReadsTheNamedCounter(t *testing.T) {
+	t.Parallel()
+
+	n, err := parseSpoofed([]byte(
+		`{"nftables":[{"metainfo":{"version":"1.0.9"}},` +
+			`{"counter":{"family":"bridge","table":"qubesome","name":"spoofed","packets":7,"bytes":420}}]}`))
+	require.NoError(t, err)
+	assert.Equal(t, uint64(7), n)
+}
+
+// A ruleset with no counter of that name is not a guard this understands,
+// and reporting zero would read as a guard that has seen nothing.
+func TestSpoofedCountRefusesARulesetWithoutTheCounter(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseSpoofed([]byte(`{"nftables":[{"metainfo":{"version":"1.0.9"}}]}`))
+	require.Error(t, err)
+}
