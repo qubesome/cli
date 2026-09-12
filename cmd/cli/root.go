@@ -25,6 +25,7 @@ var (
 	runner        string
 	commandName   string
 	debug         bool
+	limited       bool
 	interactive   bool
 )
 

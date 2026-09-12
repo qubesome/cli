@@ -18,6 +18,7 @@ import (
 	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/runners/bwrap"
 	"github.com/qubesome/cli/internal/runners/firecracker"
+	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/drive"
@@ -59,6 +60,13 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	if inception.Inside() {
+		// The request to the host carries the workload and its arguments
+		// and nothing else, so the host would launch it with its full
+		// access. Refused rather than quietly launched that way.
+		if o.Limited {
+			return errors.New("--limited cannot be used from inside a profile")
+		}
+
 		client := inception.NewClient(files.InProfileSocketPath())
 		return client.Run(context.TODO(), o.Workload, o.ExtraArgs)
 	}
@@ -77,10 +85,10 @@ func Run(opts ...command.Option[Options]) error {
 	// Nothing config-wide happens here. Refreshing every image the
 	// configuration names belongs to starting a profile, which is a
 	// process that stays up, not to opening one app.
-	return runner(in, o.Runner, o.Headless)
+	return runner(in, o.Runner, o.Headless, o.Limited)
 }
 
-func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
+func runner(in WorkloadInfo, runnerOverride string, headless, limited bool) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
@@ -183,6 +191,26 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	// to run under rather than the one its file names.
 	if runnerOverride != "" {
 		ew.Workload.Runner = runnerOverride
+	}
+
+	// After the runner override, which it clears, and before everything
+	// else. The checks below would otherwise refuse a limited launch for a
+	// gateway it does not use, and attachVM would boot the machine it
+	// detaches from. Nothing after this hands back what it took away.
+	if limited {
+		ew = types.Limited(ew)
+
+		slog.Warn("running in limited mode: no gateway, no devices, no gpu, no bus and no mime handling",
+			"workload", ew.Name)
+
+		statePath, err := bwrap.StatePath(ew)
+		if err != nil {
+			return err
+		}
+
+		if err := refuseHandOver(ew, statePath); err != nil {
+			return err
+		}
 	}
 
 	// The effective value, so a name inherited from the profile is
@@ -420,4 +448,20 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 		}
 	}
 	return msg
+}
+
+// refuseHandOver stops a limited launch of a single instance workload that
+// is already running. bwrap hands a second launch to the running sandbox,
+// which keeps every access the limited launch was meant to go without.
+func refuseHandOver(ew types.EffectiveWorkload, statePath string) error {
+	if !ew.Workload.SingleInstance {
+		return nil
+	}
+
+	if sandbox.Alive(statePath) {
+		return fmt.Errorf("workload %q is already running with its full access, so a limited launch would run inside it: stop it first",
+			ew.Workload.Name)
+	}
+
+	return nil
 }

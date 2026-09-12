@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -45,7 +46,7 @@ func TestRunnerWorkloadNameStaysInTheWorkloadsDir(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false)
+			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false, false)
 			require.ErrorIs(t, err, ErrWorkloadConfigNotFound)
 		})
 	}
@@ -95,7 +96,7 @@ func TestRunnerSelection(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, tc.runner, false)
+			err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, tc.runner, false, false)
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
@@ -126,7 +127,7 @@ func TestRunnerValidatesAgainstTheOverriddenRunner(t *testing.T) {
 		},
 	}
 
-	err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, "firecracker", false)
+	err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, "firecracker", false, false)
 	require.ErrorContains(t, err, "capsAdd cannot be granted to a firecracker workload")
 }
 
@@ -199,8 +200,25 @@ func TestRunnerRefusesAnAttachVMThatNamesNoMachine(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false)
+			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false, false)
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
+}
+
+// A second launch of a single instance workload is handed to the sandbox
+// already running, which keeps every access a limited launch goes without.
+func TestRefuseHandOver(t *testing.T) {
+	t.Parallel()
+
+	running := filepath.Join(t.TempDir(), "sandbox-app-work.json")
+	require.NoError(t, sandbox.WriteState(running, os.Getpid()))
+	absent := filepath.Join(t.TempDir(), "sandbox-app-work.json")
+
+	single := types.EffectiveWorkload{Workload: types.Workload{Name: "app", SingleInstance: true}}
+	many := types.EffectiveWorkload{Workload: types.Workload{Name: "app"}}
+
+	require.ErrorContains(t, refuseHandOver(single, running), `workload "app" is already running with its full access`)
+	require.NoError(t, refuseHandOver(single, absent))
+	require.NoError(t, refuseHandOver(many, running))
 }
