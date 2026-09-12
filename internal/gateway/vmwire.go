@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -265,4 +267,151 @@ func (a *Attach) ImageRootfs() (string, error) {
 	}
 
 	return bundle.Rootfs, nil
+}
+
+// VMWiring is what a microVM's network namespace looks like from outside.
+//
+// Every field is a fact read out of the namespace rather than something
+// qubesome remembers doing, and that is what makes it worth reading: a
+// launch that half succeeded leaves exactly the records a launch that
+// succeeded leaves.
+type VMWiring struct {
+	BridgeUp     bool
+	VethEnslaved bool
+	TapEnslaved  bool
+
+	// Guarded says the nft table is loaded, and Spoofed is what its
+	// counter has seen. A non-zero count is a guest that tried to send
+	// under an address that is not its own, and the guard stopping it is
+	// the guard working.
+	Guarded bool
+	Spoofed uint64
+}
+
+// OK reports whether the wire is whole.
+func (w VMWiring) OK() bool {
+	return w.BridgeUp && w.VethEnslaved && w.TapEnslaved
+}
+
+// InspectVM reads a microVM's wiring out of its network namespace.
+//
+// sandboxPID is the VMM sandbox's own init process in the host's pid
+// namespace, which is what the launch recorded.
+func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int) (VMWiring, error) {
+	bundle, err := images.PullProfileImage(cfg.Image)
+	if err != nil {
+		return VMWiring{}, fmt.Errorf("failed to get the gateway image %q: %w", cfg.Image, err)
+	}
+
+	links, err := helper{
+		Rootfs: bundle.Rootfs,
+		Caps:   wireCaps,
+		Args: []string{
+			nsenterCommand, "--net=" + sandbox.NetnsPath(sandboxPID),
+			ipCommand, "-json", "link", "show",
+		},
+	}.output()
+	if err != nil {
+		return VMWiring{}, fmt.Errorf("failed to read the microVM's links: %w", err)
+	}
+
+	w, err := parseVMWiring(links)
+	if err != nil {
+		return VMWiring{}, err
+	}
+
+	counters, err := helper{
+		Rootfs: bundle.Rootfs,
+		Caps:   wireCaps,
+		Args: []string{
+			nsenterCommand, "--net=" + sandbox.NetnsPath(sandboxPID),
+			nftCommand, "-j", "list", "counters", "table", "bridge", guardTable,
+		},
+	}.output()
+	if err != nil {
+		// A table that is not there is not an error to report as one. It
+		// is the answer, and what it means is the caller's to say: a
+		// machine running with no guard is a serious thing, and a machine
+		// that was never on the gateway has no guard to find. What the
+		// links said stands either way, and losing that to report this
+		// would leave a caller knowing less than it did.
+		slog.Debug("[gateway] the microVM has no guard to read", "pid", sandboxPID, "error", err)
+
+		return w, nil
+	}
+
+	n, err := parseSpoofed(counters)
+	if err != nil {
+		// A ruleset that loaded but holds no counter of that name is not
+		// a guard this understands, which is reported the same way: the
+		// wiring stands, and Guarded stays false.
+		slog.Debug("[gateway] the microVM's guard is not one this understands", "pid", sandboxPID, "error", err)
+
+		return w, nil
+	}
+
+	w.Guarded = true
+	w.Spoofed = n
+
+	return w, nil
+}
+
+// parseVMWiring reads `ip -json link show`.
+func parseVMWiring(data []byte) (VMWiring, error) {
+	var links []struct {
+		IfName    string `json:"ifname"`
+		OperState string `json:"operstate"`
+		Master    string `json:"master"`
+	}
+
+	if err := json.Unmarshal(data, &links); err != nil {
+		return VMWiring{}, fmt.Errorf("failed to parse the microVM's links: %w", err)
+	}
+
+	var w VMWiring
+
+	for _, l := range links {
+		switch l.IfName {
+		case vmBridge:
+			// Not an equality against UP. A bridge reports UNKNOWN when
+			// it has no carrier of its own, which is what a bridge in
+			// this position normally reports, and reading that as down
+			// would call every working machine broken.
+			w.BridgeUp = l.OperState != "DOWN"
+		case workloadLink:
+			w.VethEnslaved = l.Master == vmBridge
+		case vmTap:
+			w.TapEnslaved = l.Master == vmBridge
+		}
+	}
+
+	return w, nil
+}
+
+// parseSpoofed reads the named counter out of `nft -j list counters`.
+//
+// A ruleset with no counter of that name is refused rather than reported
+// as zero. Zero is what a guard that has seen nothing says, and a guard
+// this does not recognise must not be able to say it.
+func parseSpoofed(data []byte) (uint64, error) {
+	var out struct {
+		Nftables []struct {
+			Counter *struct {
+				Name    string `json:"name"`
+				Packets uint64 `json:"packets"`
+			} `json:"counter"`
+		} `json:"nftables"`
+	}
+
+	if err := json.Unmarshal(data, &out); err != nil {
+		return 0, fmt.Errorf("failed to parse the microVM's counters: %w", err)
+	}
+
+	for _, e := range out.Nftables {
+		if e.Counter != nil && e.Counter.Name == "spoofed" {
+			return e.Counter.Packets, nil
+		}
+	}
+
+	return 0, errors.New("gateway: the guard has no spoofed counter")
 }
