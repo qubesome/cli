@@ -139,3 +139,99 @@ func TestStopReleasesTheGatewayLock(t *testing.T) {
 		t.Fatal("the gateway lock was still held after Stop returned")
 	}
 }
+
+// A successful kill is a signal delivered and not a sandbox gone. Stop
+// waits, because the next launch takes the same lock and would otherwise
+// find no record and start a replacement while the old namespace and its
+// uplink were still coming down.
+func TestWaitGone(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns once the process is gone", func(t *testing.T) {
+		t.Parallel()
+
+		cmd := execabs.Command("sleep", "60")
+		require.NoError(t, cmd.Start())
+
+		path := statePathFor(t, cmd.Process.Pid)
+		require.NoError(t, cmd.Process.Kill())
+
+		require.NoError(t, waitGone(path, 5*time.Second, time.Millisecond))
+
+		_ = cmd.Wait()
+	})
+
+	// The one that matters. A gateway is not the child of whatever stops
+	// it, so nothing reaps it here and it sits as a zombie until its real
+	// parent, or init, collects it. Waiting for it to leave the process
+	// table would mean waiting out the whole grace every time.
+	t.Run("does not wait for a zombie to be reaped", func(t *testing.T) {
+		t.Parallel()
+
+		cmd := execabs.Command("sleep", "60")
+		require.NoError(t, cmd.Start())
+
+		path := statePathFor(t, cmd.Process.Pid)
+		require.NoError(t, cmd.Process.Kill())
+
+		// Long enough that a wait on reaping would fail the assertion
+		// rather than pass it slowly.
+		start := time.Now()
+		require.NoError(t, waitGone(path, 30*time.Second, time.Millisecond))
+		assert.Less(t, time.Since(start), 5*time.Second)
+
+		_ = cmd.Wait()
+	})
+
+	t.Run("gives up on a process that will not go", func(t *testing.T) {
+		t.Parallel()
+
+		cmd := execabs.Command("sleep", "60")
+		require.NoError(t, cmd.Start())
+		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+
+		err := waitGone(statePathFor(t, cmd.Process.Pid), 50*time.Millisecond, time.Millisecond)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "waiting for the gateway sandbox to stop")
+	})
+
+	t.Run("a record that names nothing is already gone", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, waitGone(filepath.Join(t.TempDir(), "absent.json"), time.Second, time.Millisecond))
+	})
+}
+
+func TestStopWaitsForTheSandboxToGo(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+
+	cmd := execabs.Command("sleep", "60")
+	require.NoError(t, cmd.Start())
+	pid := cmd.Process.Pid
+
+	require.NoError(t, sandbox.WriteState(g.StatePath, pid))
+
+	got, err := g.Stop()
+	require.NoError(t, err)
+	assert.Equal(t, pid, got)
+	assert.NoFileExists(t, g.StatePath)
+
+	assert.True(t, sandbox.Exited(statePathFor(t, pid)),
+		"Stop returned while the sandbox was still running")
+
+	_ = cmd.Wait()
+}
+
+// statePathFor writes a record naming pid, so a test can ask about a
+// process whose own record Stop has already removed.
+func statePathFor(t *testing.T, pid int) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "sandbox.json")
+	require.NoError(t, sandbox.WriteState(path, pid))
+
+	return path
+}

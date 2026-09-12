@@ -175,9 +175,15 @@ func (g Gateway) inspectAddrs(st *Status, cfg *types.GatewayConfig) {
 		return
 	}
 
+	// What this describes is the record, not a gateway. The record
+	// outlives the gateway that wrote it, and gateway stop leaves exactly
+	// that behind: nothing running, and a note of the range the last one
+	// handed addresses out of. A status naming a running gateway would be
+	// false in the state it is most likely to be read in.
 	if a.Subnet != "" && a.Subnet != subnet.String() {
 		st.AddrProblem = fmt.Sprintf(
-			"the running gateway hands addresses out of %s and the config now asks for %s",
+			"this session has handed addresses out of %s and the config now asks for %s, "+
+				"so the session has to be restarted before the new range is used",
 			a.Subnet, subnet)
 		return
 	}

@@ -32,9 +32,6 @@ chrome-work
 /dev/dri
 /dev/dri
 --ro-bind
-/etc/localtime
-/etc/localtime
---ro-bind
 /usr/share/zoneinfo/Europe/London
 /usr/share/zoneinfo/Europe/London
 --bind

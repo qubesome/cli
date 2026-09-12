@@ -13,6 +13,7 @@ import (
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/gpu"
+	"github.com/qubesome/cli/internal/util/tz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,7 +70,11 @@ func plainInput() input {
 		ShmDir:     "/run/user/1000/qubesome/work/shm/chrome",
 		CookiePath: "/run/user/1000/qubesome/work/.Xclient-cookie",
 		SocketPath: "/run/user/1000/qubesome/work/qube.sock",
-		Localtime:  []string{"/etc/localtime", "/usr/share/zoneinfo/Europe/London"},
+		Zone: tz.Zone{
+			HostPath:    "/usr/share/zoneinfo/Europe/London",
+			SandboxPath: "/usr/share/zoneinfo/Europe/London",
+			TZ:          "Europe/London",
+		},
 	}
 }
 
@@ -266,15 +271,65 @@ func TestSpecIsolatedRunUser(t *testing.T) {
 		indexOfArg(args, "--ro-bind", filepath.Join(in.ProfileDir, "machine-id")))
 }
 
-// /etc/localtime is usually a symlink, and the link alone resolves to
-// nothing inside the sandbox.
-func TestSpecSharesLocaltimeAndItsTarget(t *testing.T) {
+// An image ships /etc/localtime as a symlink, and bubblewrap 0.12.0
+// refuses to mount on one. The host's zone reaches the sandbox as a
+// zone file under its own name plus TZ, so nothing mounts there at all.
+func TestSpecNeverMountsOnLocaltime(t *testing.T) {
 	t.Parallel()
 
-	args := render(t, plainInput())
+	assert.NotContains(t, render(t, plainInput()), "/etc/localtime")
+}
 
-	assert.NotEqual(t, -1, indexOfArg(args, "--ro-bind", "/etc/localtime"))
-	assert.NotEqual(t, -1, indexOfArg(args, "--ro-bind", "/usr/share/zoneinfo/Europe/London"))
+func TestSpecSharesTheHostZoneAndNamesIt(t *testing.T) {
+	t.Parallel()
+
+	in := plainInput()
+	in.Workload.Profile.Timezone = ""
+	in.Zone = tz.Zone{
+		HostPath:    "/etc/zoneinfo/Europe/London",
+		SandboxPath: "/usr/share/zoneinfo/Europe/London",
+		TZ:          "Europe/London",
+	}
+
+	args := render(t, in)
+
+	i := indexOfArg(args, "--ro-bind", "/etc/zoneinfo/Europe/London")
+	require.NotEqual(t, -1, i)
+	assert.Equal(t, "/usr/share/zoneinfo/Europe/London", args[i+2])
+
+	j := indexOfArg(args, "--setenv", "TZ")
+	require.NotEqual(t, -1, j)
+	assert.Equal(t, "Europe/London", args[j+2])
+}
+
+// A profile that names a timezone means it, whatever the host is set to.
+func TestSpecPrefersTheProfileTimezone(t *testing.T) {
+	t.Parallel()
+
+	in := plainInput()
+	in.Workload.Profile.Timezone = "America/New_York"
+
+	args := render(t, in)
+
+	i := indexOfArg(args, "--setenv", "TZ")
+	require.NotEqual(t, -1, i)
+	assert.Equal(t, "America/New_York", args[i+2])
+	assert.Equal(t, 1, countArg(args, "--setenv", "TZ"))
+}
+
+// A host with no timezone to give leaves the sandbox on the image's own,
+// which is what the container runner did before it.
+func TestSpecWithoutATimezone(t *testing.T) {
+	t.Parallel()
+
+	in := plainInput()
+	in.Workload.Profile.Timezone = ""
+	in.Zone = tz.Zone{}
+
+	args := render(t, in)
+
+	assert.Equal(t, -1, indexOfArg(args, "--setenv", "TZ"))
+	assert.NotContains(t, args, "/usr/share/zoneinfo/Europe/London")
 }
 
 // There is no uplink in this stage, so a workload with anything short of

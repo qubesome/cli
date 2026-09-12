@@ -145,28 +145,51 @@ func TestFirstOfTakesTheFirstThatAnswered(t *testing.T) {
 	require.Empty(t, firstOf(nil, nil))
 }
 
-// A real X11 host reported gb and microsoftpro from localectl while
-// setxkbmap answered us and pc105. The configured layout is the one its
-// user types on, so it is the one preferred, on any session.
-func TestDefaultsPrefersTheConfiguredLayout(t *testing.T) {
-	got := firstOf(
-		fromLocalectl(func() ([]byte, error) {
-			return []byte("      X11 Layout: gb\n       X11 Model: microsoftpro\n"), nil
-		}),
-		fromSetxkbmap(func() ([]byte, error) {
-			return []byte("layout:     us\nmodel:      pc105\n"), nil
-		}),
-	)
+// Which of the two answers to believe depends on the session, because the
+// two tools are reliable on opposite ones. On X11 setxkbmap reports the
+// keymap the user is typing on, including one applied by hand after login.
+// On Wayland it reports Xwayland's own default, which is nobody's layout.
+func TestPreferredSource(t *testing.T) {
+	t.Parallel()
 
-	require.Equal(t, []string{"XKB_DEFAULT_MODEL=microsoftpro", "XKB_DEFAULT_LAYOUT=gb"}, got)
+	const live = "rules: evdev\nmodel: pc105\nlayout: gb\n"
+	const configured = "X11 Layout: us\nX11 Model: pc104\n"
+
+	tests := []struct {
+		name    string
+		session string
+		want    string
+	}{
+		{"x11 prefers the running layout", "x11", "XKB_DEFAULT_LAYOUT=gb"},
+		{"a session that says nothing is treated as x11", "", "XKB_DEFAULT_LAYOUT=gb"},
+		{"wayland prefers the configured layout", "wayland", "XKB_DEFAULT_LAYOUT=us"},
+		{"wayland is matched whatever its case", "Wayland", "XKB_DEFAULT_LAYOUT=us"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := preferred(tc.session,
+				func() ([]byte, error) { return []byte(live), nil },
+				func() ([]byte, error) { return []byte(configured), nil },
+			)
+
+			require.Contains(t, got, tc.want)
+		})
+	}
 }
 
-// A host with no localectl still gets the running layout.
-func TestDefaultsFallsBackToTheRunningLayout(t *testing.T) {
-	got := firstOf(
-		fromLocalectl(func() ([]byte, error) { return nil, errors.New("not found") }),
-		fromSetxkbmap(func() ([]byte, error) { return []byte("layout: us\n"), nil }),
-	)
+// Whichever is preferred, the other still answers when the first cannot.
+func TestPreferredFallsBack(t *testing.T) {
+	t.Parallel()
 
-	require.Equal(t, []string{"XKB_DEFAULT_LAYOUT=us"}, got)
+	const configured = "X11 Layout: us\n"
+	fails := func() ([]byte, error) { return nil, errors.New("not found") }
+
+	got := preferred("x11", fails, func() ([]byte, error) { return []byte(configured), nil })
+	require.Contains(t, got, "XKB_DEFAULT_LAYOUT=us")
+
+	got = preferred("wayland", func() ([]byte, error) { return []byte("layout: gb\n"), nil }, fails)
+	require.Contains(t, got, "XKB_DEFAULT_LAYOUT=gb")
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/env"
 	"github.com/qubesome/cli/internal/util/gpu"
+	"github.com/qubesome/cli/internal/util/tz"
 	"golang.org/x/sys/execabs"
 )
 
@@ -102,6 +103,20 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 	in, err := resolve(ew, att != nil)
 	if err != nil {
 		return err
+	}
+
+	// The endpoint the workload asks for a tunnel on, which is known here
+	// because the address was allocated before the sandbox was built.
+	if att != nil {
+		proxy, err := att.ProxyAddr()
+		if err != nil {
+			return err
+		}
+		in.GatewayProxy = proxy
+
+		if err := writeSSHConfig(in); err != nil {
+			return err
+		}
 	}
 
 	spec, err := buildSpec(in)
@@ -372,7 +387,7 @@ func resolve(ew types.EffectiveWorkload, gw bool) (input, error) {
 		ShmDir:     shmDir,
 		CookiePath: cookiePath,
 		SocketPath: socketPath,
-		Localtime:  localtime(),
+		Zone:       tz.Host(),
 		USBDevices: usbDevices,
 		Paths:      mappedPaths(wl.HostAccess.Paths),
 	}
@@ -476,32 +491,6 @@ func resolveMime(in *input) error {
 	}
 
 	return nil
-}
-
-// localtime returns /etc/localtime and, when it is a symlink, the file it
-// points at.
-//
-// The link on its own resolves to nothing inside the sandbox, so both are
-// shared.
-func localtime() []string {
-	const file = "/etc/localtime"
-
-	if _, err := os.Stat(file); err != nil {
-		return nil
-	}
-
-	paths := make([]string, 0, 2)
-	paths = append(paths, file)
-
-	target, err := os.Readlink(file)
-	if err != nil {
-		return paths
-	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(file), target)
-	}
-
-	return append(paths, target)
 }
 
 // mappedPaths expands the workload's mapped directories and creates the

@@ -34,6 +34,7 @@ import (
 	"github.com/qubesome/cli/internal/util/gpu"
 	"github.com/qubesome/cli/internal/util/mtls"
 	"github.com/qubesome/cli/internal/util/resolution"
+	"github.com/qubesome/cli/internal/util/tz"
 	"github.com/qubesome/cli/internal/util/xauth"
 	"github.com/qubesome/cli/internal/util/xkb"
 	"github.com/qubesome/cli/pkg/inception"
@@ -571,8 +572,8 @@ func createMagicCookie(profile *types.Profile) error {
 // and the desktop files are mounted, so the environment and the mount
 // list cannot disagree. bwrap applies --setenv in order, so these are the
 // values that survive.
-func sandboxEnv(bundle images.Bundle, ca, cert, key []byte) []string {
-	const extra = 6
+func sandboxEnv(bundle images.Bundle, ca, cert, key []byte, timezone string) []string {
+	const extra = 7
 
 	// The compositor decides the keymap for everything in the profile, so
 	// the host's layout is carried in here rather than anywhere nearer
@@ -590,6 +591,13 @@ func sandboxEnv(bundle images.Bundle, ca, cert, key []byte) []string {
 	env := make([]string, 0, len(bundle.Env)+extra+len(keymap))
 	env = append(env, bundle.Env...)
 	env = append(env, keymap...)
+
+	// An empty value is not the same as no value here: a C library reads
+	// TZ="" as UTC, so a host with no timezone to give has to leave the
+	// image's alone rather than say nothing in a way that means UTC.
+	if timezone != "" {
+		env = append(env, "TZ="+timezone)
+	}
 
 	return append(env,
 		"HOME="+profileHome,
@@ -736,13 +744,36 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		return nil, err
 	}
 
+	// The host's timezone is shared as a zone file under its own name,
+	// and TZ below is what points the sandbox at it. It is deliberately
+	// not mounted on /etc/localtime: an image ships that as a symlink,
+	// and bubblewrap 0.12.0 refuses to mount on one. Releases before it
+	// followed the link and mounted on its target, which is why sharing
+	// /etc/localtime worked until 0.12.0 landed.
+	zone := tz.Host()
+
+	// A profile that names a timezone means it for everything inside,
+	// the window manager's own clock included, whatever the host is set
+	// to.
+	timezone := profile.Timezone
+	if timezone == "" {
+		timezone = zone.TZ
+	}
+
 	mounts := []sandbox.Mount{
-		{Src: "/etc/localtime", Dst: "/etc/localtime", ReadOnly: true},
 		{Src: x11Dir, Dst: "/tmp/.X11-unix"},
 		{Src: socket, Dst: "/tmp/qube.sock", ReadOnly: true},
 		{Src: server, Dst: profileHome + "/.Xserver"},
 		{Src: workload, Dst: profileHome + "/.Xauthority"},
 		{Src: binPath, Dst: files.InProfileBinary, ReadOnly: true},
+	}
+
+	if zone.HostPath != "" {
+		mounts = append(mounts, sandbox.Mount{
+			Src:      zone.HostPath,
+			Dst:      zone.SandboxPath,
+			ReadOnly: true,
+		})
 	}
 
 	for _, p := range profile.Paths {
@@ -821,7 +852,7 @@ func createNewDisplay(bundle images.Bundle, ca, cert, key []byte, profile *types
 		}
 	}
 
-	senv := sandboxEnv(bundle, ca, cert, key)
+	senv := sandboxEnv(bundle, ca, cert, key, timezone)
 
 	// The profile runs its own compositor, so it needs nothing from the
 	// host session beyond the display socket mounted above. The session

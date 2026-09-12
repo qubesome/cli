@@ -21,6 +21,7 @@ import (
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/gpu"
+	"github.com/qubesome/cli/internal/util/tz"
 )
 
 // runUserDir is the runtime directory a workload sees. Every workload runs
@@ -88,10 +89,10 @@ type input struct {
 	// workload does not handle mime types.
 	HomeDir string
 
-	// Localtime is /etc/localtime and, when that is a symlink, the file it
-	// points at. Both are needed: the link alone resolves to nothing
-	// inside the sandbox.
-	Localtime []string
+	// Zone is the host's timezone. It is the zero value when the host
+	// has none to give, and it is ignored when the profile names a
+	// timezone of its own.
+	Zone tz.Zone
 
 	// VideoDevices are the /dev/video* nodes found on the host.
 	VideoDevices []string
@@ -109,6 +110,11 @@ type input struct {
 	// Paths are the workload's mapped directories, already expanded and
 	// created on the host.
 	Paths []sandbox.Mount
+
+	// GatewayProxy is where the workload asks the gateway for a tunnel to
+	// a host it may reach on a port the transparent path does not carry.
+	// Empty for a workload with no gateway, which has nowhere to ask.
+	GatewayProxy string
 
 	// HostEnv holds the host variables a workload on the host dbus reads.
 	// The container runners named them and let the runtime copy the
@@ -354,8 +360,17 @@ func workloadMounts(in input) []sandbox.Mount {
 
 	var mounts []sandbox.Mount
 
-	for _, p := range in.Localtime {
-		mounts = append(mounts, sandbox.Mount{Src: p, Dst: p, ReadOnly: true})
+	// The zone file lands under its own name rather than on
+	// /etc/localtime, which an image ships as a symlink and bubblewrap
+	// 0.12.0 refuses to mount on. TZ below is what points the sandbox at
+	// it, so an image whose timezone database already holds the name
+	// only gains the host's copy of the same file.
+	if in.Zone.HostPath != "" {
+		mounts = append(mounts, sandbox.Mount{
+			Src:      in.Zone.HostPath,
+			Dst:      in.Zone.SandboxPath,
+			ReadOnly: true,
+		})
 	}
 
 	mounts = append(mounts, sandbox.Mount{Src: in.ShmDir, Dst: "/dev/shm"})
@@ -410,6 +425,17 @@ func workloadMounts(in input) []sandbox.Mount {
 			},
 			sandbox.Mount{Src: in.SocketPath, Dst: files.InProfileSocketPath(), ReadOnly: true},
 		)
+	}
+
+	// Keyed on the endpoint and not on in.Gateway, so that the file
+	// naming the tunnel command and the variable the command reads are
+	// never one without the other.
+	if in.GatewayProxy != "" {
+		mounts = append(mounts, sandbox.Mount{
+			Src:      filepath.Join(in.ProfileDir, sshConfigFile),
+			Dst:      sshConfigDst,
+			ReadOnly: true,
+		})
 	}
 
 	// The mime handler, the supervisor and the console are all the
@@ -470,7 +496,7 @@ func workloadEnv(in input) []string {
 	wl := in.Workload.Workload
 	profile := in.Workload.Profile
 
-	const extra = 8
+	const extra = 9
 
 	env := make([]string, 0, len(in.Bundle.Env)+len(in.HostEnv)+extra)
 	env = append(env, in.Bundle.Env...)
@@ -480,8 +506,22 @@ func workloadEnv(in input) []string {
 		"QUBESOME_PROFILE="+profile.Name,
 	)
 
-	if profile.Timezone != "" {
-		env = append(env, "TZ="+profile.Timezone)
+	// Only when there is one. An empty value would read as an endpoint
+	// that is there and is nothing, and a workload with no gateway has
+	// nowhere to ask for a tunnel at all.
+	if in.GatewayProxy != "" {
+		env = append(env, "QUBESOME_GATEWAY_PROXY="+in.GatewayProxy)
+	}
+
+	// A profile that names a timezone means it, whatever the host is set
+	// to. Otherwise the workload follows the host, which it used to do
+	// by reading the /etc/localtime shared with it.
+	timezone := profile.Timezone
+	if timezone == "" {
+		timezone = in.Zone.TZ
+	}
+	if timezone != "" {
+		env = append(env, "TZ="+timezone)
 	}
 
 	env = append(env, in.HostEnv...)

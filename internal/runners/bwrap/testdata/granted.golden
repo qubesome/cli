@@ -59,9 +59,6 @@ kali-vpn-pentest
 /dev/hidraw9
 /dev/hidraw9
 --ro-bind
-/etc/localtime
-/etc/localtime
---ro-bind
 /usr/share/zoneinfo/Europe/London
 /usr/share/zoneinfo/Europe/London
 --bind

@@ -45,21 +45,36 @@ func Defaults() []string {
 		return env
 	}
 
-	// localectl is asked first, on any session. It reports the configured
-	// layout, which is the one the user chose. setxkbmap reports what the
-	// running X server happens to hold, and the two disagree more often
-	// than they look like they should.
-	//
-	// Both cases were seen on real hosts. On a Wayland session setxkbmap
-	// asks Xwayland, which carries its own default rather than the
-	// compositor's keymap. On an X11 host whose localectl said gb with a
-	// microsoftpro model, setxkbmap still answered us and pc105, and the
-	// profile faithfully reproduced a layout its user does not type on.
-	// Preferring the configured answer is right in both.
-	//
-	// A session that really does want the live value sets XKB_DEFAULT_
-	// above, which still wins over both.
-	return firstOf(fromLocalectl(localectlQuery), fromSetxkbmap(setxkbmapQuery))
+	return preferred(os.Getenv("XDG_SESSION_TYPE"), setxkbmapQuery, localectlQuery)
+}
+
+// preferred returns the keymap of the session, asking the two tools in the
+// order that session makes reliable and falling back to the other.
+//
+// The two disagree more often than they look like they should, and which
+// one is right depends on where it is asked.
+//
+// On X11 the live answer wins. setxkbmap asks the running X server, which
+// is the keyboard the user is typing on, including a layout applied by
+// hand after login. localectl reports what was configured, which on a host
+// whose layout is set at runtime is a layout its user does not type on.
+//
+// On Wayland the configured answer wins. There setxkbmap reaches Xwayland,
+// which carries its own default rather than the compositor's keymap, so it
+// answers confidently with nobody's layout. localectl reports what the
+// compositor built its keymap from.
+//
+// An unset session type is treated as X11. Every X11 session sets it, and
+// a session that sets nothing is not a Wayland one.
+//
+// A host that wants neither answer sets XKB_DEFAULT_ itself, which wins
+// over both.
+func preferred(session string, live, configured query) []string {
+	if strings.EqualFold(session, "wayland") {
+		return firstOf(fromLocalectl(configured), fromSetxkbmap(live))
+	}
+
+	return firstOf(fromSetxkbmap(live), fromLocalectl(configured))
 }
 
 func firstOf(sources ...[]string) []string {
@@ -102,6 +117,10 @@ func fromEnv() []string {
 	return nil
 }
 
+// query reads a tool's output. It is what makes the two sources a seam a
+// test can drive, and it is the same shape for both.
+type query func() ([]byte, error)
+
 func setxkbmapQuery() ([]byte, error) {
 	//nolint:gosec // G204: the binary is a fixed path and the argument is a literal.
 	return execabs.Command(files.SetxkbmapBinary, "-query").Output()
@@ -125,7 +144,7 @@ var localectlFields = map[string]string{
 
 // fromLocalectl reads the configured layout, which is what a Wayland
 // compositor builds its keymap from and what Xwayland does not report.
-func fromLocalectl(q func() ([]byte, error)) []string {
+func fromLocalectl(q query) []string {
 	out, err := q()
 	if err != nil {
 		slog.Debug("cannot read the configured keyboard layout", "error", err)
@@ -150,7 +169,7 @@ func fromLocalectl(q func() ([]byte, error)) []string {
 // fromSetxkbmap parses setxkbmap -query, which prints one "key: value"
 // per line and omits nothing, printing an empty value for a component
 // that is not set.
-func fromSetxkbmap(q func() ([]byte, error)) []string {
+func fromSetxkbmap(q query) []string {
 	out, err := q()
 	if err != nil {
 		slog.Debug("cannot read the host keyboard layout", "error", err)

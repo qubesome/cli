@@ -245,6 +245,18 @@ func GatewayStatePath() string {
 	return filepath.Join(SessionDir(), "sandbox-gateway.json")
 }
 
+// GatewayLogPath returns where the session's gateway writes what it says.
+//
+// The gateway is started by whichever launch found none running, and it is
+// put in a session of its own so that a Ctrl-C at that terminal does not
+// take the session's egress with it. Its stdout is therefore a terminal
+// nobody is necessarily still watching, and the audit line behind a denied
+// connection is the one thing a user needs when a workload cannot reach
+// something. It goes here instead, and qubesome gateway logs reads it back.
+func GatewayLogPath() string {
+	return filepath.Join(SessionDir(), "gateway.log")
+}
+
 // GatewaySocketDir returns the host directory the gateway's control socket
 // is created in.
 //
@@ -280,6 +292,25 @@ func GatewayLockPath() string {
 // empty map and hands the count back to zero.
 func GatewayAllocPath() string {
 	return filepath.Join(SessionDir(), "gateway-addresses.json")
+}
+
+// GatewayConfigPath returns the record of which qubesome config the
+// running gateway was started from.
+//
+// It sits beside the gateway's state file because it has the same
+// lifetime, and that lifetime is the whole point of it. A gateway
+// describes itself with the image, policy and subnet one config named, and
+// once the profile that started it has stopped there is nothing left on
+// the host to say which config that was. Inferring it from whichever
+// profiles happen to be active answers wrongly exactly when it matters:
+// after things have gone quiet.
+//
+// It is not in the home directory for the same reason. A record that
+// outlives the session outlives the gateway it describes, so after a
+// reboot it would name a config from a session that no longer exists,
+// which is a guess wearing the clothes of a fact.
+func GatewayConfigPath() string {
+	return filepath.Join(SessionDir(), "gateway-config")
 }
 
 // GatewayCredsPath returns the client half of the control channel's mTLS

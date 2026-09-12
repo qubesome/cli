@@ -63,6 +63,18 @@ type Config struct {
 	Gateway *GatewayConfig `yaml:"gateway"`
 
 	RootDir string
+
+	// Source is the file this config was decoded from, with symlinks
+	// already resolved. RootDir is its directory, and it is the directory
+	// that every path in the config is resolved against, so the two are
+	// not interchangeable: the file is what has to be read again to get
+	// this same config back.
+	//
+	// It is here so that a gateway can record which config started it. A
+	// session's gateway outlives the profile that launched it, and once
+	// that profile has stopped nothing else on the host says where its
+	// image, policy and subnet came from.
+	Source string
 }
 
 // GatewayConfig describes the gateway that gives workloads their egress.
@@ -498,6 +510,7 @@ func DecodeConfig(r io.Reader, path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to decode config %q: %w", path, err)
 	}
 
+	cfg.Source = path
 	cfg.RootDir = filepath.Dir(path)
 
 	// To avoid names being defined twice on the profiles, the name

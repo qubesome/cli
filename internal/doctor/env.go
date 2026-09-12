@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/gateway"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/runners/util/usb"
@@ -85,6 +86,15 @@ type Env interface {
 	// would call a gateway ready while a workload started against it
 	// would still have egress with no rules on it.
 	GatewayReady() error
+
+	// GatewayLog reports what the session gateway's log says has
+	// happened: how many connections it classified, how many it refused
+	// and to where, and whether anything failed.
+	//
+	// A summary rather than the log itself, because the log's shape is
+	// the gateway's own and reading it belongs in the one place that
+	// already understands it.
+	GatewayLog() (gateway.LogSummary, error)
 }
 
 // OSEnv is the real host.
@@ -173,6 +183,15 @@ func (e *OSEnv) GatewayReady() error {
 	}
 
 	return c.Ready(ctx)
+}
+
+// GatewayLog reads the log the session's gateway writes.
+//
+// Nothing is asked of the gateway for this. It is the record the launch
+// left behind, so it answers for a gateway that has stopped talking as
+// well as for one that is well.
+func (e *OSEnv) GatewayLog() (gateway.LogSummary, error) {
+	return gateway.Summarise(files.GatewayLogPath())
 }
 
 func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {

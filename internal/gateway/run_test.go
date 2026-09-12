@@ -103,7 +103,7 @@ func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 
 	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
 
-	require.NoError(t, g.Up(unusableConfig(), t.TempDir()))
+	require.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
 
 	assert.Equal(t, 1, gw.reloaded())
 }
@@ -122,7 +122,7 @@ func TestUpAcceptsAGatewayThatCannotReload(t *testing.T) {
 
 	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
 
-	assert.NoError(t, g.Up(unusableConfig(), t.TempDir()))
+	assert.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
 }
 
 // A state file outlives the process it names, so a gateway that crashed must
@@ -138,7 +138,7 @@ func TestUpStartsAGatewayWhenTheStateIsStale(t *testing.T) {
 	state := fmt.Sprintf(`{"pid":%d,"startTime":1}`, os.Getpid())
 	require.NoError(t, os.WriteFile(g.StatePath, []byte(state), 0o600))
 
-	err := g.Up(unusableConfig(), t.TempDir())
+	err := g.Up(unusableConfig(), t.TempDir(), "")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "gateway.yml")
@@ -466,4 +466,29 @@ func prefix(t *testing.T, s string) netip.Prefix {
 	require.NoError(t, err)
 
 	return p
+}
+
+// A subnet changed under a session that has already handed addresses out
+// is refused, because the count belongs to the old range and a gateway in
+// the session holds its first address.
+//
+// The message opens the way the status one does, so the two describe the
+// same thing in the same words. It keeps the claim about a running
+// gateway that the status message drops: Allocate is only ever reached
+// after Up, so by here there is one, and it is why a restart is the
+// remedy rather than an edit.
+func TestAllocateRefusesAChangedSubnet(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+
+	_, err := g.Allocate(prefix(t, testSubnet))
+	require.NoError(t, err)
+
+	_, err = g.Allocate(prefix(t, "10.112.0.0/24"))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "this session has handed addresses out of 10.111.0.0/24")
+	assert.Contains(t, err.Error(), "the config now asks for 10.112.0.0/24")
+	assert.Contains(t, err.Error(), "the session has to be restarted")
 }

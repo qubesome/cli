@@ -49,14 +49,24 @@ func RootCommand() *cli.Command {
 			superviseCommand(),
 			sessionHoldCommand(),
 			gatewayCommand(),
+			tunnelCommand(),
 			vmInitCommand(),
 			consoleCommand(),
 		},
 	}
 
+	// This runs ahead of every command, and several of them have a caller
+	// reading their standard output as data rather than as text for a
+	// person: tunnel puts an ssh connection through it, completion is
+	// eval'd by a shell, and clipboard writes back what was pasted. A
+	// warning on stdout is read as the far end talking, as shell input, or
+	// as part of the paste, so it goes to stderr for the same reason
+	// main.go sends a returned error there. It is still seen: stderr is
+	// where ssh shows what a ProxyCommand says.
 	cmd.Before = func(ctx context.Context, c *cli.Command) (context.Context, error) {
 		if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
-			fmt.Println("\033[33mWARN: Running qubesome in Wayland is experimental. Some features may not work as expected.\033[0m")
+			fmt.Fprintln(os.Stderr,
+				"\033[33mWARN: Running qubesome in Wayland is experimental. Some features may not work as expected.\033[0m")
 		}
 		return ctx, nil
 	}
@@ -98,6 +108,7 @@ func config(path string) *types.Config {
 	if err != nil {
 		return nil
 	}
+	cfg.Source = path
 	cfg.RootDir = filepath.Dir(path)
 
 	return cfg

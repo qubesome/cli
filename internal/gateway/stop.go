@@ -3,8 +3,10 @@ package gateway
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"syscall"
+	"time"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/sandbox"
@@ -52,6 +54,8 @@ func (g Gateway) Stop() (int, error) {
 			return 0, fmt.Errorf("failed to remove the gateway state %q: %w", g.StatePath, err)
 		}
 
+		g.forgetConfig()
+
 		return 0, nil
 	}
 
@@ -73,6 +77,15 @@ func (g Gateway) Stop() (int, error) {
 		return 0, fmt.Errorf("failed to stop the gateway sandbox pid %d: %w", st.PID, err)
 	}
 
+	// A delivered signal is not a sandbox that has gone. The record has to
+	// outlive the wait, because the next launch takes this same lock and
+	// decides by what it finds: removing the record first would let it see
+	// nothing, and start a replacement while the old pid namespace, its
+	// outer bwrap and its uplink were still coming down.
+	if err := waitGone(g.StatePath, stopGrace, stopPoll); err != nil {
+		return st.PID, err
+	}
+
 	// A qubesome run at a terminal exits long before the gateway it started
 	// does, so the goroutine that would have cleared this record has
 	// usually gone with it.
@@ -80,5 +93,58 @@ func (g Gateway) Stop() (int, error) {
 		return st.PID, fmt.Errorf("failed to remove the gateway state %q: %w", g.StatePath, err)
 	}
 
+	g.forgetConfig()
+
 	return st.PID, nil
+}
+
+// forgetConfig drops the note of which config the gateway came from.
+//
+// It goes with the state file, because the two describe the same gateway
+// and a record that outlived it would name the provenance of something
+// that is no longer running. A failure is a warning: the next gateway to
+// start overwrites this, so what is left behind is a stale path that only
+// a status asked between the two would read, and saying so is better than
+// failing a stop that otherwise worked.
+func (g Gateway) forgetConfig() {
+	if err := os.Remove(g.ConfigPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("failed to remove the gateway's config record",
+			"path", g.ConfigPath, "error", err)
+	}
+}
+
+const (
+	// stopGrace bounds the wait for a signalled gateway to go. SIGKILL to
+	// pid 1 of a pid namespace takes the namespace with it and is not
+	// something the process can put off, so this is a ceiling on the
+	// kernel finishing rather than an estimate of anything.
+	stopGrace = 5 * time.Second
+
+	// stopPoll is how often the record is checked while waiting. There is
+	// nothing to wait on: the gateway is not this process's child, so it
+	// cannot be reaped here and its going away is not something the
+	// kernel will report.
+	stopPoll = 20 * time.Millisecond
+)
+
+// waitGone blocks until the sandbox recorded at path has finished.
+//
+// sandbox.Exited and not the negation of sandbox.Alive, because a process
+// killed by something that is not its parent stays in the table until
+// somebody reaps it. Waiting for it to leave /proc would mean waiting for
+// a parent that has usually exited long ago.
+func waitGone(path string, grace, poll time.Duration) error {
+	deadline := time.Now().Add(grace)
+
+	for {
+		if sandbox.Exited(path) {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s waiting for the gateway sandbox to stop", grace)
+		}
+
+		time.Sleep(poll)
+	}
 }

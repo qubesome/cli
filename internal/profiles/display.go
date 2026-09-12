@@ -136,8 +136,16 @@ func xwaylandArgs(p DisplayParams) ([]string, error) {
 	// The window manager, and everything it launches, must not inherit a
 	// path to the compositor. A client that reaches the Wayland socket
 	// bypasses Xwayland and the isolation set above.
+	//
+	// DISPLAY names this profile's server rather than being left to what
+	// xwayland-run exports. The profile container's own DISPLAY is the
+	// host's, because that is what the compositor presents through, and
+	// the whole of /tmp/.X11-unix is mounted so that its socket is
+	// reachable. Anything under here that inherited that would be talking
+	// to the host session instead of to the profile.
 	args = append(args, "--",
 		"env", "-u", "WAYLAND_DISPLAY",
+		"DISPLAY=:"+strconv.Itoa(int(p.Display)),
 		"XDG_RUNTIME_DIR="+appRuntimeDir,
 		"XAUTHORITY="+clientAuthFile)
 

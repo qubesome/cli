@@ -56,6 +56,17 @@ const (
 	// for the whole session, so unlike a workload's it carries no profile.
 	gatewayHostname = "qubesome-gateway"
 
+	// inProxyPort is the port the gateway image's proxy serves its
+	// plaintext listener on, which is also where it accepts CONNECT.
+	//
+	// It is here with the image's other constants, and carries the same
+	// caveat: it belongs to the gateway and not to qubesome, so the two
+	// have to be changed together. A workload is told the whole endpoint
+	// rather than only the address for exactly that reason, so that a
+	// port which is the gateway's business does not end up written into
+	// anybody's dotfiles.
+	inProxyPort = 3128
+
 	// pastaCommand is the uplink binary in the gateway image, where the
 	// passt package puts it.
 	pastaCommand = "/usr/bin/pasta"
@@ -93,6 +104,7 @@ type Gateway struct {
 	StatePath  string
 	AllocPath  string
 	CredsPath  string
+	ConfigPath string
 	Socket     string
 	SocketDir  string
 	SecretsDir string
@@ -106,6 +118,7 @@ func Current() Gateway {
 		StatePath:  files.GatewayStatePath(),
 		AllocPath:  files.GatewayAllocPath(),
 		CredsPath:  files.GatewayCredsPath(),
+		ConfigPath: files.GatewayConfigPath(),
 		Socket:     files.GatewaySocket(),
 		SocketDir:  files.GatewaySocketDir(),
 		SecretsDir: files.GatewaySecretsDir(),
@@ -115,10 +128,10 @@ func Current() Gateway {
 // Up makes sure the session's gateway is running and returns once it is
 // ready to police traffic.
 //
-// cfg is the gateway block of the qubesome config and root is the directory
+// cfg is the gateway block of the qubesome config, root is the directory
 // that config was read from, which is what the policy file path is resolved
-// against.
-func (g Gateway) Up(cfg types.GatewayConfig, root string) error {
+// against, and source is the config file itself.
+func (g Gateway) Up(cfg types.GatewayConfig, root, source string) error {
 	if err := os.MkdirAll(g.Dir, files.DirMode); err != nil {
 		return fmt.Errorf("failed to create the session dir %q: %w", g.Dir, err)
 	}
@@ -126,6 +139,15 @@ func (g Gateway) Up(cfg types.GatewayConfig, root string) error {
 	started, err := g.startOnce(cfg, root)
 	if err != nil {
 		return err
+	}
+
+	// Only when this launch created the gateway. A launch that found one
+	// running reuses it whatever config it itself came from, so recording
+	// its own here would rename a gateway that has not changed. That is
+	// the whole difference between the config a gateway came from and the
+	// last config anything opened.
+	if started {
+		g.recordConfig(source)
 	}
 
 	if err := g.ready(); err != nil {
@@ -248,6 +270,51 @@ func (g Gateway) startOnce(cfg types.GatewayConfig, root string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// recordConfig notes which config the gateway now running was started
+// from.
+//
+// A failure is a warning and nothing more. The gateway is up by this point
+// and policing traffic, and a record qubesome could not write is a status
+// command that has to say it cannot name the config. That is a worse
+// report, not a broken session, and it is not worth refusing a launch the
+// user asked for.
+//
+// An empty source writes nothing. A config that was never read from a file
+// has no path to record, and an empty record would read as one that could
+// not be written rather than as one that never applied.
+func (g Gateway) recordConfig(source string) {
+	if source == "" {
+		return
+	}
+
+	if err := os.WriteFile(g.ConfigPath, []byte(source+"\n"), files.FileMode); err != nil {
+		slog.Warn("failed to record which config the gateway was started from",
+			"path", g.ConfigPath, "config", source, "error", err)
+	}
+}
+
+// RecordedConfig returns the config the running gateway was started from,
+// and whether there is a record of one.
+//
+// It is the only thing on the host that can answer, once the profile that
+// started the gateway has stopped. A caller that gets false has to say the
+// provenance is unknown rather than reach for whichever config is nearest:
+// a gateway describes itself with an image, a policy and a subnet, and
+// naming the wrong config names three wrong things.
+func (g Gateway) RecordedConfig() (string, bool) {
+	data, err := os.ReadFile(g.ConfigPath)
+	if err != nil {
+		return "", false
+	}
+
+	path := strings.TrimSpace(string(data))
+	if path == "" {
+		return "", false
+	}
+
+	return path, true
 }
 
 // acquire takes the gateway lock and returns the file that holds it.
@@ -394,8 +461,27 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 	// session whose gateway ended at the first Ctrl-C would take the egress
 	// of every workload still running with it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// Not this process's stdout. The gateway outlives the launch, so what
+	// it says would go to a terminal that is not necessarily still there,
+	// interleaved with the output of the workload that happened to start
+	// it. qubesome gateway logs reads this back.
+	log, err := openLog(files.GatewayLogPath())
+	if err != nil {
+		return err
+	}
+	// The sandbox has its own copy once it is started, and a launch that
+	// never got that far has nothing to write here either.
+	//
+	// The error is reported rather than deferred away. Nothing here ever
+	// writes through this descriptor, so unlike the write in replace
+	// there is no last part of one that reaches the filesystem at close
+	// and nothing to lose. What a failure here does say is that the
+	// filesystem holding the log is unwell, and the log is where a
+	// gateway that goes wrong explains itself, so it is worth a line.
+	defer closeLog(log)
+	cmd.Stdout = log
+	cmd.Stderr = log
 
 	err = cmd.Start()
 
@@ -691,8 +777,17 @@ func (h helper) start() (*execabs.Cmd, error) {
 	// Ctrl-C at the terminal that started a workload is not a request to
 	// take it away.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// The gateway's log, which the sandbox's launch has already begun by
+	// the time an uplink is put in its namespace. It goes there for the
+	// reason the gateway's own output does: it outlives the launch.
+	log, err := appendLog(files.GatewayLogPath())
+	if err != nil {
+		return nil, err
+	}
+	defer closeLog(log)
+	cmd.Stdout = log
+	cmd.Stderr = log
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -1088,10 +1183,17 @@ func (g Gateway) readAlloc(subnet netip.Prefix) (allocation, error) {
 		return allocation{}, fmt.Errorf("failed to parse the gateway addresses %q: %w", g.AllocPath, err)
 	}
 
+	// The opening clause is the one the status message uses, so the two
+	// describe the same thing in the same words. This one keeps the claim
+	// about a running gateway that the status message drops: Allocate is
+	// only reached after Up, so by here there is one, and it is the
+	// reason the remedy is a restart rather than an edit. A status is
+	// read in the state gateway stop leaves, where there is not.
 	if a.Subnet != subnet.String() {
 		return allocation{}, fmt.Errorf(
-			"this session's gateway hands addresses out of %s and the config now asks for %s: "+
-				"the running gateway holds the first address of the old range, so the session has to be restarted",
+			"this session has handed addresses out of %s and the config now asks for %s: "+
+				"the gateway running in it holds the first address of the old range, "+
+				"so the session has to be restarted before the new range is used",
 			a.Subnet, subnet)
 	}
 
