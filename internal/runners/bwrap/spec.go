@@ -427,6 +427,17 @@ func workloadMounts(in input) []sandbox.Mount {
 		)
 	}
 
+	// Keyed on the endpoint and not on in.Gateway, so that the file
+	// naming the tunnel command and the variable the command reads are
+	// never one without the other.
+	if in.GatewayProxy != "" {
+		mounts = append(mounts, sandbox.Mount{
+			Src:      filepath.Join(in.ProfileDir, sshConfigFile),
+			Dst:      sshConfigDst,
+			ReadOnly: true,
+		})
+	}
+
 	// The mime handler, the supervisor and the console are all the
 	// qubesome binary, so a workload that is more than one of them still
 	// shares it once.

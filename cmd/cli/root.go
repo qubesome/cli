@@ -49,6 +49,7 @@ func RootCommand() *cli.Command {
 			superviseCommand(),
 			sessionHoldCommand(),
 			gatewayCommand(),
+			tunnelCommand(),
 			vmInitCommand(),
 			consoleCommand(),
 		},

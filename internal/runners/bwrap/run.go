@@ -113,6 +113,10 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 			return err
 		}
 		in.GatewayProxy = proxy
+
+		if err := writeSSHConfig(in); err != nil {
+			return err
+		}
 	}
 
 	spec, err := buildSpec(in)
