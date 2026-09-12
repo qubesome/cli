@@ -26,6 +26,7 @@
             "rate_limiter": null
         }
     ],
+    "network-interfaces": [],
     "machine-config": {
         "vcpu_count": 4,
         "mem_size_mib": 4096,
