@@ -71,3 +71,29 @@ func TestParseStartTime(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint64(987654), got)
 }
+
+func TestStateCarriesTheGatewayAddress(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sandbox.json")
+	require.NoError(t, WriteStateAddr(path, os.Getpid(), "10.111.0.2"))
+
+	s, err := ReadState(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.Getpid(), s.PID)
+	assert.Equal(t, "10.111.0.2", s.Address)
+}
+
+// A sandbox with no gateway records no address, and the field is left out
+// rather than written empty, so a record from before there was one and a
+// record of a workload that has none are the same bytes.
+func TestStateWithoutAnAddressOmitsIt(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sandbox.json")
+	require.NoError(t, WriteState(path, os.Getpid()))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "address")
+}

@@ -2,6 +2,7 @@ package firecracker
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -145,4 +146,125 @@ func TestStatePathRefusals(t *testing.T) {
 		Profile: &types.Profile{Name: "personal"},
 	})
 	require.Error(t, err)
+}
+
+// A machine on the gateway is given one interface, naming the tap
+// qubesome created for it and the MAC its guard pins.
+func TestRenderConfigOnTheGateway(t *testing.T) {
+	t.Parallel()
+
+	p := params()
+	p.TapDevice = "tap0"
+	p.GuestMAC = "02:00:0a:6f:00:02"
+
+	got, err := renderConfig(p)
+	require.NoError(t, err)
+	require.True(t, json.Valid([]byte(got)), got)
+
+	assert.Contains(t, got, `"host_dev_name": "tap0"`)
+	assert.Contains(t, got, `"guest_mac": "02:00:0a:6f:00:02"`)
+
+	goldenText(t, "machine-gateway", got)
+}
+
+// A machine with no gateway gets no interface at all, rather than one
+// naming a tap that was never made. That is what a machine did before
+// there was a gateway to put one on, and it is kept exactly.
+func TestRenderConfigWithoutAGatewayHasNoInterface(t *testing.T) {
+	t.Parallel()
+
+	got, err := renderConfig(params())
+	require.NoError(t, err)
+	require.True(t, json.Valid([]byte(got)), got)
+
+	assert.NotContains(t, got, "host_dev_name")
+	assert.NotContains(t, got, "guest_mac")
+}
+
+// The order is the point of it. The sandbox exists, so the wire, the tap
+// and the guard are built from outside it. The gateway is told whose
+// address it is, which it refuses if it has no policy for the name. Only
+// then does the VMM start.
+func TestVMAttachOrder(t *testing.T) {
+	t.Parallel()
+
+	att := &fakeVMAttacher{}
+
+	require.NoError(t, vmAttach(1234, att, "dev-personal", func() error {
+		att.calls = append(att.calls, "release")
+
+		return nil
+	}))
+
+	assert.Equal(t, []string{"wire", "register", "release"}, att.calls)
+}
+
+// Fail closed. Nothing has booted when this fails, because a gated
+// supervisor is still holding the VMM, and what must not happen is a
+// guest reaching the network with nothing classifying it.
+func TestVMAttachStopsBeforeTheVMMWhenTheGatewayRefuses(t *testing.T) {
+	t.Parallel()
+
+	var released bool
+	att := &fakeVMAttacher{registerErr: errors.New("no policy for dev-personal")}
+
+	err := vmAttach(1234, att, "dev-personal", func() error {
+		released = true
+
+		return nil
+	})
+
+	require.Error(t, err)
+	assert.False(t, released, "the VMM must not start unpoliced")
+	assert.Equal(t, []string{"wire", "register"}, att.calls)
+}
+
+// A wire that cannot be built is the same class of failure, and it stops
+// the launch before the gateway is told anything at all.
+func TestVMAttachStopsWhenTheWireFails(t *testing.T) {
+	t.Parallel()
+
+	var released bool
+	att := &fakeVMAttacher{wireErr: errors.New("no tap")}
+
+	err := vmAttach(1234, att, "dev-personal", func() error {
+		released = true
+
+		return nil
+	})
+
+	require.Error(t, err)
+	assert.False(t, released)
+	assert.Equal(t, []string{"wire"}, att.calls)
+}
+
+// The pid the wiring is given is the sandbox's own, as bwrap reported it,
+// and not the outer process's.
+func TestVMAttachWiresTheSandboxPID(t *testing.T) {
+	t.Parallel()
+
+	att := &fakeVMAttacher{}
+	require.NoError(t, vmAttach(4242, att, "dev-personal", func() error { return nil }))
+
+	assert.Equal(t, 4242, att.pid)
+}
+
+type fakeVMAttacher struct {
+	calls       []string
+	pid         int
+	wireErr     error
+	registerErr error
+}
+
+func (f *fakeVMAttacher) WireVM(pid int) error {
+	f.calls = append(f.calls, "wire")
+	f.pid = pid
+
+	return f.wireErr
+}
+
+func (f *fakeVMAttacher) Register(string) error {
+	f.calls = append(f.calls, "register")
+
+	return f.registerErr
 }

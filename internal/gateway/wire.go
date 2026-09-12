@@ -72,6 +72,8 @@ func (g Gateway) Wire(cfg types.GatewayConfig, addr netip.Addr, workloadPID int)
 		return err
 	}
 
+	w.starting("workload")
+
 	// One command places both ends, so nothing has to enter a namespace to
 	// build the pair. Entering is only needed to address one.
 	//
@@ -82,25 +84,50 @@ func (g Gateway) Wire(cfg types.GatewayConfig, addr netip.Addr, workloadPID int)
 	// RTNETLINK answers: Operation not permitted while both destinations
 	// were perfectly reachable.
 	if err := (helper{Rootfs: w.rootfs, Caps: wireCaps, Args: linkArgs(w), OwnNet: true}).run(); err != nil {
-		return fmt.Errorf("failed to create the veth to workload %s: %w", addr, err)
+		return w.failed("create the veth", w.workloadPID, err)
 	}
 
 	if err := w.configure(w.gatewayPID, gatewayScript(w)); err != nil {
-		return fmt.Errorf("failed to configure the gateway end of the veth to %s: %w", addr, err)
+		return w.failed("configure the gateway end of the veth", w.gatewayPID, err)
 	}
 
 	if err := w.configure(w.workloadPID, workloadScript(w)); err != nil {
-		return fmt.Errorf("failed to configure the workload end of the veth to %s: %w", addr, err)
+		return w.failed("configure the workload end of the veth", w.workloadPID, err)
 	}
 
 	if err := writeResolvConf(w.workloadPID, w.gatewayAddr); err != nil {
 		return err
 	}
 
-	slog.Debug("[gateway] wired a workload to the gateway",
+	slog.Info("[gateway] wired a workload to the gateway",
 		"address", addr, "link", w.gatewayLink, "pid", workloadPID)
 
 	return nil
+}
+
+// starting says what is about to be wired and to what.
+//
+// The three pids are the whole of what a wire depends on and none of them
+// appear anywhere else. A wire that fails with Operation not permitted
+// says nothing about which namespace refused it, and these are what turn
+// that into a question somebody can answer.
+func (w wiring) starting(kind string) {
+	slog.Debug("[gateway] wiring "+kind,
+		"address", w.workload,
+		"link", w.gatewayLink,
+		"gateway", w.gatewayPID,
+		"sandbox", w.workloadPID)
+}
+
+// failed names the step and the namespace it was working on.
+//
+// Which step failed is not something the tool's own message says. ip
+// reports the same Operation not permitted whether it could not create a
+// pair, could not move an end or could not enter a namespace, and the
+// three have entirely different causes.
+func (w wiring) failed(step string, pid int, err error) error {
+	return fmt.Errorf("failed to %s to %s (netns of pid %d, gateway pid %d): %w",
+		step, w.workload, pid, w.gatewayPID, err)
 }
 
 // wireCaps are what a helper needs to build a wire. CAP_NET_ADMIN moves a
@@ -166,15 +193,27 @@ func (g Gateway) wiring(cfg types.GatewayConfig, addr netip.Addr, workloadPID in
 
 // configure runs one namespace's worth of ip commands inside it.
 func (w wiring) configure(pid int, script []string) error {
+	return w.configureHelper(pid, script).run()
+}
+
+// configureHelper is the helper configure runs.
+//
+// Building it apart from running it is what lets a test read what a step
+// is given without a namespace to enter.
+func (w wiring) configureHelper(pid int, script []string) helper {
 	// No OwnNet here. This one enters the namespace it configures, so the
 	// namespace it starts in decides nothing, and giving it one would be
 	// a namespace it immediately leaves.
+	//
+	// No Devices either. Addressing an end and enslaving one are netlink
+	// and nothing else, so these steps open no device node. The tap is the
+	// exception, and it has a helper of its own.
 	return helper{
 		Rootfs: w.rootfs,
 		Caps:   wireCaps,
 		Args:   nsenterArgs(pid),
 		Stdin:  strings.NewReader(batch(script)),
-	}.run()
+	}
 }
 
 // linkArgs creates the veth with an end already in each namespace.

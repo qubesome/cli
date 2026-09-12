@@ -575,3 +575,29 @@ func TestDecodeConfigGateway(t *testing.T) {
 		})
 	}
 }
+
+// A guest holds every capability over a kernel shared with nothing, so
+// capsAdd says nothing about what it may do to its own interface. What
+// holds its address down is the guard on its tap, which the machine
+// cannot reach, so the refusal that binds a sandbox does not bind a
+// machine. This is what lets a workload bring up a tunnel of its own.
+func TestValidateGatewayAccessAllowsNetAdminOnAMicroVM(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Gateway: &GatewayConfig{Subnet: "10.111.0.0/24"}}
+
+	ew := gatewayWorkload("qubesome", "NET_ADMIN")
+	ew.Workload.Runner = "firecracker"
+
+	require.NoError(t, cfg.ValidateGatewayAccess(ew))
+}
+
+// The refusal still binds every other runner, which is the case it was
+// written for.
+func TestValidateGatewayAccessStillRefusesNetAdminOnASandbox(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Gateway: &GatewayConfig{Subnet: "10.111.0.0/24"}}
+
+	require.Error(t, cfg.ValidateGatewayAccess(gatewayWorkload("qubesome", "NET_ADMIN")))
+}

@@ -64,6 +64,25 @@ func RootCommand() *cli.Command {
 	// main.go sends a returned error there. It is still seen: stderr is
 	// where ssh shows what a ProxyCommand says.
 	cmd.Before = func(ctx context.Context, c *cli.Command) (context.Context, error) {
+		// The level is decided here rather than in the flag's own Action
+		// so that there is one place that sets it and no question about
+		// which of the two runs last.
+		//
+		// A run says what it did at INFO whether or not --debug was
+		// asked for: which session it is in, which gateway it used, what
+		// address it was given, what it wired. Those are the facts a
+		// launch that goes wrong is diagnosed from, and leaving them
+		// behind --debug meant the first report of any failure never had
+		// them.
+		level := "INFO"
+		if debug {
+			level = "DEBUG"
+		}
+
+		if err := log.Configure(level, true, false, false); err != nil {
+			return ctx, err
+		}
+
 		if strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") {
 			fmt.Fprintln(os.Stderr,
 				"\033[33mWARN: Running qubesome in Wayland is experimental. Some features may not work as expected.\033[0m")
@@ -72,16 +91,13 @@ func RootCommand() *cli.Command {
 	}
 
 	cmd.Flags = append(cmd.Flags, &cli.BoolFlag{
-		Name:        "debug",
+		Name: "debug",
+		// Every other flag says what it is for, and this one printed a
+		// bare name in the global options of every help screen.
+		Usage:       "log at DEBUG rather than INFO",
 		Value:       false,
 		Destination: &debug,
 		Sources:     cli.EnvVars("QS_DEBUG"),
-		Action: func(ctx context.Context, c *cli.Command, b bool) error {
-			if debug {
-				return log.Configure("DEBUG", true, false, false)
-			}
-			return nil
-		},
 	})
 	cmd.Version = shortVersion()
 	cmd.Usage = "A cli to GitOps your dotfiles"

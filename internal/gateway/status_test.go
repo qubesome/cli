@@ -7,6 +7,7 @@
 package gateway
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -275,4 +276,97 @@ func render(t *testing.T, st Status) string {
 	require.NoError(t, st.Write(&b))
 
 	return b.String()
+}
+
+// The records a launch already wrote are the whole source. Nothing here
+// asks the gateway anything new, which is what lets a status answer for a
+// gateway that has stopped talking.
+func TestStatusListsWiredWorkloads(t *testing.T) {
+	t.Parallel()
+
+	s := Status{
+		Running:     true,
+		GatewayAddr: "10.111.0.1",
+		Wired: []WiredWorkload{
+			{Profile: "personal", Name: "dev", Address: "10.111.0.2", Runner: "firecracker", Running: true},
+			{Profile: "personal", Name: "chrome", Address: "10.111.0.3", Running: true},
+		},
+	}
+
+	var buf bytes.Buffer
+	require.NoError(t, s.Write(&buf))
+
+	got := buf.String()
+	assert.Contains(t, got, "personal/dev at 10.111.0.2, running (firecracker)")
+	assert.Contains(t, got, "personal/chrome at 10.111.0.3, running")
+}
+
+// A workload that has gone is listed as gone rather than dropped. An
+// address is never handed out twice within a session, so what the record
+// names is still true of the session.
+func TestStatusListsAWorkloadThatHasGone(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	require.NoError(t, Status{
+		Running: true,
+		Wired:   []WiredWorkload{{Profile: "personal", Name: "dev", Address: "10.111.0.2"}},
+	}.Write(&buf))
+
+	assert.Contains(t, buf.String(), "personal/dev at 10.111.0.2, gone")
+}
+
+// A session with nothing wired shows no heading with nothing under it.
+func TestStatusWithNothingWiredSaysNothing(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	require.NoError(t, Status{Running: true}.Write(&buf))
+
+	assert.NotContains(t, buf.String(), "wired")
+}
+
+// A record with no address belongs to a workload launched without one,
+// and there is nothing about it a gateway status would say.
+func TestWiredWorkloadsSkipsRecordsWithNoAddress(t *testing.T) {
+	t.Parallel()
+
+	assert.Empty(t, wiredWorkloads(nil))
+}
+
+func TestWorkloadOfRecordReadsTheName(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "dev-personal", workloadOfRecord("/run/x/personal/sandbox-dev-personal.json"))
+}
+
+// A gateway of a session that has gone is alive, has a pid, and answers
+// nothing about why every launch is failing. Saying so is the whole point
+// of the line.
+func TestStatusSaysWhenTheGatewayIsStranded(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+
+	require.NoError(t, sandbox.WriteState(g.Session.StatePath, os.Getpid()))
+	require.NoError(t, sandbox.WriteStateSession(g.StatePath, os.Getpid(), 1))
+
+	st := g.Inspect(g.Session, nil, nil)
+
+	assert.True(t, st.Running)
+	assert.NotEmpty(t, st.Stranded)
+	var b bytes.Buffer
+	require.NoError(t, st.Write(&b))
+	assert.Contains(t, b.String(), "a session that has gone")
+}
+
+// The ordinary case says nothing, so the line only ever appears when
+// there is something wrong.
+func TestStatusIsQuietWhenTheGatewayIsThisSessions(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+	runningGateway(t, g)
+
+	assert.Empty(t, g.Inspect(g.Session, nil, nil).Stranded)
 }

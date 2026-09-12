@@ -14,22 +14,20 @@
             "cache_type": "Unsafe",
             "io_engine": "Sync",
             "rate_limiter": null
-        },
-        {
-            "drive_id": "data",
-            "path_on_host": "/home/coder/.local/share/qubesome/dev.ext4",
-            "is_root_device": false,
-            "is_read_only": false,
-            "partuuid": null,
-            "cache_type": "Writeback",
-            "io_engine": "Sync",
-            "rate_limiter": null
         }
     ],
-    "network-interfaces": [],
+    "network-interfaces": [
+        {
+            "iface_id": "eth0",
+            "host_dev_name": "tap0",
+            "guest_mac": "02:00:0a:6f:00:02",
+            "rx_rate_limiter": null,
+            "tx_rate_limiter": null
+        }
+    ],
     "machine-config": {
-        "vcpu_count": 4,
-        "mem_size_mib": 4096,
+        "vcpu_count": 2,
+        "mem_size_mib": 1024,
         "smt": false,
         "track_dirty_pages": false
     },

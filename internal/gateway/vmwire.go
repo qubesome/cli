@@ -1,0 +1,480 @@
+package gateway
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/netip"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/qubesome/cli/internal/images"
+	"github.com/qubesome/cli/internal/sandbox"
+	"github.com/qubesome/cli/internal/types"
+)
+
+// GuestMAC is the hardware address a microVM's interface is given.
+//
+// It is derived from the workload's address rather than generated, so that
+// the host can write it into the machine description and the guard can pin
+// it without either end having to read it back off a running interface.
+// Two workloads never hold one address, so two guests never hold one MAC.
+//
+// 02 is locally administered and unicast: bit 1 of the first octet set and
+// bit 0 clear. A universally administered address could collide with real
+// hardware, and a multicast one is not an interface's identity at all. The
+// remaining four octets are the address itself, which makes the sender of a
+// frame legible in a capture without a lookup.
+func GuestMAC(addr netip.Addr) (string, error) {
+	if !addr.Is4() {
+		return "", fmt.Errorf("gateway: %s is not an IPv4 address, so it has no guest MAC", addr)
+	}
+
+	a := addr.As4()
+
+	return fmt.Sprintf("02:00:%02x:%02x:%02x:%02x", a[0], a[1], a[2], a[3]), nil
+}
+
+const (
+	// vmBridge joins the veth end to the tap.
+	//
+	// It holds no address, no route and no forwarding flag. The fc
+	// namespace is a wire and not a router, so the guest sits directly on
+	// the gateway's link and the gateway's view of a microVM is the same
+	// as its view of a sandbox: one address, one host route, one ARP.
+	//
+	// Routing it instead was considered and rejected. A router in the
+	// middle needs forwarding, a route each way and proxy ARP in both
+	// directions, and every one of its failures is a silent drop. See the
+	// design document.
+	vmBridge = "br0"
+
+	// vmTap is the device firecracker opens, and VMTapDevice is the same
+	// string for the machine description.
+	//
+	// Firecracker creates a device of this name when it is absent, and
+	// that one is a port of nothing. It gives a guest that boots cleanly,
+	// brings its interface up, takes its address and reaches nothing at
+	// all, which is the one failure of this topology that looks like
+	// success. It is why the tap is made before the VMM starts and why
+	// doctor checks that it is a bridge port.
+	vmTap = "tap0"
+)
+
+// tapOwner is who the tap is handed to, written the way the namespace
+// creating it spells them.
+//
+// Handing the tap over by uid is what lets firecracker attach to it
+// holding no capability at all, and that is what keeps a process that
+// escaped the machine from dissolving the bridge or unloading the guard.
+//
+// Which namespace the numbers are written in is the whole subtlety, and
+// getting it wrong is not a permission failure but an EINVAL. TUNSETOWNER
+// resolves its argument through the user namespace of the process making
+// the call. That process is a helper, which joins the session holder's
+// user namespace and then enters only the microVM sandbox's network
+// namespace, so the numbers have to mean something in the holder's.
+//
+// The holder is bwrap --unshare-user with no --uid, which maps the user's
+// own uid to itself and nothing else:
+//
+//	$ bwrap --unshare-user --dev-bind / / -- cat /proc/self/uid_map
+//	      1000       1000          1
+//
+// So a zero there is not a uid at all, and the kernel refuses it. The VMM
+// sandbox nested below maps its own 0 back to that same uid, which makes
+// the user's own uid the holder's spelling of the uid firecracker will
+// hold, and therefore the one the tap has to be handed to. The kernel
+// compares the two as kuids when firecracker attaches, so they meet.
+//
+// Both halves are in drivers/net/tun.c. TUNSETOWNER is
+// make_kuid(current_user_ns(), arg), which is why the number is written
+// here in the helper's namespace, and tun_not_capable compares
+// cred->euid against tun->owner with uid_eq, which is why a kuid reached
+// by two different spellings still lets firecracker attach holding
+// nothing.
+//
+// hack/verify-sandbox-reentry.sh checks 9 and 10 measure this, and used
+// to measure it with unshare --map-root-user, which maps a zero no part
+// of qubesome ever maps. That is why a zero here passed a check.
+func tapOwner() (uid, gid string) {
+	return strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid())
+}
+
+// VMTapDevice is the tap firecracker is told to open. It is exported
+// because the machine description has to name the same string the wiring
+// created, and the two must move together.
+const VMTapDevice = vmTap
+
+// vmWorkloadScript configures the workload end of a microVM's veth.
+//
+// It is the counterpart of workloadScript and deliberately shares nothing
+// with it. A sandbox's end is addressed. A machine's end is a bridge port,
+// because the address belongs to the guest behind it, and a guest that is
+// on the gateway's link needs nothing in front of it holding one too.
+//
+// Loopback comes up here for workloadScript's reason: nothing inside the
+// sandbox holds anything over its own network namespace, so it cannot
+// bring up an interface at all.
+func vmWorkloadScript() []string {
+	return []string{
+		"link set lo up",
+		"link add name " + vmBridge + " type bridge",
+		"link set " + vmBridge + " up",
+		"link set " + workloadLink + " master " + vmBridge,
+		"link set " + workloadLink + " up",
+	}
+}
+
+// vmTapScript creates the tap and makes it the bridge's second port.
+//
+// It is a script of its own rather than more lines of the one above
+// because the order matters across a process boundary. This has to have
+// run before firecracker starts, and the veth has to exist before the
+// bridge it is enslaved to carries anything.
+//
+// uid and gid are who the tap is handed to. See tapOwner for which
+// namespace they are written in, which is the one thing about this line
+// that is easy to get wrong.
+func vmTapScript(uid, gid string) []string {
+	return []string{
+		"tuntap add " + vmTap + " mode tap user " + uid + " group " + gid,
+		"link set " + vmTap + " master " + vmBridge,
+		"link set " + vmTap + " up",
+	}
+}
+
+const (
+	// nftCommand is the gateway image's nftables.
+	//
+	// The gateway process runs it to program its own ruleset, and qubesome
+	// runs it out of the same rootfs to load a microVM's guard, so a host
+	// with no network tooling of its own can still police a machine.
+	nftCommand = "/usr/sbin/nft"
+
+	// guardTable is the table the guard is loaded as. It is named so that
+	// doctor can ask for it back, and so that loading it a second time
+	// replaces it rather than appending to it.
+	guardTable = "qubesome"
+)
+
+// guardRuleset is the whole of what pins a guest's identity.
+//
+// A sandbox keeps --cap-drop ALL over its network namespace and therefore
+// cannot renumber itself, which is what makes its address its identity
+// rather than its choice. A guest is root on a kernel of its own and can
+// renumber whatever it likes, so the host has to hold the address down at
+// the tap instead. Without this a guest could send as a sibling workload
+// and be classified as one. The replies would go to the real holder, so it
+// is blind traffic only, but a DNS query is one packet and leaving is the
+// whole of its job.
+//
+// Everything arriving from the gateway side passes untouched, since the
+// chain is on the way in and only frames from the tap are the guest's.
+// From the tap, only IP carrying the allocated source and ARP claiming the
+// allocated sender get through, both pinned to the derived MAC. Everything
+// else meets the chain's policy: a renumbered interface, a sibling's
+// address, IPv6 solicitations, stray L2.
+//
+// The counter is named because that is its purpose. It turns a guest
+// trying to lie about who it is from invisible into a number doctor
+// prints.
+func guardRuleset(addr netip.Addr) (string, error) {
+	mac, err := GuestMAC(addr)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf(`table bridge %s {
+  counter spoofed {}
+
+  chain ingress {
+    type filter hook prerouting priority filter; policy drop;
+    iifname != %q accept
+    ether saddr %s ip saddr %s accept
+    ether saddr %s arp saddr ip %s accept
+    counter name spoofed
+  }
+}
+`, guardTable, vmTap, mac, addr, mac, addr), nil
+}
+
+// WireVM gives a microVM's sandbox a link to the session's gateway.
+//
+// It is Wire with a different workload end and two steps Wire has no need
+// of. The veth and the gateway's own end are identical, because the
+// gateway's view of a microVM is the same as its view of a sandbox: one
+// address, one host route, one link. What differs is behind the veth,
+// where the end is a bridge port rather than an address, a tap is the
+// bridge's second port, and a guard holds the guest to the address it was
+// given.
+//
+// There is no resolv.conf here. A sandbox's is written through
+// /proc/<pid>/root into a tmpfs overlay, and a guest's filesystem is
+// inside the machine where the host cannot reach it, so a machine is told
+// its resolver through the init configuration composed into its image.
+//
+// The order is load bearing. The tap has to exist and be a bridge port
+// before firecracker starts, because firecracker opens the tap by name and
+// creates an unenslaved one of its own when the name is absent.
+//
+// Nothing here has to be undone, for Wire's reason: the kernel takes the
+// bridge, the tap and the veth with the network namespace when the sandbox
+// holding it goes.
+func (g Gateway) WireVM(cfg types.GatewayConfig, addr netip.Addr, sandboxPID int) error {
+	w, err := g.wiring(cfg, addr, sandboxPID)
+	if err != nil {
+		return err
+	}
+
+	w.starting("microVM")
+
+	// OwnNet for the reason Wire gives: a netlink request is authorised
+	// against the namespace the caller stands in, not the ones the ends
+	// are bound for.
+	if err := (helper{Rootfs: w.rootfs, Caps: wireCaps, Args: linkArgs(w), OwnNet: true}).run(); err != nil {
+		return w.failed("create the veth", w.workloadPID, err)
+	}
+
+	if err := w.configure(w.gatewayPID, gatewayScript(w)); err != nil {
+		return w.failed("configure the gateway end of the veth", w.gatewayPID, err)
+	}
+
+	if err := w.configure(w.workloadPID, vmWorkloadScript()); err != nil {
+		return w.failed("bridge the microVM end of the veth", w.workloadPID, err)
+	}
+
+	if err := w.tap(); err != nil {
+		return w.failed("create the tap", w.workloadPID, err)
+	}
+
+	if err := w.guard(addr); err != nil {
+		return err
+	}
+
+	slog.Info("[gateway] wired a microVM to the gateway",
+		"address", addr, "link", w.gatewayLink, "tap", vmTap, "pid", sandboxPID)
+
+	return nil
+}
+
+// tap creates the guest's tap and makes it the bridge's second port.
+//
+// It has a helper of its own rather than being a third configure call
+// because it is the only step of a wire that opens a device. ip tuntap
+// opens /dev/net/tun, and bwrap's --dev makes no /dev/net at all, so the
+// helper is given the node the way pasta and the VMM's own sandbox are.
+// Without it ip fails on the first line of the batch with "open: No such
+// file or directory", which fails the launch before the guard is loaded
+// and leaves the machine with no interface to attach to.
+func (w wiring) tap() error {
+	return w.tapHelper().run()
+}
+
+// tapHelper is the helper tap runs. See configureHelper for why the
+// building and the running are apart.
+func (w wiring) tapHelper() helper {
+	return helper{
+		Rootfs:  w.rootfs,
+		Caps:    wireCaps,
+		Devices: []string{tunDevice},
+		Args:    nsenterArgs(w.workloadPID),
+		Stdin:   strings.NewReader(batch(vmTapScript(tapOwner()))),
+	}
+}
+
+// guard loads the ruleset into the microVM's network namespace.
+//
+// A guard that will not load fails the launch, which is the rule the rest
+// of this package follows: a workload whose policy is not being applied to
+// it must not run. Here the address is the policy, so a machine with no
+// guard is a machine whose classification anything inside it can choose.
+//
+// The ruleset arrives on standard input rather than through a file, for
+// the reason nsenterArgs gives about ip -batch: nothing qubesome computed
+// is handed to a shell or left anywhere a second process could read or
+// replace it between the write and the load.
+func (w wiring) guard(addr netip.Addr) error {
+	rules, err := guardRuleset(addr)
+	if err != nil {
+		return err
+	}
+
+	err = helper{
+		Rootfs: w.rootfs,
+		Caps:   wireCaps,
+		Args: []string{
+			nsenterCommand, "--net=" + sandbox.NetnsPath(w.workloadPID),
+			nftCommand, "-f", "-",
+		},
+		Stdin: strings.NewReader(rules),
+	}.run()
+	if err != nil {
+		return fmt.Errorf("failed to load the guard for microVM %s: %w", addr, err)
+	}
+
+	return nil
+}
+
+// ImageRootfs is the gateway image's root filesystem.
+//
+// It is the tree the VMM's sandbox runs in. The gateway is up by the time
+// anything asks for this, so the image is already in the store and this
+// reads the bundle it was started from rather than going to a registry.
+func (a *Attach) ImageRootfs() (string, error) {
+	bundle, err := images.PullProfileImage(a.config.Image)
+	if err != nil {
+		return "", fmt.Errorf("failed to get the gateway image %q: %w", a.config.Image, err)
+	}
+
+	return bundle.Rootfs, nil
+}
+
+// VMWiring is what a microVM's network namespace looks like from outside.
+//
+// Every field is a fact read out of the namespace rather than something
+// qubesome remembers doing, and that is what makes it worth reading: a
+// launch that half succeeded leaves exactly the records a launch that
+// succeeded leaves.
+type VMWiring struct {
+	BridgeUp     bool
+	VethEnslaved bool
+	TapEnslaved  bool
+
+	// Guarded says the nft table is loaded, and Spoofed is what its
+	// counter has seen. A non-zero count is a guest that tried to send
+	// under an address that is not its own, and the guard stopping it is
+	// the guard working.
+	Guarded bool
+	Spoofed uint64
+}
+
+// OK reports whether the wire is whole.
+func (w VMWiring) OK() bool {
+	return w.BridgeUp && w.VethEnslaved && w.TapEnslaved
+}
+
+// InspectVM reads a microVM's wiring out of its network namespace.
+//
+// sandboxPID is the VMM sandbox's own init process in the host's pid
+// namespace, which is what the launch recorded.
+func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int) (VMWiring, error) {
+	bundle, err := images.PullProfileImage(cfg.Image)
+	if err != nil {
+		return VMWiring{}, fmt.Errorf("failed to get the gateway image %q: %w", cfg.Image, err)
+	}
+
+	links, err := helper{
+		Rootfs: bundle.Rootfs,
+		Caps:   wireCaps,
+		Args: []string{
+			nsenterCommand, "--net=" + sandbox.NetnsPath(sandboxPID),
+			ipCommand, "-json", "link", "show",
+		},
+	}.output()
+	if err != nil {
+		return VMWiring{}, fmt.Errorf("failed to read the microVM's links: %w", err)
+	}
+
+	w, err := parseVMWiring(links)
+	if err != nil {
+		return VMWiring{}, err
+	}
+
+	counters, err := helper{
+		Rootfs: bundle.Rootfs,
+		Caps:   wireCaps,
+		Args: []string{
+			nsenterCommand, "--net=" + sandbox.NetnsPath(sandboxPID),
+			nftCommand, "-j", "list", "counters", "table", "bridge", guardTable,
+		},
+	}.output()
+	if err != nil {
+		// A table that is not there is not an error to report as one. It
+		// is the answer, and what it means is the caller's to say: a
+		// machine running with no guard is a serious thing, and a machine
+		// that was never on the gateway has no guard to find. What the
+		// links said stands either way, and losing that to report this
+		// would leave a caller knowing less than it did.
+		slog.Debug("[gateway] the microVM has no guard to read", "pid", sandboxPID, "error", err)
+
+		return w, nil
+	}
+
+	n, err := parseSpoofed(counters)
+	if err != nil {
+		// A ruleset that loaded but holds no counter of that name is not
+		// a guard this understands, which is reported the same way: the
+		// wiring stands, and Guarded stays false.
+		slog.Debug("[gateway] the microVM's guard is not one this understands", "pid", sandboxPID, "error", err)
+
+		return w, nil
+	}
+
+	w.Guarded = true
+	w.Spoofed = n
+
+	return w, nil
+}
+
+// parseVMWiring reads `ip -json link show`.
+func parseVMWiring(data []byte) (VMWiring, error) {
+	var links []struct {
+		IfName    string `json:"ifname"`
+		OperState string `json:"operstate"`
+		Master    string `json:"master"`
+	}
+
+	if err := json.Unmarshal(data, &links); err != nil {
+		return VMWiring{}, fmt.Errorf("failed to parse the microVM's links: %w", err)
+	}
+
+	var w VMWiring
+
+	for _, l := range links {
+		switch l.IfName {
+		case vmBridge:
+			// Not an equality against UP. A bridge reports UNKNOWN when
+			// it has no carrier of its own, which is what a bridge in
+			// this position normally reports, and reading that as down
+			// would call every working machine broken.
+			w.BridgeUp = l.OperState != "DOWN"
+		case workloadLink:
+			w.VethEnslaved = l.Master == vmBridge
+		case vmTap:
+			w.TapEnslaved = l.Master == vmBridge
+		}
+	}
+
+	return w, nil
+}
+
+// parseSpoofed reads the named counter out of `nft -j list counters`.
+//
+// A ruleset with no counter of that name is refused rather than reported
+// as zero. Zero is what a guard that has seen nothing says, and a guard
+// this does not recognise must not be able to say it.
+func parseSpoofed(data []byte) (uint64, error) {
+	var out struct {
+		Nftables []struct {
+			Counter *struct {
+				Name    string `json:"name"`
+				Packets uint64 `json:"packets"`
+			} `json:"counter"`
+		} `json:"nftables"`
+	}
+
+	if err := json.Unmarshal(data, &out); err != nil {
+		return 0, fmt.Errorf("failed to parse the microVM's counters: %w", err)
+	}
+
+	for _, e := range out.Nftables {
+		if e.Counter != nil && e.Counter.Name == "spoofed" {
+			return e.Counter.Packets, nil
+		}
+	}
+
+	return 0, errors.New("gateway: the guard has no spoofed counter")
+}

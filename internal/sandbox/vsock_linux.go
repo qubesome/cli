@@ -68,9 +68,17 @@ func SuperviseVM(port, consolePort uint32, argv []string) error {
 		return superviseConsoles(ln, reaper, gate)
 	}
 
-	// No gate. A microVM has a network stack of its own and takes no
-	// address from the session gateway, so there is nothing for the host
-	// to tell it before its command runs.
+	// No gate, and not because a machine has nothing to wait for. It does
+	// take an address on the session gateway, exactly as a sandbox does.
+	// It has already waited for it twice over by the time this runs.
+	//
+	// Outside, the VMM is itself held by a gated supervisor until the
+	// veth, the tap and the guard are all in place, so firecracker has
+	// not started until the wire exists. Inside, the guest init
+	// configures the interface and writes the resolver from the init
+	// configuration composed into the image, before it reaches here.
+	// There is nothing left for the host to tell a guest at this point,
+	// so a gate would be a wait on a message that is never sent.
 	return superviseWith(ln, argv, reaper, nil)
 }
 
