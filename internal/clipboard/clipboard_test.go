@@ -224,3 +224,25 @@ func xauthorityOf(t *testing.T, env []string) string {
 
 	return string(out)
 }
+
+// xclip -i forks a process to own the selection and keeps it running for
+// as long as it owns one. That child inherits whatever the parent was
+// given for its standard error, so a pipe there is a pipe nothing ever
+// closes, and os/exec's Wait waits for the copy to reach the end of it.
+// It is the whole of why a from-host copy froze.
+func TestPipeReturnsWhenTheWritingCommandForks(t *testing.T) {
+	t.Parallel()
+
+	out := execabs.Command(files.ShBinary, "-c", "echo hello")                  //nolint:gosec // fixed test command.
+	in := execabs.Command(files.ShBinary, "-c", "cat >/dev/null; sleep 60 & :") //nolint:gosec // fixed test command.
+
+	done := make(chan error, 1)
+	go func() { done <- pipe(out, in) }()
+
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("pipe is still waiting for a process that has already exited")
+	}
+}
