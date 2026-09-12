@@ -12,6 +12,7 @@ import (
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/profiles"
+	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"go.yaml.in/yaml/v3"
 )
@@ -50,7 +51,7 @@ func Workload(env Env, cfg *types.Config, profileName, workloadName string) []Ch
 
 	effective := w.ApplyProfile(&profile)
 
-	return []Check{
+	checks := []Check{
 		configCheck,
 		checkWorkloadRunner(env, effective.Workload.Runner),
 		checkWorkloadImage(env, w.Image),
@@ -60,7 +61,48 @@ func Workload(env Env, cfg *types.Config, profileName, workloadName string) []Ch
 		checkMappedPaths(env, "workload paths", effective.Workload.HostAccess.Paths),
 		checkWorkloadValidation(effective),
 	}
+
+	// Only a running microVM on a configured gateway has a namespace to
+	// read. A workload that is neither is not a failure here, it simply
+	// has nothing to report, so the checks are absent rather than empty.
+	if rec, ok := runningMicroVM(env, cfg, effective, profileName, workloadName); ok {
+		checks = append(checks, microVMChecks(env, cfg.Gateway, rec.PID, rec.Address)...)
+	}
+
+	return checks
 }
+
+// runningMicroVM returns the record of a microVM that is up on the
+// gateway, and whether there is one.
+//
+// The state file is a cache of a pid and not the truth, which is why
+// SandboxAlive is asked first: it compares the recorded start time too, so
+// a record left behind by a machine that crashed reads as not running
+// rather than as whatever process has since been given its number.
+func runningMicroVM(env Env, cfg *types.Config, ew types.EffectiveWorkload,
+	profileName, workloadName string,
+) (sandbox.State, bool) {
+	if ew.Workload.Runner != firecrackerRunner || cfg == nil || cfg.Gateway == nil {
+		return sandbox.State{}, false
+	}
+
+	path := filepath.Join(files.ProfileDir(profileName), "sandbox-"+workloadName+".json")
+	if !env.SandboxAlive(path) {
+		return sandbox.State{}, false
+	}
+
+	rec, err := env.SandboxRecord(path)
+	if err != nil || rec.Address == "" {
+		// No address means this machine was launched with no gateway, and
+		// there is no wire to describe.
+		return sandbox.State{}, false
+	}
+
+	return rec, true
+}
+
+// firecrackerRunner is the runner that backs a workload with a microVM.
+const firecrackerRunner = "firecracker"
 
 // checkWorkloadConfig confirms that a config was loaded, that the
 // requested profile exists, and that the requested workload can be found

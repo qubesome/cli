@@ -12,6 +12,7 @@ import (
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/runners/util/usb"
 	"github.com/qubesome/cli/internal/sandbox"
+	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/drive"
 	"golang.org/x/sys/execabs"
 )
@@ -76,6 +77,20 @@ type Env interface {
 	// at path is still running. It is how doctor asks whether a profile
 	// is up, since a sandbox has no name to look up and nothing to ask.
 	SandboxAlive(path string) bool
+
+	// SandboxRecord returns what was recorded for a running sandbox: its
+	// pid, and the gateway address it was given. A caller that needs
+	// either asks SandboxAlive first, since a state file outlives the
+	// process it names.
+	SandboxRecord(path string) (sandbox.State, error)
+
+	// MicroVMWiring reads a running microVM's network namespace: whether
+	// its bridge is whole, and what its guard has counted.
+	//
+	// It is asked of the namespace rather than of the records qubesome
+	// wrote, because the failure worth catching here leaves exactly the
+	// records a working launch leaves.
+	MicroVMWiring(cfg types.GatewayConfig, sandboxPID int) (gateway.VMWiring, error)
 
 	// GatewayReady asks the session's gateway over its control socket
 	// whether its resolver, proxy and netfilter ruleset are all up.
@@ -162,6 +177,14 @@ func (e *OSEnv) ImageInStore(ref string) bool {
 
 func (e *OSEnv) SandboxAlive(path string) bool {
 	return sandbox.Alive(path)
+}
+
+func (e *OSEnv) SandboxRecord(path string) (sandbox.State, error) {
+	return sandbox.ReadState(path)
+}
+
+func (e *OSEnv) MicroVMWiring(cfg types.GatewayConfig, sandboxPID int) (gateway.VMWiring, error) {
+	return gateway.Current().InspectVM(cfg, sandboxPID)
 }
 
 // GatewayReady reaches the running gateway over the control channel the
