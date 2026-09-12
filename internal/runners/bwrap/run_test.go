@@ -10,6 +10,7 @@ import (
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/images"
+	"github.com/qubesome/cli/internal/runners/util/launch"
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/gpu"
@@ -746,7 +747,7 @@ func TestHandOverWithADeadStateFile(t *testing.T) {
 	handled, err := handOver(ew, statePath)
 	require.NoError(t, err)
 	assert.False(t, handled)
-	assert.Less(t, time.Since(start), startupGrace)
+	assert.Less(t, time.Since(start), launch.StartupGrace)
 }
 
 // A supervisor that answers and refuses is running the workload, so the

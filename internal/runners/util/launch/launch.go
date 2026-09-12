@@ -1,4 +1,11 @@
-package bwrap
+// Package launch starts a bwrap sandbox, optionally nested inside the
+// session's user namespace so that a veth can be wired into it.
+//
+// It is shared by the two runners. A workload sandbox and the sandbox a
+// microVM's VMM runs in are given entirely different things, and are
+// started in exactly the same way, and the nesting in particular is subtle
+// enough that one copy of it is the right number.
+package launch
 
 import (
 	"errors"
@@ -6,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"syscall"
+	"time"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/runners/util/container"
@@ -15,7 +23,43 @@ import (
 	"golang.org/x/sys/execabs"
 )
 
-// launcher is one prepared workload sandbox, before and after it starts.
+// firstExtraFD is the descriptor os/exec puts the first ExtraFiles entry
+// on in the child.
+const firstExtraFD = 3
+
+const (
+	// StartupGrace bounds the wait for a sandbox that was recorded a
+	// moment ago to reach the point of listening. Between the host
+	// recording the sandbox and the supervisor binding its socket there is
+	// a bwrap setup and an exec, and a caller that gave up inside that
+	// window would read a sandbox that is not quite up yet as one that is
+	// not there.
+	StartupGrace = 2 * time.Second
+
+	StartupPoll = 50 * time.Millisecond
+)
+
+// Release opens a gated supervisor's gate, waiting for a sandbox that is
+// still starting.
+//
+// The wait is there because between the sandbox existing and the supervisor
+// binding its socket there is a bwrap setup and an exec. The sandbox is
+// known to exist by the time this is called, since its pid was read from
+// bwrap, so what is being waited for is only the socket.
+func Release(socket string) error {
+	deadline := time.Now().Add(StartupGrace)
+
+	for {
+		err := sandbox.Release(socket)
+		if !errors.Is(err, sandbox.ErrNoSupervisor) || time.Now().After(deadline) {
+			return err
+		}
+
+		time.Sleep(StartupPoll)
+	}
+}
+
+// Launcher is one prepared sandbox, before and after it starts.
 //
 // A workload taking a gateway address is started differently from one that
 // is not, and the difference is not only the arguments. It nests inside the
@@ -23,7 +67,7 @@ import (
 // and the sandbox, and it reports its own pid on an info descriptor so the
 // veth has somewhere to go. This holds both shapes, so the launch reads the
 // same either way and only the failure handling has to know which it is.
-type launcher struct {
+type Launcher struct {
 	cmd *execabs.Cmd
 
 	// files are the descriptors handed to the sandbox, closed once it has
@@ -42,19 +86,19 @@ type launcher struct {
 	pid int
 }
 
-// launch prepares the sandbox described by spec.
+// New prepares the sandbox described by spec.
 //
 // gated says the sandbox is to take a gateway address, which is what
 // decides both of the differences above.
-func launch(spec sandbox.Spec, gated bool) (*launcher, error) {
-	l := &launcher{}
+func New(spec sandbox.Spec, gated bool) (*Launcher, error) {
+	l := &Launcher{}
 
 	seccompFD := -1
 
 	if spec.Seccomp {
 		filter, err := seccomp.MemFD()
 		if err != nil {
-			l.close()
+			l.Close()
 
 			return nil, err
 		}
@@ -65,7 +109,7 @@ func launch(spec sandbox.Spec, gated bool) (*launcher, error) {
 
 	args, err := sandbox.Args(spec, seccompFD)
 	if err != nil {
-		l.close()
+		l.Close()
 
 		return nil, err
 	}
@@ -78,7 +122,7 @@ func launch(spec sandbox.Spec, gated bool) (*launcher, error) {
 	// stay on it.
 	outer, packed, err := sandbox.PackArgs(spec, args, firstExtraFD+len(l.files))
 	if err != nil {
-		l.close()
+		l.Close()
 
 		return nil, err
 	}
@@ -87,7 +131,7 @@ func launch(spec sandbox.Spec, gated bool) (*launcher, error) {
 	if gated {
 		outer, err = l.nest(outer)
 		if err != nil {
-			l.close()
+			l.Close()
 
 			return nil, err
 		}
@@ -117,7 +161,7 @@ func launch(spec sandbox.Spec, gated bool) (*launcher, error) {
 // which is what lets the inner one go on naming the seccomp filter and the
 // packed argument file by number. See session.Namespace.Enter, where that
 // was measured rather than assumed.
-func (l *launcher) nest(args []string) ([]string, error) {
+func (l *Launcher) nest(args []string) ([]string, error) {
 	sess := session.Current()
 	if err := sess.Start(); err != nil {
 		return nil, err
@@ -142,8 +186,22 @@ func (l *launcher) nest(args []string) ([]string, error) {
 	return ns.Enter(sandbox.InfoFDArgs(args, firstExtraFD+len(l.files)-1)), nil
 }
 
-// start runs the prepared sandbox.
-func (l *launcher) start() error {
+// Cmd is the process that was started. For a nested launch it is the outer
+// bwrap and not the sandbox itself, which is what ChildPID is for. It is
+// exposed because the caller records its pid and waits on it.
+func (l *Launcher) Cmd() *execabs.Cmd {
+	return l.cmd
+}
+
+// ForTest returns a Launcher standing for a sandbox that is already
+// running, so that the ordering around a launch can be driven without
+// starting one. pid is what ChildPID reports.
+func ForTest(pid int) *Launcher {
+	return &Launcher{pid: pid}
+}
+
+// Start runs the prepared sandbox.
+func (l *Launcher) Start() error {
 	if err := l.cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start workload sandbox: %w", err)
 	}
@@ -151,14 +209,14 @@ func (l *launcher) start() error {
 	return nil
 }
 
-// childPID returns the sandbox's own init process, in the host's pid
+// ChildPID returns the sandbox's own init process, in the host's pid
 // namespace, as bwrap reported it.
 //
 // It is taken from bwrap rather than guessed from the process tree. A
 // nested launch has two bwrap processes and a sandbox init below it, and
 // which pid a veth has to be put next to is not something to infer from
 // parentage.
-func (l *launcher) childPID() (int, error) {
+func (l *Launcher) ChildPID() (int, error) {
 	// bwrap reports it once, and the launch asks for it more than once: the
 	// wiring needs it and so does the kill on the way out.
 	if l.pid > 0 {
@@ -178,13 +236,13 @@ func (l *launcher) childPID() (int, error) {
 	return l.pid, nil
 }
 
-// close releases the descriptors the launch prepared.
+// Close releases the descriptors the launch prepared.
 //
 // The sandbox has its own copies once it has started, and the write end of
 // the info pipe in particular has to be closed here: while this process
 // holds one, a read on the other end would wait for a sandbox that has
 // already gone rather than seeing the end of the file.
-func (l *launcher) close() {
+func (l *Launcher) Close() {
 	for _, f := range l.files {
 		f.Close()
 	}
@@ -196,14 +254,14 @@ func (l *launcher) close() {
 	}
 }
 
-// stop takes down a sandbox that must not be left running, and returns why.
+// Stop takes down a sandbox that must not be left running, and returns why.
 //
 // The process that was started is the outer bwrap for a nested launch, and
 // killing it does not signal the sandbox below it. The sandbox's own init
 // is pid 1 of its pid namespace, and a SIGKILL from an ancestor namespace
 // takes the whole namespace with it, so that is the one to name when it is
 // known.
-func (l *launcher) stop(cause error) error {
+func (l *Launcher) Stop(cause error) error {
 	if l.pid > 0 {
 		if err := syscall.Kill(l.pid, syscall.SIGKILL); err != nil {
 			slog.Warn("failed to kill the unusable workload sandbox", "pid", l.pid, "error", err)
