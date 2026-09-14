@@ -43,7 +43,13 @@ message ReadyReply {
 // is the source of truth for it, and a reload that dropped it would leave
 // running workloads unclassified.
 message ReloadRequest {
+  // Host keyring values, carried only over the authenticated control channel.
+  // Keys are KeyringID(service, account). Never log this request.
+  map<string, string> keyring_secrets = 1;
+  // SHA-256 of the exact policy bytes the host used to select these entries.
+  bytes policy_digest = 2;
 }
 
 message ReloadReply {
+  bool keyring_supported = 1;
 }

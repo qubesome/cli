@@ -272,7 +272,12 @@ func (*ReadyReply) Descriptor() ([]byte, []int) {
 // is the source of truth for it, and a reload that dropped it would leave
 // running workloads unclassified.
 type ReloadRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Host keyring values, carried only over the authenticated control channel.
+	// Keys are KeyringID(service, account). Never log this request.
+	KeyringSecrets map[string]string `protobuf:"bytes,1,rep,name=keyring_secrets,json=keyringSecrets,proto3" json:"keyring_secrets,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// SHA-256 of the exact policy bytes the host used to select these entries.
+	PolicyDigest  []byte `protobuf:"bytes,2,opt,name=policy_digest,json=policyDigest,proto3" json:"policy_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -307,10 +312,25 @@ func (*ReloadRequest) Descriptor() ([]byte, []int) {
 	return file_pkg_control_proto_control_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *ReloadRequest) GetKeyringSecrets() map[string]string {
+	if x != nil {
+		return x.KeyringSecrets
+	}
+	return nil
+}
+
+func (x *ReloadRequest) GetPolicyDigest() []byte {
+	if x != nil {
+		return x.PolicyDigest
+	}
+	return nil
+}
+
 type ReloadReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	KeyringSupported bool                   `protobuf:"varint,1,opt,name=keyring_supported,json=keyringSupported,proto3" json:"keyring_supported,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ReloadReply) Reset() {
@@ -343,6 +363,13 @@ func (*ReloadReply) Descriptor() ([]byte, []int) {
 	return file_pkg_control_proto_control_proto_rawDescGZIP(), []int{7}
 }
 
+func (x *ReloadReply) GetKeyringSupported() bool {
+	if x != nil {
+		return x.KeyringSupported
+	}
+	return false
+}
+
 var File_pkg_control_proto_control_proto protoreflect.FileDescriptor
 
 const file_pkg_control_proto_control_proto_rawDesc = "" +
@@ -357,9 +384,15 @@ const file_pkg_control_proto_control_proto_rawDesc = "" +
 	"\x0fUnregisterReply\"\x0e\n" +
 	"\fReadyRequest\"\f\n" +
 	"\n" +
-	"ReadyReply\"\x0f\n" +
-	"\rReloadRequest\"\r\n" +
-	"\vReloadReply2\x87\x02\n" +
+	"ReadyReply\"\xcc\x01\n" +
+	"\rReloadRequest\x12S\n" +
+	"\x0fkeyring_secrets\x18\x01 \x03(\v2*.control.ReloadRequest.KeyringSecretsEntryR\x0ekeyringSecrets\x12#\n" +
+	"\rpolicy_digest\x18\x02 \x01(\fR\fpolicyDigest\x1aA\n" +
+	"\x13KeyringSecretsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\":\n" +
+	"\vReloadReply\x12+\n" +
+	"\x11keyring_supported\x18\x01 \x01(\bR\x10keyringSupported2\x87\x02\n" +
 	"\x0eGatewayControl\x12>\n" +
 	"\bRegister\x12\x18.control.RegisterRequest\x1a\x16.control.RegisterReply\"\x00\x12D\n" +
 	"\n" +
@@ -379,7 +412,7 @@ func file_pkg_control_proto_control_proto_rawDescGZIP() []byte {
 	return file_pkg_control_proto_control_proto_rawDescData
 }
 
-var file_pkg_control_proto_control_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_pkg_control_proto_control_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_pkg_control_proto_control_proto_goTypes = []any{
 	(*RegisterRequest)(nil),   // 0: control.RegisterRequest
 	(*RegisterReply)(nil),     // 1: control.RegisterReply
@@ -389,21 +422,23 @@ var file_pkg_control_proto_control_proto_goTypes = []any{
 	(*ReadyReply)(nil),        // 5: control.ReadyReply
 	(*ReloadRequest)(nil),     // 6: control.ReloadRequest
 	(*ReloadReply)(nil),       // 7: control.ReloadReply
+	nil,                       // 8: control.ReloadRequest.KeyringSecretsEntry
 }
 var file_pkg_control_proto_control_proto_depIdxs = []int32{
-	0, // 0: control.GatewayControl.Register:input_type -> control.RegisterRequest
-	2, // 1: control.GatewayControl.Unregister:input_type -> control.UnregisterRequest
-	4, // 2: control.GatewayControl.Ready:input_type -> control.ReadyRequest
-	6, // 3: control.GatewayControl.Reload:input_type -> control.ReloadRequest
-	1, // 4: control.GatewayControl.Register:output_type -> control.RegisterReply
-	3, // 5: control.GatewayControl.Unregister:output_type -> control.UnregisterReply
-	5, // 6: control.GatewayControl.Ready:output_type -> control.ReadyReply
-	7, // 7: control.GatewayControl.Reload:output_type -> control.ReloadReply
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	8, // 0: control.ReloadRequest.keyring_secrets:type_name -> control.ReloadRequest.KeyringSecretsEntry
+	0, // 1: control.GatewayControl.Register:input_type -> control.RegisterRequest
+	2, // 2: control.GatewayControl.Unregister:input_type -> control.UnregisterRequest
+	4, // 3: control.GatewayControl.Ready:input_type -> control.ReadyRequest
+	6, // 4: control.GatewayControl.Reload:input_type -> control.ReloadRequest
+	1, // 5: control.GatewayControl.Register:output_type -> control.RegisterReply
+	3, // 6: control.GatewayControl.Unregister:output_type -> control.UnregisterReply
+	5, // 7: control.GatewayControl.Ready:output_type -> control.ReadyReply
+	7, // 8: control.GatewayControl.Reload:output_type -> control.ReloadReply
+	5, // [5:9] is the sub-list for method output_type
+	1, // [1:5] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_pkg_control_proto_control_proto_init() }
@@ -417,7 +452,7 @@ func file_pkg_control_proto_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_control_proto_control_proto_rawDesc), len(file_pkg_control_proto_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -93,7 +93,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 	// The gateway is up and ready and the address is allocated before the
 	// sandbox exists, because everything after this point either needs a
 	// sandbox to act on or has to be undone by killing one.
-	att, err := gateway.Attached(cfg, ew.Workload.HostAccess.Network)
+	att, err := gateway.Attached(cfg, ew.Workload.HostAccess.Network, ew)
 	if err != nil {
 		return err
 	}

@@ -178,7 +178,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 	// Before the image is built, because the address is composed into it,
 	// and after the Alive check above, so a second launch of a machine
 	// that is already up allocates nothing.
-	att, err := gateway.Attached(cfg, ew.Workload.HostAccess.Network)
+	att, err := gateway.Attached(cfg, ew.Workload.HostAccess.Network, ew)
 	if err != nil {
 		return err
 	}

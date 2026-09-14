@@ -389,6 +389,23 @@ func (c *Config) ValidateGatewayAccess(ew EffectiveWorkload) error {
 	if c == nil || c.Gateway == nil {
 		return nil
 	}
+	// Hyphens are legal in both components of the policy key. Refuse a
+	// launch whose key can also name a workload in another configured
+	// profile, even if that other workload has not been created yet.
+	if ew.Profile != nil {
+		for profile := range c.Profiles {
+			if profile == ew.Profile.Name {
+				continue
+			}
+			suffix := "-" + profile
+			if strings.HasSuffix(ew.Name, suffix) {
+				candidate := strings.TrimSuffix(ew.Name, suffix)
+				if candidate != "" && nameRegex.MatchString(candidate) {
+					return fmt.Errorf("ambiguous gateway workload name %q: also names workload %q in profile %q; rename a workload or profile", ew.Name, candidate, profile)
+				}
+			}
+		}
+	}
 
 	if ew.Workload.Runner == firecrackerRunner {
 		return nil

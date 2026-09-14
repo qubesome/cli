@@ -50,12 +50,18 @@ so this is for the cases where that is not enough:
 qubesome gateway status  - Report what qubesome knows about the session's gateway
 qubesome gateway stop    - Stop the session's gateway, leaving the session itself up
 qubesome gateway logs    - Show what the session's gateway has said
+qubesome gateway reload  - Reload policy and refresh host-keyring injection tokens
 
 A running gateway is reused whatever image it came from, so a change to
 the gateway block of the config reaches nothing until it is stopped. The
 next launch then starts a fresh one inside the same session.
 `,
 		Commands: []*cli.Command{
+			{
+				Name:   "reload",
+				Usage:  "reload gateway policy and refresh host-keyring injection tokens",
+				Action: func(context.Context, *cli.Command) error { return gateway.Current().Refresh() },
+			},
 			gatewayStatusCommand(),
 			gatewayStopCommand(),
 			gatewayLogsCommand(),

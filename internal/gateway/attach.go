@@ -58,7 +58,7 @@ type Attach struct {
 // binds only those who asked for a gateway. A workload that asks for no
 // network is not a failure either: it gets nothing, which is the same
 // thing the rule protects.
-func Attached(cfg *types.Config, network string) (*Attach, error) {
+func Attached(cfg *types.Config, network string, identities ...types.EffectiveWorkload) (*Attach, error) {
 	if cfg == nil || cfg.Gateway == nil || !types.GatewayNetwork(network) {
 		return nil, nil //nolint:nilnil // no gateway and no failure is the ordinary case, and there is nothing to return.
 	}
@@ -71,6 +71,11 @@ func Attached(cfg *types.Config, network string) (*Attach, error) {
 	g := Current()
 	if err := g.Up(*cfg.Gateway, cfg.RootDir, cfg.Source); err != nil {
 		return nil, err
+	}
+	for _, identity := range identities {
+		if err := g.bindIdentity(identity); err != nil {
+			return nil, err
+		}
 	}
 
 	// After Up and not before it. Starting a gateway resets the count, so

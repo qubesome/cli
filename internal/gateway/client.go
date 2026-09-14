@@ -217,6 +217,26 @@ func (c *Client) Reload(ctx context.Context) error {
 	return nil
 }
 
+// ReloadKeyring replaces the in-memory host-store snapshot with the values
+// selected by this exact policy. Never log the request or backend values.
+func (c *Client) ReloadKeyring(values map[string]string, digest []byte) error {
+	conn, err := c.dial()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	reply, err := pb.NewGatewayControlClient(conn).Reload(ctx, &pb.ReloadRequest{KeyringSecrets: values, PolicyDigest: digest})
+	if err != nil {
+		return fmt.Errorf("gateway keyring refresh failed: %w", err)
+	}
+	if !reply.GetKeyringSupported() {
+		return errors.New("gateway image does not support host-keyring injection; update the gateway image and restart it")
+	}
+	return nil
+}
+
 // Ready blocks until the gateway's DNS resolver, proxy and netfilter ruleset
 // are all up.
 //
