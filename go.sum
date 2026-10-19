@@ -24,8 +24,8 @@ github.com/go-git/go-git-fixtures/v6 v6.0.0-alpha.1 h1:gmqi2jvsreu0s8JMLylYDFq4s
 github.com/go-git/go-git-fixtures/v6 v6.0.0-alpha.1/go.mod h1:ECf1MqJlBdYpKggBrOXjo/0EnvRZx6D++I86UYjPgAQ=
 github.com/go-git/go-git/v6 v6.0.0-beta.1 h1:1t+vJYGDBN6f9GRWskgWx5UjXPFUa7wfffZZZ2C5GtA=
 github.com/go-git/go-git/v6 v6.0.0-beta.1/go.mod h1:ugDlr38Wwc+fOw85J+Oluh5TNXQtJgYMcriOljg3l4s=
-github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
-github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
+github.com/godbus/dbus/v5 v5.2.3 h1:IQNSXULh6Nc4ZH8ETJ5Mdsj8loUFCWSBnsjmJkyjUB8=
+github.com/godbus/dbus/v5 v5.2.3/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
 github.com/golang/protobuf v1.5.4/go.mod h1:lnTiLA8Wa4RWRcIUkrtSVa5nRhsEGBg48fD6rSs7xps=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
