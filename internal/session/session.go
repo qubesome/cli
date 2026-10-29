@@ -104,7 +104,26 @@ func Current() Session {
 // alongside the first. An flock lives on the open file description, so
 // this one is released when this process exits and not before, by any
 // route out including a signal it does not handle.
-func (s Session) Hold() error {
+//
+// end runs once the session is over, while this holder still has the lock
+// but no longer its record. It is how whatever outlives a session is taken down with
+// it, and the timing is the point: run after the lock was released, a new
+// session could start in between and have what it had just started torn
+// down by the one that is leaving. A holder that never took the lock owns
+// nothing, so end is not run for it.
+func (s Session) Hold(end func()) error {
+	// Registered before the lock is taken, so a shutdown that arrives
+	// while the holder is still recording itself is not lost.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sig)
+
+	return s.hold(sig, end)
+}
+
+// hold is Hold with the shutdown signal passed in, so that the order
+// around it can be driven without signalling the process.
+func (s Session) hold(sig <-chan os.Signal, end func()) error {
 	if err := os.MkdirAll(s.Dir, files.DirMode); err != nil {
 		return fmt.Errorf("failed to create the session dir %q: %w", s.Dir, err)
 	}
@@ -130,9 +149,17 @@ func (s Session) Hold() error {
 	// is what sandbox.Alive reads as not running. Handling the two signals
 	// a shutdown normally arrives as removes the file in the ordinary case
 	// instead of leaving it for the next launch to see through.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
+
+	// Unrecorded before end and not after it, while the lock is still held.
+	// A launch that arrives during the teardown then finds no session to
+	// nest in, and a holder it starts loses the lock and exits, so it fails
+	// rather than start a gateway in the namespace that is about to go.
+	if err := os.Remove(s.StatePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("failed to remove the session state", "path", s.StatePath, "error", err)
+	}
+
+	end()
 
 	return nil
 }
@@ -212,14 +239,29 @@ func (s Session) Start() error {
 		return err
 	}
 
-	// Only when this call started one. A launch that found a holder
-	// running says nothing, so this line marks the beginning of a session
-	// and not merely the use of one.
-	if id, err := s.UsernsID(); err == nil {
-		slog.Info("[session] started a session", "session", id)
+	// Only when this call started the holder that is recorded. A launch
+	// that found a holder running says nothing, and neither does one that
+	// started a holder and lost the race for the lock to another, so this
+	// line marks the beginning of a session and not merely the use of one.
+	if s.startedBy(cmd.Process.Pid) {
+		if id, err := s.UsernsID(); err == nil {
+			slog.Info("[session] started a session", "session", id)
+		}
 	}
 
 	return nil
+}
+
+// startedBy reports whether the recorded holder is the child of launcher,
+// the bwrap a launch started it under.
+func (s Session) startedBy(launcher int) bool {
+	rec, err := sandbox.ReadState(s.StatePath)
+	if err != nil {
+		return false
+	}
+
+	ppid, err := sandbox.ParentPID(rec.PID)
+	return err == nil && ppid == launcher
 }
 
 // wait blocks until the holder records itself, exits, or runs out of

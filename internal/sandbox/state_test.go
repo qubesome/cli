@@ -97,3 +97,42 @@ func TestStateWithoutAnAddressOmitsIt(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "address")
 }
+
+func TestParentPIDOfSelf(t *testing.T) {
+	t.Parallel()
+
+	got, err := ParentPID(os.Getpid())
+	require.NoError(t, err)
+	assert.Equal(t, os.Getppid(), got)
+}
+
+func TestParseParentPID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		line    string
+		want    int
+		wantErr bool
+	}{
+		{name: "plain", line: "42 (qubesome) S 7 42 42 0", want: 7},
+		{name: "command name with a paren and spaces", line: "42 (a) b (c) S 9 42", want: 9},
+		{name: "no command name", line: "42 qubesome S 7", wantErr: true},
+		{name: "truncated", line: "42 (qubesome) S", wantErr: true},
+		{name: "not a number", line: "42 (qubesome) S x", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := parseParentPID(tc.line)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

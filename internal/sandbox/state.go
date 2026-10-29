@@ -195,6 +195,43 @@ func startTime(pid int) (uint64, error) {
 	return parseStartTime(string(data))
 }
 
+// ParentPID returns the pid of a process's parent.
+func ParentPID(pid int) (int, error) {
+	path := procStat(pid)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read %q: %w", path, err)
+	}
+
+	return parseParentPID(string(data))
+}
+
+// parseParentPID reads field 4 of a /proc/<pid>/stat line, counted from
+// after the command name for the reason parseStartTime gives.
+func parseParentPID(line string) (int, error) {
+	i := strings.LastIndex(line, ")")
+	if i < 0 {
+		return 0, fmt.Errorf("malformed stat line: no command name")
+	}
+
+	// Field 3 is the first after the command name, so the parent is the
+	// second of the remaining fields.
+	const parentField = 2
+
+	fields := strings.Fields(line[i+1:])
+	if len(fields) < parentField {
+		return 0, fmt.Errorf("malformed stat line: %d fields after the command name", len(fields))
+	}
+
+	ppid, err := strconv.Atoi(fields[parentField-1])
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse parent pid: %w", err)
+	}
+
+	return ppid, nil
+}
+
 // parseStartTime reads field 22 of a /proc/<pid>/stat line.
 //
 // Field 2 is the command name in parentheses and may contain spaces and
