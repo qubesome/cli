@@ -30,7 +30,7 @@ qubesome flatpak run -profile <profile> org.kde.francis     - Run the org.kde.fr
 				},
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:        "profile",
+						Name:        profileFlag,
 						Destination: &targetProfile,
 					},
 				},
@@ -68,7 +68,7 @@ qubesome flatpak install
 `,
 				Arguments: []cli.Argument{
 					&cli.StringArg{
-						Name:        "profile",
+						Name:        profileFlag,
 						Destination: &targetProfile,
 					},
 				},

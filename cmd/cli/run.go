@@ -35,7 +35,7 @@ and never grants anything, so it can be asked for on any workload.
 		},
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:        "profile",
+				Name:        profileFlag,
 				Usage:       "the profile to run in, required when more than one is active",
 				Destination: &targetProfile,
 			},
@@ -51,40 +51,46 @@ and never grants anything, so it can be asked for on any workload.
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			var cfg *types.Config
-
-			// Commands that can be executed from within a profile
-			// (a.k.a. inception mode) should not check for profile
-			// names nor configs, as those are imposed by the inception
-			// server.
-			if !inception.Inside() {
-				prof, err := profileOrActive(targetProfile)
-				if err != nil {
-					return err
-				}
-
-				targetProfile = prof.Name
-				cfg = profileConfigOrDefault(targetProfile)
-
-				if runner == "" {
-					runner = prof.Runner
-				}
-			}
-
-			opts := []command.Option[qubesome.Options]{
-				qubesome.WithWorkload(workload),
-				qubesome.WithProfile(targetProfile),
-				qubesome.WithConfig(cfg),
-				qubesome.WithRunner(runner),
-				qubesome.WithExtraArgs(cmd.Args().Slice()),
-			}
-
-			if limited {
-				opts = append(opts, qubesome.WithLimited())
-			}
-
-			return qubesome.Run(opts...)
+			return launchWorkload(workload, targetProfile, runner, limited, cmd.Args().Slice())
 		},
 	}
 	return cmd
+}
+
+// launchWorkload starts a workload the way qubesome run does. It is apart
+// from the command so that a restart launches exactly what a run would.
+func launchWorkload(workload, profile, runner string, limited bool, args []string) error {
+	var cfg *types.Config
+
+	// Commands that can be executed from within a profile
+	// (a.k.a. inception mode) should not check for profile
+	// names nor configs, as those are imposed by the inception
+	// server.
+	if !inception.Inside() {
+		prof, err := profileOrActive(profile)
+		if err != nil {
+			return err
+		}
+
+		profile = prof.Name
+		cfg = profileConfigOrDefault(profile)
+
+		if runner == "" {
+			runner = prof.Runner
+		}
+	}
+
+	opts := []command.Option[qubesome.Options]{
+		qubesome.WithWorkload(workload),
+		qubesome.WithProfile(profile),
+		qubesome.WithConfig(cfg),
+		qubesome.WithRunner(runner),
+		qubesome.WithExtraArgs(args),
+	}
+
+	if limited {
+		opts = append(opts, qubesome.WithLimited())
+	}
+
+	return qubesome.Run(opts...)
 }

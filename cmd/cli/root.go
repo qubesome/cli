@@ -18,6 +18,9 @@ import (
 	"golang.org/x/term"
 )
 
+// profileFlag is the flag every command that acts on one profile takes.
+const profileFlag = "profile"
+
 var (
 	targetProfile string
 	sourceProfile string
@@ -53,6 +56,7 @@ func RootCommand() *cli.Command {
 			superviseCommand(),
 			sessionHoldCommand(),
 			gatewayCommand(),
+			workloadsCommand(),
 			tunnelCommand(),
 			vmInitCommand(),
 			consoleCommand(),

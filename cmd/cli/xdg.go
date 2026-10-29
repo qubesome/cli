@@ -21,7 +21,7 @@ qubesome xdg-open -profile <profile> https://github.com/qubesome    - Opens the 
 `,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:        "profile",
+				Name:        profileFlag,
 				Usage:       "the profile to run in, required when more than one is active",
 				Destination: &targetProfile,
 			},

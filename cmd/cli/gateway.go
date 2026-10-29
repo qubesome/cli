@@ -192,7 +192,7 @@ filter is given.
 				Destination: &logsFollow,
 			},
 			&cli.StringFlag{
-				Name:        "profile",
+				Name:        profileFlag,
 				Usage:       "only the lines about the workloads of this profile",
 				Destination: &targetProfile,
 			},

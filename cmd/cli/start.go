@@ -130,7 +130,7 @@ qubesome start -git https://github.com/qubesome/sample-dotfiles i3
 		},
 		Arguments: []cli.Argument{
 			&cli.StringArg{
-				Name:        "profile",
+				Name:        profileFlag,
 				Destination: &targetProfile,
 			},
 		},

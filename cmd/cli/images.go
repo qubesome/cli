@@ -24,7 +24,7 @@ func imagesCommand() *cli.Command {
 				Aliases: []string{"pull"},
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:        "profile",
+						Name:        profileFlag,
 						Destination: &targetProfile,
 					},
 				},

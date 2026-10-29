@@ -39,7 +39,7 @@ used, as qubesome run does.
 				Destination: &conf,
 			},
 			&cli.StringFlag{
-				Name:        "profile",
+				Name:        profileFlag,
 				Usage:       "the profile to run in, required when more than one is active",
 				Destination: &targetProfile,
 			},
