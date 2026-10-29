@@ -331,7 +331,52 @@ func TestStatusWithNothingWiredSaysNothing(t *testing.T) {
 func TestWiredWorkloadsSkipsRecordsWithNoAddress(t *testing.T) {
 	t.Parallel()
 
-	assert.Empty(t, wiredWorkloads(nil))
+	assert.Empty(t, wiredWorkloads(nil, 1))
+}
+
+// A workload left running by a session that has gone is still recorded
+// with an address, and it is not wired to anything this session's gateway
+// knows about. Only the records of the session being reported on count.
+func TestWiredRecordKeepsOnlyThisSession(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	const held = 4026531837
+
+	write := func(name, addr string, session uint64) string {
+		path := filepath.Join(dir, "sandbox-"+name+".json")
+		require.NoError(t, sandbox.WriteStateAddr(path, os.Getpid(), addr, session))
+		return path
+	}
+
+	tests := []struct {
+		name   string
+		path   string
+		held   uint64
+		wantOK bool
+	}{
+		{name: "this session", path: write("dev", "10.111.0.2", held), held: held, wantOK: true},
+		{name: "a session that has gone", path: write("old", "10.111.0.3", 1), held: held},
+		{name: "recorded with no session", path: write("legacy", "10.111.0.4", 0), held: held},
+		{name: "no address", path: write("plain", "", held), held: held},
+		{name: "no session is held", path: write("orphan", "10.111.0.5", held), held: 0},
+		{name: "no record", path: filepath.Join(dir, "sandbox-absent.json"), held: held},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			w, ok := wiredRecord("personal", tc.path, tc.held)
+			require.Equal(t, tc.wantOK, ok)
+			if ok {
+				assert.Equal(t, "personal", w.Profile)
+				assert.Equal(t, "dev", w.Name)
+				assert.Equal(t, "10.111.0.2", w.Address)
+				assert.True(t, w.Running)
+			}
+		})
+	}
 }
 
 func TestWorkloadOfRecordReadsTheName(t *testing.T) {

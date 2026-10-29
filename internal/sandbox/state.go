@@ -44,18 +44,24 @@ type State struct {
 
 // WriteState records a running sandbox at path.
 func WriteState(path string, pid int) error {
-	return WriteStateAddr(path, pid, "")
+	return WriteStateAddr(path, pid, "", 0)
 }
 
-// WriteStateAddr records a running sandbox and the gateway address it was
-// given, which is empty for a sandbox that was given none.
-func WriteStateAddr(path string, pid int, addr string) error {
+// WriteStateAddr records a running sandbox, the gateway address it was
+// given and the session user namespace it was wired under. addr is empty
+// and session is zero for a sandbox that was given no address.
+//
+// The session is recorded beside the address because the address alone
+// does not say whose gateway it is on. A sandbox outlives the session it
+// was wired under when the holder is killed, and its record still names
+// an address a later session's gateway knows nothing about.
+func WriteStateAddr(path string, pid int, addr string, session uint64) error {
 	st, err := startTime(pid)
 	if err != nil {
 		return err
 	}
 
-	return writeState(path, State{PID: pid, StartTime: st, Address: addr})
+	return writeState(path, State{PID: pid, StartTime: st, Address: addr, Session: session})
 }
 
 // WriteStateSession records a running sandbox and the session user

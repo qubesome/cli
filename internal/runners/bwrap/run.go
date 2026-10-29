@@ -148,11 +148,13 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 	// down, so a diagnostic asking what a running sandbox is on the gateway
 	// has somewhere to read it.
 	var addr string
+	var session uint64
 	if att != nil {
 		addr = att.Addr.String()
+		session = att.Session
 	}
 
-	if err := sandbox.WriteStateAddr(statePath, l.RecordedPID(), addr); err != nil {
+	if err := sandbox.WriteStateAddr(statePath, l.RecordedPID(), addr, session); err != nil {
 		// The state file is how a second launch of a single instance
 		// workload finds this one, so a sandbox that cannot be recorded
 		// must not keep running under a name nothing can reach.

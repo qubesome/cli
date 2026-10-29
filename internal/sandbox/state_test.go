@@ -76,12 +76,13 @@ func TestStateCarriesTheGatewayAddress(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sandbox.json")
-	require.NoError(t, WriteStateAddr(path, os.Getpid(), "10.111.0.2"))
+	require.NoError(t, WriteStateAddr(path, os.Getpid(), "10.111.0.2", 4026531837))
 
 	s, err := ReadState(path)
 	require.NoError(t, err)
 	assert.Equal(t, os.Getpid(), s.PID)
 	assert.Equal(t, "10.111.0.2", s.Address)
+	assert.Equal(t, uint64(4026531837), s.Session)
 }
 
 // A sandbox with no gateway records no address, and the field is left out

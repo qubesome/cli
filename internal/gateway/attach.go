@@ -31,6 +31,13 @@ type Attach struct {
 	// the file the answer is in, and it is empty when it could not be
 	// resolved.
 	policy string
+
+	// Session is the session user namespace the gateway was started in,
+	// as the inode the kernel names it by. A workload's record carries it
+	// so that a status can tell the workloads of this session from those
+	// a session that has gone left running. It is zero when it could not
+	// be read.
+	Session uint64
 }
 
 // Attached prepares the gateway side of a launch, and returns nil when the
@@ -85,7 +92,14 @@ func Attached(cfg *types.Config, network string) (*Attach, error) {
 		policy = ""
 	}
 
-	return &Attach{gateway: g, config: *cfg.Gateway, Addr: addr, policy: policy}, nil
+	// Not an error either, for the same reason. It is only ever read by a
+	// status, and Up has just made sure a holder is running.
+	session, err := g.Session.UsernsID()
+	if err != nil {
+		slog.Debug("[gateway] cannot read the session user namespace", "error", err)
+	}
+
+	return &Attach{gateway: g, config: *cfg.Gateway, Addr: addr, policy: policy, Session: session}, nil
 }
 
 // ProxyAddr returns the endpoint a workload asks for a tunnel on.

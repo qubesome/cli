@@ -158,7 +158,10 @@ func (g Gateway) Inspect(s session.Session, cfg *types.Config, ready func() erro
 
 	g.inspectConfig(&st, cfg)
 
-	st.Wired = wiredWorkloads(cfg)
+	// A failure leaves held at zero, which no record names, so a session
+	// with no holder reports nothing wired to it.
+	held, _ := s.UsernsID()
+	st.Wired = wiredWorkloads(cfg, held)
 
 	if st.Running && ready != nil {
 		if err := ready(); err != nil {
@@ -169,18 +172,21 @@ func (g Gateway) Inspect(s session.Session, cfg *types.Config, ready func() erro
 	return st
 }
 
-// wiredWorkloads reads every sandbox record that names a gateway address.
+// wiredWorkloads reads every sandbox record that names a gateway address
+// and was wired under the session held names.
 //
 // The records are the source rather than the gateway, for Inspect's
 // reason. A record with no address belongs to a workload that was launched
 // without one, and it is left out: there is nothing about it a gateway
-// status would say.
+// status would say. A record of another session is left out as well. Its
+// workload is still running when the holder that wired it was killed, and
+// it is wired to a gateway that is not this one.
 //
 // Nothing here fails. A directory that cannot be read and a record that
 // does not parse are both a workload this cannot report, and a status that
 // refused to print because one file was malformed would be useless in
 // exactly the situation it is run in.
-func wiredWorkloads(cfg *types.Config) []WiredWorkload {
+func wiredWorkloads(cfg *types.Config, held uint64) []WiredWorkload {
 	if cfg == nil {
 		return nil
 	}
@@ -201,21 +207,29 @@ func wiredWorkloads(cfg *types.Config) []WiredWorkload {
 		sort.Strings(paths)
 
 		for _, path := range paths {
-			rec, err := sandbox.ReadState(path)
-			if err != nil || rec.Address == "" {
-				continue
+			if w, ok := wiredRecord(profile, path, held); ok {
+				out = append(out, w)
 			}
-
-			out = append(out, WiredWorkload{
-				Profile: profile,
-				Name:    workloadOfRecord(path),
-				Address: rec.Address,
-				Running: sandbox.Alive(path),
-			})
 		}
 	}
 
 	return out
+}
+
+// wiredRecord reads one sandbox record, and reports whether it is a
+// workload wired under the session held names.
+func wiredRecord(profile, path string, held uint64) (WiredWorkload, bool) {
+	rec, err := sandbox.ReadState(path)
+	if err != nil || rec.Address == "" || held == 0 || rec.Session != held {
+		return WiredWorkload{}, false
+	}
+
+	return WiredWorkload{
+		Profile: profile,
+		Name:    workloadOfRecord(path),
+		Address: rec.Address,
+		Running: sandbox.Alive(path),
+	}, true
 }
 
 // workloadOfRecord returns the workload a sandbox record belongs to. The
