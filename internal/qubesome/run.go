@@ -178,10 +178,18 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 			"workload", ew.Workload.Name)
 	}
 
+	// Before anything that depends on the runner, so that the warnings and
+	// the gateway check below answer for the runner the workload is about
+	// to run under rather than the one its file names.
+	if runnerOverride != "" {
+		ew.Workload.Runner = runnerOverride
+	}
+
 	// The effective value, so a name inherited from the profile is
 	// reported once here rather than at every validation of it.
 	types.WarnIgnoredNetwork(ew.Name, ew.Workload.HostAccess.Network, in.Config.Gateway != nil)
 	types.WarnIgnoredMicroVMFields(ew.Name, ew.Workload)
+	types.WarnConsoleTakesItsOwnAddress(ew.Name, ew.Workload, in.Config.Gateway != nil)
 
 	// A workload that could renumber its own interface could claim another
 	// workload's policy and another workload's injected credentials, so the
@@ -203,10 +211,6 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	}
 
 	ew.Workload.Args = append(ew.Workload.Args, in.Args...)
-
-	if runnerOverride != "" {
-		ew.Workload.Runner = runnerOverride
-	}
 
 	if headless {
 		// In headless mode, Mime handling is not supported.

@@ -381,6 +381,10 @@ const netAdmin = "NET_ADMIN"
 // which the machine cannot reach. So the capability stops being a hole in
 // a shared design and becomes an ordinary thing to hold inside your own
 // kernel, which is what a workload wanting to bring up a tunnel needs.
+//
+// The guest already holds it, so there is nothing to ask for. capsAdd on a
+// microVM is refused by ValidateMicroVM, which says why, and this check
+// stands aside so that the refusal a user sees is that one.
 func (c *Config) ValidateGatewayAccess(ew EffectiveWorkload) error {
 	if c == nil || c.Gateway == nil {
 		return nil

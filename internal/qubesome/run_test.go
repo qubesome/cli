@@ -101,6 +101,35 @@ func TestRunnerSelection(t *testing.T) {
 	}
 }
 
+// The runner a workload is validated against is the one it will run
+// under. A --runner given on the command line replaces the configured one
+// before any check that depends on it, or a check would be answered for a
+// runner the workload is not about to use.
+//
+// runner registers the config root with the expandable env vars, which is
+// package level state, so this test does not run in parallel.
+func TestRunnerValidatesAgainstTheOverriddenRunner(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "work", "workloads")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app.yaml"),
+		[]byte("image: example.com/app\nsingleInstance: true\nhostAccess:\n  network: work\n  capsAdd: [NET_ADMIN]\n"), 0o600))
+
+	cfg := &types.Config{
+		RootDir: root,
+		Gateway: &types.GatewayConfig{Subnet: "10.111.0.0/24"},
+		Profiles: map[string]types.Profile{
+			"work": {
+				Name: "work", Path: "work", WindowManager: "exec awesome",
+				HostAccess: types.HostAccess{Network: "work", CapsAdd: []string{"NET_ADMIN"}},
+			},
+		},
+	}
+
+	err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, "firecracker", false)
+	require.ErrorContains(t, err, "capsAdd cannot be granted to a firecracker workload")
+}
+
 // Whether attachVM names a workload that exists, and one that is a
 // firecracker workload, cannot be answered by types.ValidateMicroVM: a
 // workload file is validated on its own and the target lives in another

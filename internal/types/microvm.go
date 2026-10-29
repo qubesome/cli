@@ -245,19 +245,6 @@ func validateMicroVMSizes(m MicroVM) error {
 	return nil
 }
 
-// WarnIgnoredMicroVMFields reports the fields of a firecracker workload
-// that have no effect.
-//
-// There is no X server in a guest, so the arguments that exist to
-// configure one, and the mime registrations that exist to reach one, are
-// read by nothing. They are warned about rather than refused because they
-// are inert: a workload carrying them still does exactly what it was
-// asked to do, and refusing would break a config that only ever shared
-// these fields with its non-VM sibling.
-//
-// Callers invoke this once per launch, for the same reason
-// WarnIgnoredNetwork says: Validate runs several times for a single
-// launch and would otherwise warn repeatedly.
 // WarnConsoleTakesItsOwnAddress reports a workload that attaches to a
 // machine and is also given an address of its own on the gateway.
 //
@@ -290,6 +277,19 @@ func WarnConsoleTakesItsOwnAddress(name string, w Workload, gateway bool) {
 		"name", name, "attachVM", w.AttachVM, "network", w.HostAccess.Network)
 }
 
+// WarnIgnoredMicroVMFields reports the fields of a firecracker workload
+// that have no effect.
+//
+// There is no X server in a guest, so the arguments that exist to
+// configure one, and the mime registrations that exist to reach one, are
+// read by nothing. They are warned about rather than refused because they
+// are inert: a workload carrying them still does exactly what it was
+// asked to do, and refusing would break a config that only ever shared
+// these fields with its non-VM sibling.
+//
+// Callers invoke this once per launch, for the same reason
+// WarnIgnoredNetwork says: Validate runs several times for a single
+// launch and would otherwise warn repeatedly.
 func WarnIgnoredMicroVMFields(name string, w Workload) {
 	if w.Runner != firecrackerRunner {
 		return
