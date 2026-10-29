@@ -274,7 +274,7 @@ func runOnGateway(ew types.EffectiveWorkload, in machine, att *gateway.Attach, s
 		return l.Stop(err)
 	}
 
-	if err := sandbox.WriteStateAddr(statePath, l.Cmd().Process.Pid, att.Addr.String()); err != nil {
+	if err := sandbox.WriteStateAddr(statePath, l.RecordedPID(), att.Addr.String()); err != nil {
 		return l.Stop(fmt.Errorf("failed to record microVM state: %w", err))
 	}
 

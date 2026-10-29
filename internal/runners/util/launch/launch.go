@@ -208,9 +208,24 @@ func (l *Launcher) nest(args []string) ([]string, error) {
 
 // Cmd is the process that was started. For a nested launch it is the outer
 // bwrap and not the sandbox itself, which is what ChildPID is for. It is
-// exposed because the caller records its pid and waits on it.
+// exposed because the caller waits on it.
 func (l *Launcher) Cmd() *execabs.Cmd {
 	return l.cmd
+}
+
+// RecordedPID is the pid a sandbox's state record names.
+//
+// For a nested launch it is the sandbox's own init and not the outer bwrap.
+// The outer bwrap shares the host's network namespace, so a diagnostic
+// reading /proc/<pid>/ns/net through it would see none of the wiring. And a
+// SIGKILL to it does not reach the sandbox below, while one to the init
+// takes the whole pid namespace with it. A plain launch has no outer bwrap,
+// so the process started is the sandbox.
+func (l *Launcher) RecordedPID() int {
+	if l.pid > 0 {
+		return l.pid
+	}
+	return l.cmd.Process.Pid
 }
 
 // ForTest returns a Launcher standing for a sandbox that is already

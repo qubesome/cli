@@ -152,7 +152,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 		addr = att.Addr.String()
 	}
 
-	if err := sandbox.WriteStateAddr(statePath, l.Cmd().Process.Pid, addr); err != nil {
+	if err := sandbox.WriteStateAddr(statePath, l.RecordedPID(), addr); err != nil {
 		// The state file is how a second launch of a single instance
 		// workload finds this one, so a sandbox that cannot be recorded
 		// must not keep running under a name nothing can reach.
