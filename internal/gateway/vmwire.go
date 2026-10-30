@@ -158,6 +158,10 @@ const (
 	// doctor can ask for it back, and so that loading it a second time
 	// replaces it rather than appending to it.
 	guardTable = "qubesome"
+
+	// guardChain is the guard's one chain, named so that doctor can find
+	// it in the table it reads back.
+	guardChain = "ingress"
 )
 
 // guardRuleset is the whole of what pins a guest's identity.
@@ -190,7 +194,7 @@ func guardRuleset(addr netip.Addr) (string, error) {
 	return fmt.Sprintf(`table bridge %s {
   counter spoofed {}
 
-  chain ingress {
+  chain %s {
     type filter hook prerouting priority filter; policy drop;
     iifname != %q accept
     ether saddr %s ip saddr %s accept
@@ -198,7 +202,7 @@ func guardRuleset(addr netip.Addr) (string, error) {
     counter name spoofed
   }
 }
-`, guardTable, vmTap, mac, addr, mac, addr), nil
+`, guardTable, guardChain, vmTap, mac, addr, mac, addr), nil
 }
 
 // WireVM gives a microVM's sandbox a link to the session's gateway.
@@ -343,8 +347,9 @@ type VMWiring struct {
 	VethEnslaved bool
 	TapEnslaved  bool
 
-	// Guarded says the nft table is loaded, and Spoofed is what its
-	// counter has seen. A non-zero count is a guest that tried to send
+	// Guarded says the guard is still the one that was loaded, its chain
+	// and its rules as well as its table, and Spoofed is what its counter
+	// has seen. A non-zero count is a guest that tried to send
 	// under an address that is not its own, and the guard stopping it is
 	// the guard working.
 	Guarded bool
@@ -359,8 +364,9 @@ func (w VMWiring) OK() bool {
 // InspectVM reads a microVM's wiring out of its network namespace.
 //
 // sandboxPID is the VMM sandbox's own init process in the host's pid
-// namespace, which is what the launch recorded.
-func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int) (VMWiring, error) {
+// namespace, which is what the launch recorded, and addr is the address the
+// guard was loaded to pin.
+func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int, addr netip.Addr) (VMWiring, error) {
 	bundle, err := images.PullProfileImage(cfg.Image)
 	if err != nil {
 		return VMWiring{}, fmt.Errorf("failed to get the gateway image %q: %w", cfg.Image, err)
@@ -383,12 +389,15 @@ func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int) (VMWiring, e
 		return VMWiring{}, err
 	}
 
-	counters, err := helper{
+	// The whole table and not only its counter. A counter is an object of
+	// its own and stays when the chain beside it is flushed or replaced, so
+	// it says nothing about whether anything is still being dropped.
+	table, err := helper{
 		Rootfs: bundle.Rootfs,
 		Caps:   wireCaps,
 		Args: []string{
 			nsenterCommand, "--net=" + sandbox.NetnsPath(sandboxPID),
-			nftCommand, "-j", "list", "counters", "table", "bridge", guardTable,
+			nftCommand, "-j", "list", "table", "bridge", guardTable,
 		},
 	}.output()
 	if err != nil {
@@ -403,11 +412,11 @@ func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int) (VMWiring, e
 		return w, nil
 	}
 
-	n, err := parseSpoofed(counters)
+	n, err := parseGuard(table, addr)
 	if err != nil {
-		// A ruleset that loaded but holds no counter of that name is not
-		// a guard this understands, which is reported the same way: the
-		// wiring stands, and Guarded stays false.
+		// A table that is not the guard this loaded is not a guard this
+		// understands, which is reported the same way: the wiring stands,
+		// and Guarded stays false.
 		slog.Debug("[gateway] the microVM's guard is not one this understands", "pid", sandboxPID, "error", err)
 
 		return w, nil
@@ -451,30 +460,73 @@ func parseVMWiring(data []byte) (VMWiring, error) {
 	return w, nil
 }
 
-// parseSpoofed reads the named counter out of `nft -j list counters`.
+// parseGuard reads the guard back out of `nft -j list table`, and returns
+// what its counter has seen.
 //
-// A ruleset with no counter of that name is refused rather than reported
-// as zero. Zero is what a guard that has seen nothing says, and a guard
-// this does not recognise must not be able to say it.
-func parseSpoofed(data []byte) (uint64, error) {
+// A table is only taken for the guard when it is still the guard that was
+// loaded: the spoofed counter, an ingress chain on the prerouting hook
+// dropping by default, and rules pinning both the IP and the ARP frames
+// of the tap to this guest's address and MAC. Any of those missing is
+// refused rather than reported as a guard that has seen nothing, which is
+// what zero says. The rules are matched by the values they name and not
+// by the shape nft prints them in, which changes between releases.
+func parseGuard(data []byte, addr netip.Addr) (uint64, error) {
+	mac, err := GuestMAC(addr)
+	if err != nil {
+		return 0, err
+	}
+
 	var out struct {
 		Nftables []struct {
 			Counter *struct {
 				Name    string `json:"name"`
 				Packets uint64 `json:"packets"`
 			} `json:"counter"`
+			Chain *struct {
+				Name   string `json:"name"`
+				Hook   string `json:"hook"`
+				Policy string `json:"policy"`
+			} `json:"chain"`
+			Rule *struct {
+				Chain string          `json:"chain"`
+				Expr  json.RawMessage `json:"expr"`
+			} `json:"rule"`
 		} `json:"nftables"`
 	}
 
 	if err := json.Unmarshal(data, &out); err != nil {
-		return 0, fmt.Errorf("failed to parse the microVM's counters: %w", err)
+		return 0, fmt.Errorf("failed to parse the microVM's guard: %w", err)
 	}
 
+	var (
+		packets  uint64
+		counter  bool
+		chain    bool
+		pinnings int
+	)
+
 	for _, e := range out.Nftables {
-		if e.Counter != nil && e.Counter.Name == "spoofed" {
-			return e.Counter.Packets, nil
+		switch {
+		case e.Counter != nil && e.Counter.Name == "spoofed":
+			packets, counter = e.Counter.Packets, true
+		case e.Chain != nil && e.Chain.Name == guardChain:
+			chain = e.Chain.Hook == "prerouting" && e.Chain.Policy == "drop"
+		case e.Rule != nil && e.Rule.Chain == guardChain:
+			expr := strings.ToLower(string(e.Rule.Expr))
+			if strings.Contains(expr, `"`+addr.String()+`"`) && strings.Contains(expr, `"`+strings.ToLower(mac)+`"`) {
+				pinnings++
+			}
 		}
 	}
 
-	return 0, errors.New("gateway: the guard has no spoofed counter")
+	switch {
+	case !counter:
+		return 0, errors.New("gateway: the guard has no spoofed counter")
+	case !chain:
+		return 0, errors.New("gateway: the guard has no ingress chain dropping by default")
+	case pinnings < 2:
+		return 0, fmt.Errorf("gateway: the guard does not pin both the IP and the ARP of %s to %s", addr, mac)
+	}
+
+	return packets, nil
 }

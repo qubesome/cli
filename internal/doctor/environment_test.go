@@ -567,7 +567,7 @@ func (f *fakeEnv) SandboxRecord(path string) (sandbox.State, error) {
 	return sandbox.State{}, os.ErrNotExist
 }
 
-func (f *fakeEnv) MicroVMWiring(types.GatewayConfig, int) (gateway.VMWiring, error) {
+func (f *fakeEnv) MicroVMWiring(types.GatewayConfig, int, string) (gateway.VMWiring, error) {
 	return f.wiring, f.wiringErr
 }
 
