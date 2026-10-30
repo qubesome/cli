@@ -102,6 +102,7 @@ func gatewayWithPolicy(t *testing.T, policy string) Gateway {
 	source := filepath.Join(dir, "gateway.yml")
 	require.NoError(t, os.WriteFile(source, []byte(policy), 0o600))
 	require.NoError(t, os.WriteFile(g.policySourcePath(), []byte(source), 0o600))
+	require.NoError(t, g.stagePolicy([]byte(policy)))
 
 	return g
 }
@@ -114,7 +115,7 @@ func TestReloadToleratesAGatewayThatCannotReload(t *testing.T) {
 	gw.noReload = true
 	c := startGateway(t, gw)
 
-	require.NoError(t, gatewayWithPolicy(t, plainPolicy).reloadWith(c, false))
+	require.NoError(t, gatewayWithPolicy(t, plainPolicy).reloadWith(c, false, ""))
 }
 
 // A gateway this launch started has just read its policy, so with no host
@@ -123,7 +124,7 @@ func TestReloadSkipsAGatewayJustStarted(t *testing.T) {
 	gw := newGateway(closedChan(), testWorkload)
 	c := startGateway(t, gw)
 
-	require.NoError(t, gatewayWithPolicy(t, plainPolicy).reloadWith(c, true))
+	require.NoError(t, gatewayWithPolicy(t, plainPolicy).reloadWith(c, true, ""))
 	assert.Equal(t, 0, gw.reloaded())
 }
 
@@ -131,6 +132,50 @@ func TestReloadReReadsARunningGatewaysPolicy(t *testing.T) {
 	gw := newGateway(closedChan(), testWorkload)
 	c := startGateway(t, gw)
 
-	require.NoError(t, gatewayWithPolicy(t, plainPolicy).reloadWith(c, false))
+	require.NoError(t, gatewayWithPolicy(t, plainPolicy).reloadWith(c, false, ""))
+	assert.Equal(t, 1, gw.reloaded())
+}
+
+// The gateway reads the staged copy as it starts, and an image pull can sit
+// between that and the launch staging the policy again. An edit made then
+// is one the gateway has not read.
+func TestReloadReReadsAPolicyEditedWhileTheGatewayStarted(t *testing.T) {
+	gw := newGateway(closedChan(), testWorkload)
+	c := startGateway(t, gw)
+
+	edited := strings.ReplaceAll(plainPolicy, "api.github.com", "api.example.com")
+	g := gatewayWithPolicy(t, edited)
+	require.NoError(t, g.stagePolicy([]byte(plainPolicy)))
+
+	require.NoError(t, g.reloadWith(c, true, ""))
+	assert.Equal(t, 1, gw.reloaded())
+}
+
+// A gateway started by a qubesome from before the source was recorded
+// cannot be handed keyring values. A launch whose policy names some is
+// refused rather than run without the credentials it was given.
+func TestReloadRefusesAGatewayWithNoSourceForAKeyringPolicy(t *testing.T) {
+	gw := newGateway(closedChan(), testWorkload)
+	c := startGateway(t, gw)
+
+	dir := t.TempDir()
+	launch := filepath.Join(dir, "gateway.yml")
+	require.NoError(t, os.WriteFile(launch, []byte(keyringPolicy), 0o600))
+
+	g := Gateway{Dir: dir}
+	require.ErrorIs(t, g.reloadWith(c, false, launch), errNoPolicySource)
+	require.ErrorIs(t, g.reloadWith(c, false, ""), errNoPolicySource)
+	assert.Equal(t, 0, gw.reloaded())
+}
+
+func TestReloadKeepsAGatewayWithNoSourceWorkingForAPlainPolicy(t *testing.T) {
+	gw := newGateway(closedChan(), testWorkload)
+	c := startGateway(t, gw)
+
+	dir := t.TempDir()
+	launch := filepath.Join(dir, "gateway.yml")
+	require.NoError(t, os.WriteFile(launch, []byte(plainPolicy), 0o600))
+
+	require.NoError(t, Gateway{Dir: dir}.reloadWith(c, false, launch))
 	assert.Equal(t, 1, gw.reloaded())
 }

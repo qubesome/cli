@@ -162,10 +162,17 @@ func (g Gateway) Up(cfg types.GatewayConfig, root, source string) error {
 		return err
 	}
 
+	// Not an error. A gateway that records its policy source never reads
+	// this, and one that does not is refused when it is empty.
+	policy, err := cfg.ConfigPath(root)
+	if err != nil {
+		policy = ""
+	}
+
 	// A gateway this launch started has just read its policy, but not the
 	// host keyring values it names. Those are in neither the policy file
 	// nor the gateway's environment, so they are delivered here.
-	return g.reload(started)
+	return g.reload(started, policy)
 }
 
 // reload asks a gateway that was already running to re-read its policy file.
@@ -190,9 +197,13 @@ func (g Gateway) Up(cfg types.GatewayConfig, root, source string) error {
 // re-read its policy and is no worse for being asked.
 //
 // started is true for the launch that has just started the gateway. Unless
-// the policy names host keyring values to deliver, there is nothing to ask
-// of a gateway that has only now read its policy.
-func (g Gateway) reload(started bool) error {
+// the policy names host keyring values to deliver, or was edited after the
+// gateway read it, there is nothing to ask of a gateway that has only now
+// read its policy.
+//
+// policy is the launch's own policy file. See reloadKeyring for when it is
+// read.
+func (g Gateway) reload(started bool, policy string) error {
 	// Held across the staging of the policy and the call, so that two
 	// launches cannot leave a gateway with one's policy and the other's
 	// keyring values.
@@ -207,16 +218,20 @@ func (g Gateway) reload(started bool) error {
 		return err
 	}
 
-	return g.reloadWith(c, started)
+	return g.reloadWith(c, started, policy)
 }
 
 // reloadWith is reload with the lock held and the client at hand.
-func (g Gateway) reloadWith(c *Client, started bool) error {
-	if delivered, err := g.reloadKeyring(c); delivered || err != nil {
+func (g Gateway) reloadWith(c *Client, started bool, policy string) error {
+	delivered, changed, err := g.reloadKeyring(c, policy)
+	if delivered || err != nil {
 		return err
 	}
 
-	if started {
+	// A gateway reads the staged copy as it starts, and the policy is
+	// staged again above. An edit made in between, while the image was
+	// pulled, is one the gateway has not read.
+	if started && !changed {
 		return nil
 	}
 

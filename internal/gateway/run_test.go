@@ -143,6 +143,7 @@ func TestAttachedStopsTheLaunchWhenTheGatewayWillNotStart(t *testing.T) {
 // launch that started it read it.
 func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 	g := newSessionGateway(t)
+	cfg, root := reusableConfig(t)
 
 	creds := newCreds(t)
 	require.NoError(t, g.writeCreds(creds))
@@ -151,7 +152,7 @@ func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 
 	runningGateway(t, g)
 
-	require.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
+	require.NoError(t, g.Up(cfg, root, ""))
 
 	assert.Equal(t, 1, gw.reloaded())
 }
@@ -161,6 +162,7 @@ func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 // start a workload over it.
 func TestUpAcceptsAGatewayThatCannotReload(t *testing.T) {
 	g := newSessionGateway(t)
+	cfg, root := reusableConfig(t)
 
 	creds := newCreds(t)
 	require.NoError(t, g.writeCreds(creds))
@@ -170,7 +172,7 @@ func TestUpAcceptsAGatewayThatCannotReload(t *testing.T) {
 
 	runningGateway(t, g)
 
-	assert.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
+	assert.NoError(t, g.Up(cfg, root, ""))
 }
 
 // A state file outlives the process it names, so a gateway that crashed must
@@ -530,6 +532,22 @@ func unusableConfig() types.GatewayConfig {
 	}
 }
 
+// reusableConfig names a policy that is there and asks for nothing from
+// the host keyring. A gateway that records no policy source is reused
+// only once the launch's own policy says so.
+//
+// A launch that took the start path instead would get as far as the image
+// pull, so a test using it shows the gateway was reused by reloaded and not
+// by an error.
+func reusableConfig(t *testing.T) (types.GatewayConfig, string) {
+	t.Helper()
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "gateway.yml"), []byte(plainPolicy), 0o600))
+
+	return unusableConfig(), root
+}
+
 func prefix(t *testing.T, s string) netip.Prefix {
 	t.Helper()
 
@@ -696,6 +714,7 @@ func TestUpReusesAGatewayFromAReleaseThatRecordedNoSession(t *testing.T) {
 	t.Parallel()
 
 	g := newSessionGateway(t)
+	cfg, root := reusableConfig(t)
 
 	creds := newCreds(t)
 	require.NoError(t, g.writeCreds(creds))
@@ -710,7 +729,7 @@ func TestUpReusesAGatewayFromAReleaseThatRecordedNoSession(t *testing.T) {
 	require.NoError(t, sandbox.WriteState(g.Session.StatePath, os.Getppid()))
 	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
 
-	require.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
+	require.NoError(t, g.Up(cfg, root, ""))
 
 	assert.Equal(t, 1, gw.reloaded(), "the gateway that was running must have been reused")
 }

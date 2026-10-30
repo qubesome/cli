@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -71,7 +72,7 @@ func (g Gateway) Refresh() error {
 	if err := g.ready(); err != nil {
 		return err
 	}
-	return g.reload(false)
+	return g.reload(false, "")
 }
 
 // stagePolicy copies only configuration, never resolved values. Mounting its
@@ -95,8 +96,15 @@ func (g Gateway) stagePolicy(data []byte) error {
 	return os.Rename(f.Name(), filepath.Join(g.policyDir(), "gateway.yml"))
 }
 
+// errNoPolicySource reports a gateway started by a qubesome from before
+// policy sources were recorded. It reads its policy where that release
+// mounted it, and is never handed host keyring values.
+var errNoPolicySource = errors.New("the running gateway was started by an older qubesome and cannot be handed " +
+	"host keyring values: run qubesome gateway stop, and the next launch starts one that can")
+
 // reloadKeyring stages the policy the gateway was started from and delivers
-// the host keyring values it names, and reports whether it delivered any.
+// the host keyring values it names. It reports whether it delivered any,
+// and whether the policy staged differs from the one that was there.
 //
 // It is always the original policy, never the configuration of an unrelated
 // launch reusing this session's gateway. The caller holds the gateway lock
@@ -106,35 +114,70 @@ func (g Gateway) stagePolicy(data []byte) error {
 // A policy that names no keyring values is staged and nothing more. The
 // caller then asks the gateway to re-read it the way it always has, which
 // is what keeps a gateway too old to serve Reload working as it did.
-func (g Gateway) reloadKeyring(c *Client) (bool, error) {
+//
+// launch is the policy of the launch asking, and is only read for a
+// gateway that records no source. That gateway cannot be handed values, so
+// a launch whose policy names some is refused rather than run without
+// them. Empty means there is no launch to ask on behalf of, and then any
+// gateway with no source is refused.
+func (g Gateway) reloadKeyring(c *Client, launch string) (delivered, changed bool, err error) {
 	source, err := os.ReadFile(g.policySourcePath())
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return false, false, refuseWithoutSource(launch)
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	// The source record is written only by the trusted launcher in its
 	// private session directory. The policy itself may live anywhere.
 	data, err := os.ReadFile(string(source)) //nolint:gosec // trusted host configuration path, not workload input.
 	if err != nil {
-		return false, fmt.Errorf("read gateway policy: %w", err)
+		return false, false, fmt.Errorf("read gateway policy: %w", err)
 	}
 
 	values, err := keyringValues(data, backend.New().Get)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 
+	// A file that cannot be read reads as changed, which only costs a
+	// Reload the gateway did not need.
+	staged, err := os.ReadFile(filepath.Join(g.policyDir(), "gateway.yml"))
+	changed = err != nil || !bytes.Equal(staged, data)
+
 	if err := g.stagePolicy(data); err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	if len(values) == 0 {
-		return false, nil
+		return false, changed, nil
 	}
 
 	digest := sha256.Sum256(data)
-	return true, c.ReloadKeyring(values, digest[:])
+	return true, changed, c.ReloadKeyring(values, digest[:])
+}
+
+// refuseWithoutSource decides for a gateway that records no policy source.
+func refuseWithoutSource(launch string) error {
+	if launch == "" {
+		return errNoPolicySource
+	}
+
+	data, err := os.ReadFile(launch)
+	if err != nil {
+		return fmt.Errorf("read gateway policy: %w", err)
+	}
+
+	// No value is read. The stub stands in for the store so that only
+	// whether the policy names any is asked.
+	refs, err := keyringValues(data, func(string, string) (string, error) { return "set", nil })
+	if err != nil {
+		return err
+	}
+	if len(refs) > 0 {
+		return errNoPolicySource
+	}
+
+	return nil
 }
