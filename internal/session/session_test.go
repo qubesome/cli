@@ -230,3 +230,25 @@ func TestStartedByWithoutARecord(t *testing.T) {
 
 	assert.False(t, newSession(t).startedBy(os.Getppid()))
 }
+
+func TestOutlived(t *testing.T) {
+	t.Parallel()
+
+	s := newSession(t)
+	require.NoError(t, sandbox.WriteState(s.StatePath, os.Getpid()))
+	current, err := s.UsernsID()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	record := func(name string, session uint64) string {
+		path := filepath.Join(dir, name+".json")
+		require.NoError(t, sandbox.WriteStateAddr(path, os.Getpid(), "10.111.0.2", session))
+		return path
+	}
+
+	require.NoError(t, s.Outlived(record("this", current), "this"))
+	require.NoError(t, s.Outlived(record("ungated", 0), "ungated"))
+	require.NoError(t, s.Outlived(filepath.Join(dir, "absent.json"), "absent"))
+	require.ErrorContains(t, s.Outlived(record("old", current+1), "old"), "old is still running from a session that has ended")
+	require.ErrorContains(t, newSession(t).Outlived(record("orphan", current), "orphan"), "session that has ended")
+}

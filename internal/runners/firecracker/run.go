@@ -16,6 +16,7 @@ import (
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/runners/util/launch"
 	"github.com/qubesome/cli/internal/sandbox"
+	"github.com/qubesome/cli/internal/session"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
@@ -161,6 +162,10 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 	// types.ValidateMicroVM refuses singleInstance: false at config
 	// load, so every firecracker workload reaches this.
 	if sandbox.Alive(statePath) {
+		if err := session.Current().Outlived(statePath, ew.Name); err != nil {
+			return err
+		}
+
 		slog.Info("the microVM is already running", "workload", ew.Name)
 
 		return nil

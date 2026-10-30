@@ -19,6 +19,7 @@ import (
 	"github.com/qubesome/cli/internal/runners/util/mime"
 	"github.com/qubesome/cli/internal/runners/util/usb"
 	"github.com/qubesome/cli/internal/sandbox"
+	"github.com/qubesome/cli/internal/session"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/env"
@@ -266,6 +267,10 @@ func reap(cmd *execabs.Cmd, statePath string, att *gateway.Attach, name string) 
 func handOver(ew types.EffectiveWorkload, statePath string) (bool, error) {
 	if !sandbox.Alive(statePath) {
 		return false, nil
+	}
+
+	if err := session.Current().Outlived(statePath, ew.Name); err != nil {
+		return true, err
 	}
 
 	socket, err := files.WorkloadAgentSocket(ew.Profile.Name, ew.Workload.Name)
