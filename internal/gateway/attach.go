@@ -63,6 +63,17 @@ func Attached(cfg *types.Config, network string, identities ...types.EffectiveWo
 		return nil, nil //nolint:nilnil // no gateway and no failure is the ordinary case, and there is nothing to return.
 	}
 
+	// Here and not with the rest of the config checks, because every
+	// launch given an address comes through here and not every one goes
+	// through those. A machine booted for a console it is attached to is
+	// one that does not. Before Up, so a name that cannot be told apart
+	// starts no gateway.
+	for _, identity := range identities {
+		if err := cfg.ValidateGatewayName(identity); err != nil {
+			return nil, err
+		}
+	}
+
 	subnet, err := cfg.Gateway.SubnetPrefix()
 	if err != nil {
 		return nil, err

@@ -389,23 +389,6 @@ func (c *Config) ValidateGatewayAccess(ew EffectiveWorkload) error {
 	if c == nil || c.Gateway == nil {
 		return nil
 	}
-	// Hyphens are legal in both components of the policy key. Refuse a
-	// launch whose key can also name a workload in another configured
-	// profile, even if that other workload has not been created yet.
-	if ew.Profile != nil {
-		for profile := range c.Profiles {
-			if profile == ew.Profile.Name {
-				continue
-			}
-			suffix := "-" + profile
-			if strings.HasSuffix(ew.Name, suffix) {
-				candidate := strings.TrimSuffix(ew.Name, suffix)
-				if candidate != "" && nameRegex.MatchString(candidate) {
-					return fmt.Errorf("ambiguous gateway workload name %q: also names workload %q in profile %q; rename a workload or profile", ew.Name, candidate, profile)
-				}
-			}
-		}
-	}
 
 	if ew.Workload.Runner == firecrackerRunner {
 		return nil
@@ -428,6 +411,40 @@ func (c *Config) ValidateGatewayAccess(ew EffectiveWorkload) error {
 				"Drop the capability to keep the network, or set hostAccess.network to none to keep the capability "+
 				"with no egress",
 			ew.Name, netAdmin, network)
+	}
+
+	return nil
+}
+
+// ValidateGatewayName refuses a workload whose policy key could also name
+// a workload in another configured profile.
+//
+// The key is the workload and the profile joined by a hyphen, and hyphens
+// are legal in both. So workload a-b in profile c and workload a in profile
+// b-c are both a-b-c to the gateway, and would share its policy and the
+// credentials it injects. The other workload need not exist yet to be
+// refused for, since creating it later would not ask this again.
+//
+// It is asked only of a launch that is about to be given a gateway
+// address, which is why the gateway's Attached is what calls it. A launch
+// with no network shares nothing with the gateway, whatever it is called.
+func (c *Config) ValidateGatewayName(ew EffectiveWorkload) error {
+	if c == nil || ew.Profile == nil {
+		return nil
+	}
+
+	for profile := range c.Profiles {
+		if profile == ew.Profile.Name {
+			continue
+		}
+
+		candidate, ok := strings.CutSuffix(ew.Name, "-"+profile)
+		if !ok || candidate == "" || !nameRegex.MatchString(candidate) {
+			continue
+		}
+
+		return fmt.Errorf("ambiguous gateway workload name %q: it also names workload %q in profile %q. "+
+			"Rename the workload or the profile", ew.Name, candidate, profile)
 	}
 
 	return nil

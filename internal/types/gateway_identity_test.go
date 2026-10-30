@@ -12,8 +12,11 @@ func TestGatewayRejectsAmbiguousProfileWorkloadNames(t *testing.T) {
 	p := cfg.Profiles["c"]
 	ew := (Workload{Name: "a-b"}).ApplyProfile(&p)
 	require.Equal(t, "a-b-c", ew.Name)
-	require.ErrorContains(t, cfg.ValidateGatewayAccess(ew), "ambiguous gateway workload name")
+	require.ErrorContains(t, cfg.ValidateGatewayName(ew), "ambiguous gateway workload name")
 	p = cfg.Profiles["b-c"]
 	ew = (Workload{Name: "a"}).ApplyProfile(&p)
-	require.ErrorContains(t, cfg.ValidateGatewayAccess(ew), "ambiguous gateway workload name")
+	require.ErrorContains(t, cfg.ValidateGatewayName(ew), "ambiguous gateway workload name")
+
+	p = cfg.Profiles["c"]
+	require.NoError(t, cfg.ValidateGatewayName((Workload{Name: "x"}).ApplyProfile(&p)))
 }
