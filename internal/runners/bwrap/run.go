@@ -159,6 +159,10 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 		// The state file is how a second launch of a single instance
 		// workload finds this one, so a sandbox that cannot be recorded
 		// must not keep running under a name nothing can reach.
+		if att != nil {
+			att.Unregister(ew.Name)
+		}
+
 		return l.Stop(fmt.Errorf("failed to record sandbox state: %w", err))
 	}
 
@@ -173,6 +177,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 type attacher interface {
 	Wire(pid int) error
 	Register(name string) error
+	Unregister(name string)
 }
 
 // attach wires the started sandbox to the gateway and lets its workload
@@ -207,6 +212,10 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload) error 
 	}
 
 	if err := launch.Release(socket); err != nil {
+		// The sandbox holding the name is about to be killed, and a name
+		// left registered refuses the next launch of this workload.
+		att.Unregister(ew.Name)
+
 		return fmt.Errorf("failed to release workload %q into its sandbox: %w", ew.Name, err)
 	}
 

@@ -238,6 +238,23 @@ func TestVMAttachStopsWhenTheWireFails(t *testing.T) {
 	assert.Equal(t, []string{"wire"}, att.calls)
 }
 
+// A machine that could not be released is killed, and the name it was
+// registered under goes with it, or the next launch of it is refused.
+func TestVMAttachUnregistersWhenTheReleaseFails(t *testing.T) {
+	t.Parallel()
+
+	att := &fakeVMAttacher{}
+
+	err := vmAttach(1234, att, "dev-personal", func() error {
+		att.calls = append(att.calls, "release")
+
+		return errors.New("no supervisor")
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, []string{"wire", "register", "release", "unregister"}, att.calls)
+}
+
 // The pid the wiring is given is the sandbox's own, as bwrap reported it,
 // and not the outer process's.
 func TestVMAttachWiresTheSandboxPID(t *testing.T) {
@@ -267,4 +284,8 @@ func (f *fakeVMAttacher) Register(string) error {
 	f.calls = append(f.calls, "register")
 
 	return f.registerErr
+}
+
+func (f *fakeVMAttacher) Unregister(string) {
+	f.calls = append(f.calls, "unregister")
 }

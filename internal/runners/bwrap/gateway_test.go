@@ -119,6 +119,10 @@ func (f *fakeAttach) Register(string) error {
 	return f.registerErr
 }
 
+func (f *fakeAttach) Unregister(string) {
+	f.calls = append(f.calls, "unregister")
+}
+
 // gatedLaunch returns a launcher whose sandbox is this process, with a gated
 // supervisor answering where the host will look for one.
 //

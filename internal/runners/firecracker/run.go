@@ -280,6 +280,8 @@ func runOnGateway(ew types.EffectiveWorkload, in machine, att *gateway.Attach, s
 	}
 
 	if err := sandbox.WriteStateAddr(statePath, l.RecordedPID(), att.Addr.String(), att.Session); err != nil {
+		att.Unregister(ew.Name)
+
 		return l.Stop(fmt.Errorf("failed to record microVM state: %w", err))
 	}
 
@@ -294,6 +296,7 @@ func runOnGateway(ew types.EffectiveWorkload, in machine, att *gateway.Attach, s
 type vmAttacher interface {
 	WireVM(pid int) error
 	Register(name string) error
+	Unregister(name string)
 }
 
 // vmAttach wires the started sandbox and then lets the VMM run.
@@ -322,6 +325,11 @@ func vmAttach(pid int, att vmAttacher, name string, release func() error) error 
 	}
 
 	if err := release(); err != nil {
+		// The name is the gateway's until it is unregistered, and the
+		// sandbox holding it is about to be killed. Left registered, it
+		// refuses the next launch of this machine.
+		att.Unregister(name)
+
 		return fmt.Errorf("failed to release the microVM %q into its sandbox: %w", name, err)
 	}
 
