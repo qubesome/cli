@@ -42,6 +42,16 @@ func (g Gateway) Stop() (int, error) {
 	}
 	defer lock.Close()
 
+	return g.stopLocked()
+}
+
+// stopLocked is Stop with the lock already held.
+//
+// It is apart from Stop because startOnce replaces a stranded gateway
+// while holding that same lock, and flock is held per open file
+// description: a second one taken from this process would wait for the
+// first for as long as this process lives.
+func (g Gateway) stopLocked() (int, error) {
 	// sandbox.Alive and not a look at the pid. It compares the recorded
 	// start time as well, so a record left behind by a gateway that crashed
 	// reads as not running, and nothing here signals a pid the kernel has

@@ -18,6 +18,26 @@
 #   7. veth into a descendant's netns    PASS
 #   8. nsenter --net into a descendant    PASS
 #
+# Checks 9, 10 and 11 are the microVM's. Result on the target host,
+# 2026-09-12, bubblewrap 0.12.0 and the same util-linux:
+#
+#   9. tap created in a descendant netns PASS
+#  10. that tap opened with CapEff 0     PASS
+#  11. nft bridge table in a descendant  SKIP, no nft on the host
+#
+# Check 10 is the one the microVM design rests on, and it is the reason
+# the sandbox a VMM runs in is given no capabilities at all. A guest is
+# root on a kernel of its own and can renumber its interface, so what
+# pins its address is an nft table in the namespace its VMM runs in, and
+# that only holds if the VMM itself cannot remove it. It cannot, because
+# it needs no capability to open a tap that was made for its uid, which
+# is what this measured.
+#
+# Check 11 skips because nft is not a host tool here. qubesome runs it out
+# of the gateway image, so the answer comes from a running session, and
+# a guard that will not load fails the launch rather than booting a
+# machine nothing is policing.
+#
 # Check 3 stopping at ns/pid while check 4 stops at ns/mnt is the useful
 # part. nsenter joins the user namespace first, so that join succeeded and
 # carried its capabilities forward. The pid namespace is the wall, not the
@@ -200,6 +220,174 @@ if command -v ip >/dev/null 2>&1; then
     res $? "nsenter --net into a descendant userns netns"
 else
     printf '   SKIP  ip is not installed\n\n'
+fi
+
+printf '== 9. creating a tap inside a DESCENDANT network namespace\n'
+printf '   Firecracker opens a tap, and it opens it in whatever network\n'
+printf '   namespace it stands in. The sandbox it runs in holds no\n'
+printf '   CAP_NET_ADMIN, on purpose: a process that escaped the machine\n'
+printf '   could otherwise dissolve the bridge and unload the guard that\n'
+printf '   pins the guest address. So the tap has to be made from outside\n'
+printf '   and handed over by uid, which is what this asks.\n'
+printf '\n'
+printf '   The outer namespace maps the invoking uid and not zero, because\n'
+printf '   that is what bwrap --unshare-user maps and the session holder is\n'
+printf '   nothing else. TUNSETOWNER resolves its argument there, so a\n'
+printf '   check that mapped zero would measure a uid map no part of\n'
+printf '   qubesome ever creates and would pass on an owner the kernel\n'
+printf '   refuses in production with EINVAL. It did.\n'
+if ! command -v ip >/dev/null 2>&1; then
+    printf '   SKIP  ip is not installed\n\n'
+elif [ ! -e /dev/net/tun ]; then
+    printf '   SKIP  /dev/net/tun is not present\n\n'
+else
+    unshare --user --map-user="$(id -u)" --map-group="$(id -g)" --net sh -c '
+        # Written in this namespace, which stands for the session holder.
+        # The child below maps its own 0 back to these, the way the VMM
+        # sandbox does, so this is how the holder spells the uid
+        # firecracker will hold.
+        owner=$(id -u)
+        group=$(id -g)
+
+        unshare --user --map-root-user --net sleep 5 &
+        child=$!
+        sleep 1
+
+        if nsenter --net=/proc/"$child"/ns/net \
+               ip tuntap add qtap0 mode tap user "$owner" group "$group" 2>&1; then
+            echo "   created qtap0 in the descendant namespace"
+            rc=0
+        else
+            rc=1
+        fi
+
+        kill "$child" 2>/dev/null
+        exit $rc
+    ' 2>&1
+    res $? "ip tuntap add in a descendant userns netns"
+fi
+
+printf '== 10. opening that tap from inside, holding NO capability\n'
+printf '   This is the one the design rests on. If a process with an empty\n'
+printf '   capability set cannot attach to a tap that was created for its\n'
+printf '   uid, the sandbox has to be given CAP_NET_ADMIN over its own\n'
+printf '   network namespace, and the guard becomes decoration: whatever\n'
+printf '   escaped the machine could remove it. Do not work around a\n'
+printf '   failure here. Go back to the design.\n'
+if ! command -v ip >/dev/null 2>&1; then
+    printf '   SKIP  ip is not installed\n\n'
+elif [ ! -e /dev/net/tun ]; then
+    printf '   SKIP  /dev/net/tun is not present\n\n'
+elif ! command -v python3 >/dev/null 2>&1; then
+    printf '   SKIP  python3 is not installed, and the probe needs an ioctl\n\n'
+else
+    PROBE=$(mktemp)
+    cat >"$PROBE" <<'PROBE_EOF'
+import fcntl, struct, sys
+
+# TUNSETIFF is what firecracker calls. Attaching to a tap that already
+# exists and is owned by this uid is supposed to need no capability at
+# all. Creating one does.
+TUNSETIFF = 0x400454ca
+IFF_TAP, IFF_NO_PI = 0x0002, 0x1000
+
+try:
+    fd = open("/dev/net/tun", "r+b", buffering=0)
+except OSError as e:
+    print("   cannot open /dev/net/tun:", e)
+    sys.exit(1)
+
+try:
+    fcntl.ioctl(fd, TUNSETIFF, struct.pack("16sH", b"qtap0", IFF_TAP | IFF_NO_PI))
+except OSError as e:
+    print("   TUNSETIFF failed:", e)
+    sys.exit(1)
+
+print("   attached to qtap0 with an empty capability set")
+PROBE_EOF
+    unshare --user --map-user="$(id -u)" --map-group="$(id -g)" --net sh -c '
+        probe=$1
+        ready=$(mktemp -d)
+
+        # See check 9: the owner is written in this namespace, which maps
+        # the invoking uid and not zero.
+        owner=$(id -u)
+        group=$(id -g)
+
+        # The child holds the namespace the tap goes in. It waits for the
+        # tap to exist before trying to open it, because firecracker is
+        # started after the wiring for exactly the same reason.
+        unshare --user --map-root-user --net sh -c "
+            while [ ! -f $ready/go ]; do sleep 0.1; done
+            # --tmpfs /tmp comes before the probe is bound, not after.
+            # bwrap applies these in order and a mount hides whatever was
+            # put under it earlier, which is what made the first version of
+            # this check report a failure that was its own.
+            bwrap --unshare-user --uid 0 --gid 0 --cap-drop ALL \
+                  --bind / / --dev-bind /dev/net/tun /dev/net/tun \
+                  --tmpfs /tmp --ro-bind $probe $probe \
+                  -- python3 $probe
+            echo \$? > $ready/rc
+        " &
+        child=$!
+        sleep 1
+
+        nsenter --net=/proc/"$child"/ns/net \
+            ip tuntap add qtap0 mode tap user "$owner" group "$group" 2>&1 || {
+            kill "$child" 2>/dev/null
+            rm -rf "$ready"
+            exit 1
+        }
+
+        touch "$ready/go"
+
+        i=0
+        while [ ! -f "$ready/rc" ] && [ "$i" -lt 50 ]; do
+            sleep 0.1
+            i=$((i + 1))
+        done
+
+        rc=$(cat "$ready/rc" 2>/dev/null || echo 1)
+        kill "$child" 2>/dev/null
+        rm -rf "$ready"
+        exit "$rc"
+    ' sh "$PROBE" 2>&1
+    res $? "TUNSETIFF on a pre-made tap with CapEff 0"
+    rm -f "$PROBE"
+fi
+
+printf '== 11. loading an nft bridge table into a descendant netns\n'
+printf '   The guard is an nft table in the bridge family, loaded into the\n'
+printf '   machine own network namespace from outside it. nft is run out of\n'
+printf '   the gateway image rather than from the host, so a host without it\n'
+printf '   skips this and the answer has to come from a running session.\n'
+if ! command -v nft >/dev/null 2>&1; then
+    printf '   SKIP  nft is not installed on the host\n\n'
+else
+    unshare --user --map-root-user --net sh -c '
+        unshare --user --map-root-user --net sleep 5 &
+        child=$!
+        sleep 1
+
+        if nsenter --net=/proc/"$child"/ns/net nft -f - <<NFT_EOF 2>&1
+table bridge qubesome {
+  chain ingress {
+    type filter hook prerouting priority filter; policy drop;
+    iifname != "tap0" accept
+  }
+}
+NFT_EOF
+        then
+            echo "   loaded a bridge table in the descendant namespace"
+            rc=0
+        else
+            rc=1
+        fi
+
+        kill "$child" 2>/dev/null
+        exit $rc
+    ' 2>&1
+    res $? "nft -f a bridge table in a descendant userns netns"
 fi
 
 printf '== cleaning up\n'

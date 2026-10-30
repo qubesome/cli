@@ -108,6 +108,13 @@ type Gateway struct {
 	Socket     string
 	SocketDir  string
 	SecretsDir string
+
+	// Session is the session this gateway belongs to, which is what says
+	// whether a gateway that is running is one this session can still
+	// wire anything to. It is carried for the reason the paths above are:
+	// a test can then drive a gateway and its session outside the user's
+	// run directory.
+	Session session.Session
 }
 
 // Current returns the gateway of the session of the user running qubesome.
@@ -122,6 +129,7 @@ func Current() Gateway {
 		Socket:     files.GatewaySocket(),
 		SocketDir:  files.GatewaySocketDir(),
 		SecretsDir: files.GatewaySecretsDir(),
+		Session:    session.Current(),
 	}
 }
 
@@ -227,6 +235,15 @@ func (g Gateway) SandboxPID() (int, error) {
 		return 0, ErrNoGateway
 	}
 
+	// A gateway of a session that has gone is not this session's gateway,
+	// whatever its pid says. Wiring to it is refused here rather than at
+	// the veth, where the kernel's answer is Operation not permitted and
+	// names nothing. A launch that came through Up has already replaced
+	// it by now, so this is the answer for every other route in.
+	if why := g.stranded(); why != nil {
+		return 0, fmt.Errorf("%w: the gateway that is running belongs to a session that has gone: %w", ErrNoGateway, why)
+	}
+
 	st, err := sandbox.ReadState(g.StatePath)
 	if err != nil {
 		return 0, err
@@ -261,8 +278,33 @@ func (g Gateway) startOnce(cfg types.GatewayConfig, root string) (bool, error) {
 	defer lock.Close()
 
 	if sandbox.Alive(g.StatePath) {
-		slog.Debug("[gateway] the session gateway is already running")
-		return false, nil
+		why := g.stranded()
+		if why == nil {
+			slog.Info("[gateway] reusing the session gateway that is already running")
+			return false, nil
+		}
+
+		// Loud, and not a refusal. A stranded gateway is the state a
+		// session is left in whenever a holder goes without taking its
+		// gateway with it, and from the user's side it presents as every
+		// launch failing with RTNETLINK answers: Operation not permitted
+		// and nothing saying why. Replacing it is what gets the session
+		// working again without anybody having to know that.
+		//
+		// What it costs is worth saying in the same breath. Workloads
+		// still running from the session that has gone keep running, and
+		// they were reaching the network through the gateway being taken
+		// down here.
+		slog.Warn("the session gateway was left behind by a session that has gone, so it is being replaced; "+
+			"workloads still running from that session keep running but lose their egress",
+			"reason", why)
+
+		// stopLocked and not Stop. The lock this holds is the one Stop
+		// would take, and flock is held per open file description, so a
+		// second one from this same process waits for the first forever.
+		if _, err := g.stopLocked(); err != nil {
+			return false, fmt.Errorf("failed to replace the stranded session gateway: %w", err)
+		}
 	}
 
 	if err := g.start(cfg, root); err != nil {
@@ -270,6 +312,94 @@ func (g Gateway) startOnce(cfg types.GatewayConfig, root string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// stranded says why the gateway now recorded cannot serve this session,
+// or nil when it can.
+//
+// A gateway is started inside the session holder's user namespace and
+// outlives the launch that started it. It does not usefully outlive the
+// holder. When the holder goes and a later launch starts a fresh one, the
+// gateway that survived has its namespaces owned by what is by then a
+// dead sibling of the session's user namespace. A helper's CAP_NET_ADMIN
+// is held in the current session namespace and reaches its descendants
+// only, so putting a veth end next to that gateway is refused.
+//
+// Nothing about the pid says any of this. The gateway is alive, both
+// namespaces are reachable, and every launch in the session fails at the
+// veth with Operation not permitted: workloads, profiles and microVMs
+// alike. Asking here is what turns that into one warning and a working
+// session.
+func (g Gateway) stranded() error {
+	gw, err := sandbox.ReadState(g.StatePath)
+	if err != nil {
+		return fmt.Errorf("its record cannot be read: %w", err)
+	}
+
+	held, holdErr := g.Session.UsernsID()
+
+	// The holder's own record, which is read for its start time and only
+	// consulted for a gateway recorded before the namespace was. A
+	// failure here is carried as the zero record rather than returned:
+	// whether it matters is startedBefore's to say, and it says so.
+	holder, _ := sandbox.ReadState(g.Session.StatePath)
+
+	return strandedBy(gw, holder, held, holdErr)
+}
+
+// strandedBy is the decision stranded makes, apart from the two lookups
+// it makes it from.
+//
+// held identifies the user namespace this session's holder is keeping
+// open and holdErr is what asking for it said, which is ErrNoHolder when
+// no holder is running at all. That case is stranded by definition: a
+// gateway was started inside some holder's namespace, so a gateway with
+// no holder anywhere is one whose holder has gone.
+func strandedBy(gw, holder sandbox.State, held uint64, holdErr error) error {
+	if holdErr != nil {
+		return fmt.Errorf("this session has no holder to compare it against: %w", holdErr)
+	}
+
+	if gw.Session == 0 {
+		return startedBeforeTheHolder(gw, holder)
+	}
+
+	if gw.Session != held {
+		return fmt.Errorf("it was started in user namespace %d and this session holds %d", gw.Session, held)
+	}
+
+	return nil
+}
+
+// startedBeforeTheHolder answers for a gateway whose record names no
+// namespace, which is every gateway a release before this one started.
+//
+// Killing those on sight would be the simple reading and the wrong one. A
+// gateway of the session that is running now is perfectly usable, and its
+// record says nothing about that only because the release that wrote it
+// had nothing to say. Replacing it would take the egress from every
+// workload of a session that was working, to fix a session that was not
+// broken.
+//
+// The start times settle it without the namespace. Exactly one holder
+// runs at a time, because the session lock says so, and a gateway is
+// always started inside the holder that is running when it starts. So a
+// gateway that started no earlier than this holder did is this holder's
+// gateway, and one that started before it belongs to a holder that has
+// since gone. Both times are clock ticks since boot read from the same
+// field of /proc/<pid>/stat, which makes them comparable with each other
+// and with nothing else.
+func startedBeforeTheHolder(gw, holder sandbox.State) error {
+	if holder.StartTime == 0 {
+		return errors.New("it records no session user namespace, and there is no holder record to date it against")
+	}
+
+	if gw.StartTime < holder.StartTime {
+		return fmt.Errorf("it records no session user namespace and started before this session's holder did (%d before %d)",
+			gw.StartTime, holder.StartTime)
+	}
+
+	return nil
 }
 
 // recordConfig notes which config the gateway now running was started
@@ -436,7 +566,7 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 	}
 	defer packed.Close()
 
-	sess := session.Current()
+	sess := g.Session
 	if err := sess.Start(); err != nil {
 		return err
 	}
@@ -528,7 +658,17 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 	// truer answer to whether the gateway is running: killing the outer
 	// bwrap does not signal the sandbox below it, and a sandbox that has
 	// gone is a gateway that has gone whatever is left above it.
-	if err := sandbox.WriteState(g.StatePath, gw.pid); err != nil {
+	//
+	// The session's user namespace is recorded alongside it. It is taken
+	// from the handle that was just given to bwrap rather than looked up
+	// again, so it is the identity of the namespace this gateway is
+	// actually in. See stranded for what reads it back.
+	held, err := ns.ID()
+	if err != nil {
+		return gw.stop(err)
+	}
+
+	if err := sandbox.WriteStateSession(g.StatePath, gw.pid, held); err != nil {
 		return gw.stop(fmt.Errorf("failed to record the gateway state: %w", err))
 	}
 
@@ -538,7 +678,8 @@ func (g Gateway) launch(bundle images.Bundle, spec sandbox.Spec) error {
 		slog.Warn("failed to reset the gateway addresses", "path", g.AllocPath, "error", err)
 	}
 
-	slog.Debug("[gateway] started the session gateway", "pid", cmd.Process.Pid, "sandbox", gw.pid)
+	slog.Info("[gateway] started the session gateway",
+		"pid", cmd.Process.Pid, "sandbox", gw.pid, "session", held)
 
 	go reap(cmd, g.StatePath)
 
@@ -824,6 +965,35 @@ func (h helper) run() error {
 	return nil
 }
 
+// output runs the helper to completion and returns what it wrote, for the
+// callers that want the answer rather than only whether it worked.
+//
+// Standard error is kept apart from standard output here, unlike run,
+// because the answer is parsed. A warning the tool wrote would otherwise
+// land in the middle of the JSON a caller is about to decode.
+func (h helper) output() ([]byte, error) {
+	cmd, ns, err := h.command()
+	if err != nil {
+		return nil, err
+	}
+	defer ns.Close()
+
+	var out, said bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &said
+
+	if err := cmd.Run(); err != nil {
+		reason := strings.TrimSpace(said.String())
+		if reason == "" {
+			return nil, fmt.Errorf("%s: %w", h.Args[0], err)
+		}
+
+		return nil, fmt.Errorf("%s: %w: %s", h.Args[0], err, reason)
+	}
+
+	return out.Bytes(), nil
+}
+
 // bwrapArgs renders the helper into bwrap arguments.
 //
 // usernsFD is the descriptor the session's user namespace has in the child,
@@ -1014,7 +1184,7 @@ func (g Gateway) ready() error {
 		return err
 	}
 
-	slog.Debug("[gateway] the session gateway is ready")
+	slog.Info("[gateway] the session gateway is ready")
 
 	return nil
 }
@@ -1161,7 +1331,7 @@ func (g Gateway) Allocate(subnet netip.Prefix) (netip.Addr, error) {
 		return netip.Addr{}, err
 	}
 
-	slog.Debug("[gateway] allocated a workload address", "address", addr, "subnet", subnet)
+	slog.Info("[gateway] allocated a workload address", "address", addr, "subnet", subnet)
 
 	return addr, nil
 }

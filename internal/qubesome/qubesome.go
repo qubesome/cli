@@ -17,7 +17,7 @@ var (
 )
 
 type Qubesome struct {
-	runner func(in WorkloadInfo, runnerOverride string, headless bool) error
+	runner func(in WorkloadInfo, runnerOverride string, headless, limited bool) error
 }
 
 func New() *Qubesome {

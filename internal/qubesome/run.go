@@ -18,6 +18,7 @@ import (
 	"github.com/qubesome/cli/internal/inception"
 	"github.com/qubesome/cli/internal/runners/bwrap"
 	"github.com/qubesome/cli/internal/runners/firecracker"
+	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/drive"
@@ -59,6 +60,13 @@ func Run(opts ...command.Option[Options]) error {
 	}
 
 	if inception.Inside() {
+		// The request to the host carries the workload and its arguments
+		// and nothing else, so the host would launch it with its full
+		// access. Refused rather than quietly launched that way.
+		if o.Limited {
+			return errors.New("--limited cannot be used from inside a profile")
+		}
+
 		client := inception.NewClient(files.InProfileSocketPath())
 		return client.Run(context.TODO(), o.Workload, o.ExtraArgs)
 	}
@@ -77,10 +85,10 @@ func Run(opts ...command.Option[Options]) error {
 	// Nothing config-wide happens here. Refreshing every image the
 	// configuration names belongs to starting a profile, which is a
 	// process that stays up, not to opening one app.
-	return runner(in, o.Runner, o.Headless)
+	return runner(in, o.Runner, o.Headless, o.Limited)
 }
 
-func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
+func runner(in WorkloadInfo, runnerOverride string, headless, limited bool) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
@@ -178,10 +186,38 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 			"workload", ew.Workload.Name)
 	}
 
+	// Before anything that depends on the runner, so that the warnings and
+	// the gateway check below answer for the runner the workload is about
+	// to run under rather than the one its file names.
+	if runnerOverride != "" {
+		ew.Workload.Runner = runnerOverride
+	}
+
+	// After the runner override, which it clears, and before everything
+	// else. The checks below would otherwise refuse a limited launch for a
+	// gateway it does not use, and attachVM would boot the machine it
+	// detaches from. Nothing after this hands back what it took away.
+	if limited {
+		ew = types.Limited(ew)
+
+		slog.Warn("running in limited mode: no gateway, no devices, no gpu, no bus and no mime handling",
+			"workload", ew.Name)
+
+		statePath, err := bwrap.StatePath(ew)
+		if err != nil {
+			return err
+		}
+
+		if err := refuseHandOver(ew, statePath); err != nil {
+			return err
+		}
+	}
+
 	// The effective value, so a name inherited from the profile is
 	// reported once here rather than at every validation of it.
 	types.WarnIgnoredNetwork(ew.Name, ew.Workload.HostAccess.Network, in.Config.Gateway != nil)
 	types.WarnIgnoredMicroVMFields(ew.Name, ew.Workload)
+	types.WarnConsoleTakesItsOwnAddress(ew.Name, ew.Workload, in.Config.Gateway != nil)
 
 	// A workload that could renumber its own interface could claim another
 	// workload's policy and another workload's injected credentials, so the
@@ -193,7 +229,7 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	}
 
 	if ew.Workload.AttachVM != "" {
-		if err := attachVM(root, profile, ew.Workload.AttachVM); err != nil {
+		if err := attachVM(root, profile, ew.Workload.AttachVM, in.Config); err != nil {
 			return err
 		}
 	}
@@ -203,10 +239,6 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	}
 
 	ew.Workload.Args = append(ew.Workload.Args, in.Args...)
-
-	if runnerOverride != "" {
-		ew.Workload.Runner = runnerOverride
-	}
 
 	if headless {
 		// In headless mode, Mime handling is not supported.
@@ -220,18 +252,18 @@ func runner(in WorkloadInfo, runnerOverride string, headless bool) error {
 	// this one is the failure worth avoiding.
 	switch ew.Workload.Runner {
 	case "":
-		// The config comes with the workload because this is the branch
-		// that can be given a gateway address. A configured gateway that
-		// will not start stops the launch, which is the one outcome this
-		// stage exists to guarantee, and a configuration with no gateway
-		// block asks for no egress and is unaffected.
-		//
-		// A microVM is handed none of it. It has a network stack of its
-		// own and takes no address from the gateway, so starting one for
-		// it would be a process nothing was going to talk to.
+		// The config comes with the workload because both branches can be
+		// given a gateway address. A configured gateway that will not
+		// start stops the launch, which is the one outcome this stage
+		// exists to guarantee, and a configuration with no gateway block
+		// asks for no egress and is unaffected.
 		return bwrap.Run(ew, in.Config)
 	case firecrackerRunner:
-		return firecracker.Run(ew)
+		// A machine takes an address out of the same subnet and is
+		// registered under the same name. What differs is behind its end
+		// of the veth, where a bridge and a tap stand in for an addressed
+		// interface, because the address belongs to the guest.
+		return firecracker.Run(ew, in.Config)
 	case "docker", "podman":
 		return fmt.Errorf("workload %q asks for the %q runner, which has been removed: workloads run under bwrap",
 			in.Name, ew.Workload.Runner)
@@ -305,7 +337,7 @@ const (
 // Starting the machine is a no-op when it is already up, which is what
 // makes a second console on one machine the ordinary case rather than a
 // second machine.
-func attachVM(root *os.Root, profile *types.Profile, name string) error {
+func attachVM(root *os.Root, profile *types.Profile, name string, cfg *types.Config) error {
 	w, err := readWorkload(root, name)
 	if err != nil {
 		// A file that is not there and a file that does not decode are
@@ -324,7 +356,7 @@ func attachVM(root *os.Root, profile *types.Profile, name string) error {
 
 	w.Name = name
 
-	if err := firecracker.Run(w.ApplyProfile(profile)); err != nil {
+	if err := firecracker.Run(w.ApplyProfile(profile), cfg); err != nil {
 		return fmt.Errorf("failed to start the microVM %q: %w", name, err)
 	}
 
@@ -416,4 +448,20 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 		}
 	}
 	return msg
+}
+
+// refuseHandOver stops a limited launch of a single instance workload that
+// is already running. bwrap hands a second launch to the running sandbox,
+// which keeps every access the limited launch was meant to go without.
+func refuseHandOver(ew types.EffectiveWorkload, statePath string) error {
+	if !ew.Workload.SingleInstance {
+		return nil
+	}
+
+	if sandbox.Alive(statePath) {
+		return fmt.Errorf("workload %q is already running with its full access, so a limited launch would run inside it: stop it first",
+			ew.Workload.Name)
+	}
+
+	return nil
 }

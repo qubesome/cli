@@ -11,7 +11,8 @@ import (
 
 func flatpakCommand() *cli.Command {
 	cmd := &cli.Command{
-		Name: "flatpak",
+		Name:  "flatpak",
+		Usage: "runs and installs Flatpak workloads in a qubesome profile",
 		Commands: []*cli.Command{
 			{
 				Name:  "run",
@@ -29,7 +30,7 @@ qubesome flatpak run -profile <profile> org.kde.francis     - Run the org.kde.fr
 				},
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:        "profile",
+						Name:        profileFlag,
 						Destination: &targetProfile,
 					},
 				},
@@ -67,7 +68,7 @@ qubesome flatpak install
 `,
 				Arguments: []cli.Argument{
 					&cli.StringArg{
-						Name:        "profile",
+						Name:        profileFlag,
 						Destination: &targetProfile,
 					},
 				},

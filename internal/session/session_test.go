@@ -9,9 +9,12 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/sandbox"
@@ -156,4 +159,96 @@ func staleState(t *testing.T, path string) {
 	data, err := json.Marshal(s)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, data, files.FileMode))
+}
+
+// A holder that loses the race for the lock must not tear down what the
+// winner owns, so the end of a session is not run for it at all.
+func TestHoldThatLosesTheLockEndsNothing(t *testing.T) {
+	t.Parallel()
+
+	s := newSession(t)
+
+	winner, err := acquire(s.LockPath)
+	require.NoError(t, err)
+	defer winner.Close()
+
+	ended := false
+	err = s.hold(make(chan os.Signal), func() { ended = true })
+
+	require.ErrorIs(t, err, ErrHeld)
+	assert.False(t, ended)
+}
+
+// The end of a session runs while the holder still owns it. Were the lock
+// released first, a new session could start in between and have what it
+// had just started torn down by the one that is leaving. The record is
+// already gone, so a launch arriving meanwhile has no session to nest in.
+func TestHoldEndsTheSessionWhileStillHoldingIt(t *testing.T) {
+	t.Parallel()
+
+	s := newSession(t)
+	sig := make(chan os.Signal, 1)
+
+	var heldDuringEnd, recordedDuringEnd bool
+	var openDuringEnd error
+	done := make(chan error, 1)
+	go func() {
+		done <- s.hold(sig, func() {
+			_, err := acquire(s.LockPath)
+			heldDuringEnd = errors.Is(err, ErrHeld)
+			_, err = os.Stat(s.StatePath)
+			recordedDuringEnd = err == nil
+			_, openDuringEnd = s.Open(3)
+		})
+	}()
+
+	require.Eventually(t, func() bool { return sandbox.Alive(s.StatePath) }, 5*time.Second, 10*time.Millisecond)
+	sig <- syscall.SIGTERM
+
+	require.NoError(t, <-done)
+	assert.True(t, heldDuringEnd)
+	assert.False(t, recordedDuringEnd)
+	require.Error(t, openDuringEnd)
+	assert.NoFileExists(t, s.StatePath)
+}
+
+// Two launches racing to start a session both see the winner recorded, and
+// only the one whose holder won started anything. The holder is the child
+// of the bwrap a launch started, which is how the winner is told apart.
+func TestStartedBy(t *testing.T) {
+	t.Parallel()
+
+	s := newSession(t)
+	require.NoError(t, sandbox.WriteState(s.StatePath, os.Getpid()))
+
+	assert.True(t, s.startedBy(os.Getppid()))
+	assert.False(t, s.startedBy(os.Getpid()))
+}
+
+func TestStartedByWithoutARecord(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, newSession(t).startedBy(os.Getppid()))
+}
+
+func TestOutlived(t *testing.T) {
+	t.Parallel()
+
+	s := newSession(t)
+	require.NoError(t, sandbox.WriteState(s.StatePath, os.Getpid()))
+	current, err := s.UsernsID()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	record := func(name string, session uint64) string {
+		path := filepath.Join(dir, name+".json")
+		require.NoError(t, sandbox.WriteStateAddr(path, os.Getpid(), "10.111.0.2", session))
+		return path
+	}
+
+	require.NoError(t, s.Outlived(record("this", current), "this"))
+	require.NoError(t, s.Outlived(record("ungated", 0), "ungated"))
+	require.NoError(t, s.Outlived(filepath.Join(dir, "absent.json"), "absent"))
+	require.ErrorContains(t, s.Outlived(record("old", current+1), "old"), "old is still running from a session that has ended")
+	require.ErrorContains(t, newSession(t).Outlived(record("orphan", current), "orphan"), "session that has ended")
 }

@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -18,16 +19,65 @@ import (
 type State struct {
 	PID       int    `json:"pid"`
 	StartTime uint64 `json:"startTime"`
+
+	// Session is the user namespace the session holder was keeping open
+	// when this was recorded, as the inode the kernel names it by. It is
+	// zero for a sandbox that was recorded without one.
+	//
+	// It is here because a pid that is still alive does not make a
+	// sandbox usable. A gateway outlives the launch that started it, and
+	// when the holder goes and a later launch starts a fresh one the
+	// surviving gateway's namespaces are owned by what is now a dead
+	// sibling of the session. Nothing can be wired to it any more, and
+	// nothing about the pid says so.
+	Session uint64 `json:"session,omitempty"`
+
+	// Address is the workload's address on the session gateway, and is
+	// empty for a workload that has none.
+	//
+	// It is recorded because it is the other thing every later question
+	// needs and nothing else writes it down. The gateway is told which
+	// workload holds which address and qubesome tells it, but neither end
+	// keeps a note a third process could read, so a diagnostic asking what
+	// a running sandbox is on the gateway has only this record to go on.
+	Address string `json:"address,omitempty"`
 }
 
 // WriteState records a running sandbox at path.
 func WriteState(path string, pid int) error {
+	return WriteStateAddr(path, pid, "", 0)
+}
+
+// WriteStateAddr records a running sandbox, the gateway address it was
+// given and the session user namespace it was wired under. addr is empty
+// and session is zero for a sandbox that was given no address.
+//
+// The session is recorded beside the address because the address alone
+// does not say whose gateway it is on. A sandbox outlives the session it
+// was wired under when the holder is killed, and its record still names
+// an address a later session's gateway knows nothing about.
+func WriteStateAddr(path string, pid int, addr string, session uint64) error {
 	st, err := startTime(pid)
 	if err != nil {
 		return err
 	}
 
-	return writeState(path, State{PID: pid, StartTime: st})
+	return writeState(path, State{PID: pid, StartTime: st, Address: addr, Session: session})
+}
+
+// WriteStateSession records a running sandbox and the session user
+// namespace it was started under.
+//
+// It is the gateway's writer. A workload sandbox is wired during its own
+// launch, while the session that is wiring it is the one holding it, so
+// there is nothing for it to disagree with later.
+func WriteStateSession(path string, pid int, session uint64) error {
+	st, err := startTime(pid)
+	if err != nil {
+		return err
+	}
+
+	return writeState(path, State{PID: pid, StartTime: st, Session: session})
 }
 
 func writeState(path string, s State) error {
@@ -67,6 +117,33 @@ func ReadState(path string) (State, error) {
 	}
 
 	return s, nil
+}
+
+// RemoveStateOf removes the record at path if it still names pid, and
+// reports whether it did.
+//
+// A record that names another pid belongs to a launch that came after the
+// one asking, and one that is gone was removed by whoever took the sandbox
+// down. Neither is the asker's to remove, and neither is the gateway
+// mapping under the same name.
+func RemoveStateOf(path string, pid int) (bool, error) {
+	s, err := ReadState(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	if s.PID != pid {
+		return false, nil
+	}
+
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("failed to remove sandbox state %q: %w", path, err)
+	}
+
+	return true, nil
 }
 
 // Alive reports whether the sandbox recorded at path is still running.
@@ -150,6 +227,43 @@ func startTime(pid int) (uint64, error) {
 	}
 
 	return parseStartTime(string(data))
+}
+
+// ParentPID returns the pid of a process's parent.
+func ParentPID(pid int) (int, error) {
+	path := procStat(pid)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read %q: %w", path, err)
+	}
+
+	return parseParentPID(string(data))
+}
+
+// parseParentPID reads field 4 of a /proc/<pid>/stat line, counted from
+// after the command name for the reason parseStartTime gives.
+func parseParentPID(line string) (int, error) {
+	i := strings.LastIndex(line, ")")
+	if i < 0 {
+		return 0, fmt.Errorf("malformed stat line: no command name")
+	}
+
+	// Field 3 is the first after the command name, so the parent is the
+	// second of the remaining fields.
+	const parentField = 2
+
+	fields := strings.Fields(line[i+1:])
+	if len(fields) < parentField {
+		return 0, fmt.Errorf("malformed stat line: %d fields after the command name", len(fields))
+	}
+
+	ppid, err := strconv.Atoi(fields[parentField-1])
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse parent pid: %w", err)
+	}
+
+	return ppid, nil
 }
 
 // parseStartTime reads field 22 of a /proc/<pid>/stat line.

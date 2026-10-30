@@ -104,7 +104,26 @@ func Current() Session {
 // alongside the first. An flock lives on the open file description, so
 // this one is released when this process exits and not before, by any
 // route out including a signal it does not handle.
-func (s Session) Hold() error {
+//
+// end runs once the session is over, while this holder still has the lock
+// but no longer its record. It is how whatever outlives a session is taken down with
+// it, and the timing is the point: run after the lock was released, a new
+// session could start in between and have what it had just started torn
+// down by the one that is leaving. A holder that never took the lock owns
+// nothing, so end is not run for it.
+func (s Session) Hold(end func()) error {
+	// Registered before the lock is taken, so a shutdown that arrives
+	// while the holder is still recording itself is not lost.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sig)
+
+	return s.hold(sig, end)
+}
+
+// hold is Hold with the shutdown signal passed in, so that the order
+// around it can be driven without signalling the process.
+func (s Session) hold(sig <-chan os.Signal, end func()) error {
 	if err := os.MkdirAll(s.Dir, files.DirMode); err != nil {
 		return fmt.Errorf("failed to create the session dir %q: %w", s.Dir, err)
 	}
@@ -130,9 +149,17 @@ func (s Session) Hold() error {
 	// is what sandbox.Alive reads as not running. Handling the two signals
 	// a shutdown normally arrives as removes the file in the ordinary case
 	// instead of leaving it for the next launch to see through.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
+
+	// Unrecorded before end and not after it, while the lock is still held.
+	// A launch that arrives during the teardown then finds no session to
+	// nest in, and a holder it starts loses the lock and exits, so it fails
+	// rather than start a gateway in the namespace that is about to go.
+	if err := os.Remove(s.StatePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("failed to remove the session state", "path", s.StatePath, "error", err)
+	}
+
+	end()
 
 	return nil
 }
@@ -208,7 +235,33 @@ func (s Session) Start() error {
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 
-	return s.wait(exited)
+	if err := s.wait(exited); err != nil {
+		return err
+	}
+
+	// Only when this call started the holder that is recorded. A launch
+	// that found a holder running says nothing, and neither does one that
+	// started a holder and lost the race for the lock to another, so this
+	// line marks the beginning of a session and not merely the use of one.
+	if s.startedBy(cmd.Process.Pid) {
+		if id, err := s.UsernsID(); err == nil {
+			slog.Info("[session] started a session", "session", id)
+		}
+	}
+
+	return nil
+}
+
+// startedBy reports whether the recorded holder is the child of launcher,
+// the bwrap a launch started it under.
+func (s Session) startedBy(launcher int) bool {
+	rec, err := sandbox.ReadState(s.StatePath)
+	if err != nil {
+		return false
+	}
+
+	ppid, err := sandbox.ParentPID(rec.PID)
+	return err == nil && ppid == launcher
 }
 
 // wait blocks until the holder records itself, exits, or runs out of
@@ -284,6 +337,46 @@ func (s Session) Open(fd int) (*Namespace, error) {
 	return &Namespace{f: f, fd: fd}, nil
 }
 
+// ID identifies the namespace this handle is open on.
+//
+// It is the inode the kernel names a namespace by: unique for as long as
+// the namespace exists, and not handed out again while anything is
+// holding it. It is read from the open handle rather than from the path
+// it was opened through, so it is the identity of the namespace actually
+// being handed to bwrap rather than of whatever is at that path by the
+// time somebody asks again.
+func (n *Namespace) ID() (uint64, error) {
+	fi, err := n.f.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("failed to identify the session user namespace: %w", err)
+	}
+
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, errors.New("session: the user namespace has no inode to identify it by")
+	}
+
+	return st.Ino, nil
+}
+
+// UsernsID identifies the user namespace this session's holder is keeping
+// open, and reports ErrNoHolder when there is no holder to ask.
+//
+// It is what tells a gateway of this session from one left behind by a
+// session that has gone. Both are a pid that is still alive, and only the
+// namespace says which is which.
+func (s Session) UsernsID() (uint64, error) {
+	// The descriptor number decides nothing here. Nothing is being handed
+	// to a child, and Open takes one because its usual caller is.
+	ns, err := s.Open(3)
+	if err != nil {
+		return 0, err
+	}
+	defer ns.Close()
+
+	return ns.ID()
+}
+
 // File returns the descriptor to pass in exec.Cmd.ExtraFiles. It has to
 // land at the position Open was given.
 func (n *Namespace) File() *os.File {
@@ -325,4 +418,30 @@ func (n *Namespace) Enter(args []string) []string {
 		"--", files.BwrapBinary)
 
 	return append(out, args...)
+}
+
+// Outlived refuses a sandbox recorded at path that is still running from a
+// session that has ended.
+//
+// Its wiring was to the gateway of that session, which a later launch has
+// replaced, and nothing can wire it to the new one while it runs. Handing
+// it a second launch, or reporting it as already up, would leave a
+// workload with no egress and nothing saying why. A record wired to no
+// gateway depends on no session and is never refused.
+func (s Session) Outlived(path, name string) error {
+	// An unreadable record is one Alive has already read as not running,
+	// so it is treated as a record wired to no gateway.
+	var recorded uint64
+	if rec, err := sandbox.ReadState(path); err == nil {
+		recorded = rec.Session
+	}
+	if recorded == 0 {
+		return nil
+	}
+
+	if id, err := s.UsernsID(); err == nil && id == recorded {
+		return nil
+	}
+
+	return fmt.Errorf("%s is still running from a session that has ended, so its gateway is gone: stop it and launch it again", name)
 }

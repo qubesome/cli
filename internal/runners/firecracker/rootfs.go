@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/gateway"
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/env"
@@ -69,6 +70,48 @@ type InitConfig struct {
 	// empty when the workload configured none. It is also how the guest
 	// knows there is a second drive to mount at all.
 	DataMount string `json:"dataMount,omitempty"`
+
+	// Network is the machine's place on the session gateway, and is nil
+	// for a machine that has none.
+	//
+	// It goes here rather than on the kernel command line for the reason
+	// this whole file exists: the command line is bounded and is world
+	// readable inside the guest through /proc/cmdline, and the tree is
+	// being composed anyway.
+	Network *NetworkConfig `json:"network,omitempty"`
+}
+
+// NetworkConfig is the machine's network, as the guest is told it.
+//
+// It is a pointer on InitConfig and nil for a machine with no gateway,
+// which is how the guest knows there is nothing to configure rather than
+// having to infer it from empty strings.
+type NetworkConfig struct {
+	// Address is the workload's address on the gateway's subnet. The guest
+	// takes it as a /32, for the reason gateway.workloadScript gives: the
+	// subnet is not a shared link, and each workload has a point to point
+	// wire to the gateway and no path at all to a sibling.
+	//
+	// The guest is free to renumber the interface, since it is root on a
+	// kernel of its own. What stops that mattering is the guard on the
+	// tap rather than anything here.
+	Address string `json:"address"`
+
+	// Gateway is both the default route and the resolver, which are one
+	// address. The gateway's own ruleset redirects 53 to its resolver,
+	// because resolv.conf has no way to name a port.
+	Gateway string `json:"gateway"`
+
+	// Proxy is the endpoint a client asks to carry a connection the
+	// gateway will not route, and is empty for a machine with no gateway.
+	//
+	// The gateway drops every port but 80, 443 and 53, so ssh cannot
+	// connect out of a guest at all and has to ask instead. A sandbox is
+	// told this in its environment by the bwrap runner; a guest has no
+	// environment the host can reach into, so it is told here and the
+	// guest init puts it back into the environment of everything it
+	// starts.
+	Proxy string `json:"proxy,omitempty"`
 }
 
 // roPath is one host path composed into the guest tree. Both sides are
@@ -99,6 +142,10 @@ type rootfsBuild struct {
 
 	// InitConfig is the host path of the generated init.json.
 	InitConfig string
+
+	// SSHConfig is the host path of the generated ssh drop-in, or empty
+	// for a machine with no gateway, which has nothing to tunnel through.
+	SSHConfig string
 }
 
 // rootfsArgs renders a build into the arguments of the one command it
@@ -172,6 +219,10 @@ func rootfsArgs(b rootfsBuild) []string {
 		args = append(args, "--ro-bind", p.Src, filepath.Join(composedRoot, p.Dst))
 	}
 
+	if b.SSHConfig != "" {
+		args = append(args, "--ro-bind", b.SSHConfig, filepath.Join(composedRoot, guestSSHConfig))
+	}
+
 	args = append(args,
 		"--ro-bind", b.QubesomeBin, filepath.Join(composedRoot, guestInit),
 		"--ro-bind", b.InitConfig, filepath.Join(composedRoot, guestInitConfig),
@@ -206,10 +257,15 @@ func rootfsArgs(b rootfsBuild) []string {
 // composition is a bwrap overlay and mkfs.ext4 -d walks it, inside a user
 // namespace where the invoking uid is 0 so the inodes come out root owned.
 //
+// net is the machine's place on the session gateway, and is nil for a
+// machine with no gateway, which then configures no interface at all. It
+// is composed in with everything else rather than handed over later,
+// because a guest has to be on the network before it runs anything.
+//
 // It is rebuilt on every boot and discarded on shutdown, which is what
 // makes the read-only paths free. On the target host that cost 2.5 s over
 // a 926M bundle, recorded in the header of hack/verify-microvm-rootfs.sh.
-func BuildRootfs(bundle images.Bundle, ew types.EffectiveWorkload, target string) error {
+func BuildRootfs(bundle images.Bundle, ew types.EffectiveWorkload, target string, net *NetworkConfig) error {
 	m := ew.Workload.MicroVM.WithDefaults()
 
 	warnImageUser(ew.Workload.Image, bundle.UID)
@@ -223,7 +279,12 @@ func BuildRootfs(bundle images.Bundle, ew types.EffectiveWorkload, target string
 	}
 
 	cfg := filepath.Join(filepath.Dir(target), initConfigFile)
-	if err := writeInitConfig(cfg, bundle, ew); err != nil {
+	if err := writeInitConfig(cfg, bundle, ew, net); err != nil {
+		return err
+	}
+
+	sshCfg, err := writeSSHConfig(filepath.Dir(target), net)
+	if err != nil {
 		return err
 	}
 
@@ -238,6 +299,7 @@ func BuildRootfs(bundle images.Bundle, ew types.EffectiveWorkload, target string
 		Paths:       readOnlyPaths(ew.Workload.HostAccess.Paths),
 		QubesomeBin: bin,
 		InitConfig:  cfg,
+		SSHConfig:   sshCfg,
 	})
 
 	slog.Debug(files.BwrapBinary, "args", args)
@@ -252,6 +314,61 @@ func BuildRootfs(bundle images.Bundle, ew types.EffectiveWorkload, target string
 	}
 
 	return nil
+}
+
+// guestSSHConfig is the ssh drop-in composed into the guest.
+//
+// It is the path the bwrap runner writes its own drop-in to, for the same
+// reasons: a system ssh_config already includes this directory, so the
+// file is read without the image being changed and without covering
+// anything of the image's over, and the user's own ~/.ssh/config is read
+// first and still wins. The number keeps it early among any siblings,
+// since ssh takes the first value it is given for a keyword.
+const guestSSHConfig = "/etc/ssh/ssh_config.d/10-qubesome-gateway.conf"
+
+// sshConfigFile is the drop-in's name on the host, beside the init
+// configuration in the machine's runtime directory.
+const sshConfigFile = "ssh_gateway.conf"
+
+// guestSSHGatewayConfig is the drop-in's content.
+//
+// The command is the guest init's own path, because that is where the
+// qubesome binary is in a guest. There is no /usr/local/bin/qubesome
+// inside a machine: the binary is composed in once, as the init, and
+// everything that runs it in there runs that one.
+func guestSSHGatewayConfig() string {
+	return `# Written by qubesome for a microVM attached to the session gateway.
+#
+# The gateway drops every port but 80, 443 and 53, so ssh reaches a host
+# by asking the gateway to carry the connection. The endpoint to ask is in
+# QUBESOME_GATEWAY_PROXY, which the guest init puts in the environment of
+# everything it starts, and which the command below reads for itself.
+Host *
+	ProxyCommand ` + guestInit + ` tunnel %h %p
+`
+}
+
+// writeSSHConfig writes the drop-in beside the init configuration and
+// returns its path, or an empty path for a machine with no gateway.
+//
+// A machine with no gateway has nothing to tunnel through, and a
+// ProxyCommand there would turn "no route to host" into a command that
+// fails for a reason that has nothing to do with the network.
+//
+// It is rewritten on every boot rather than kept, for the bwrap runner's
+// reason: the file is qubesome's own, and a stale one left by an older
+// version would be composed in unchanged.
+func writeSSHConfig(dir string, net *NetworkConfig) (string, error) {
+	if net == nil || net.Proxy == "" {
+		return "", nil
+	}
+
+	path := filepath.Join(dir, sshConfigFile)
+	if err := os.WriteFile(path, []byte(guestSSHGatewayConfig()), files.FileMode); err != nil {
+		return "", fmt.Errorf("failed to write the guest ssh configuration: %w", err)
+	}
+
+	return path, nil
 }
 
 // warnImageUser reports an image whose USER the machine will not honour.
@@ -298,8 +415,8 @@ func createSparse(target string, size int64) error {
 // It is written on the host and bound into the composed tree, so it is
 // part of the image the guest boots rather than something handed over at
 // runtime.
-func writeInitConfig(path string, bundle images.Bundle, ew types.EffectiveWorkload) error {
-	data, err := json.Marshal(initConfig(bundle, ew))
+func writeInitConfig(path string, bundle images.Bundle, ew types.EffectiveWorkload, net *NetworkConfig) error {
+	data, err := json.Marshal(initConfig(bundle, ew, net))
 	if err != nil {
 		return fmt.Errorf("failed to encode the guest init configuration: %w", err)
 	}
@@ -317,7 +434,7 @@ func writeInitConfig(path string, bundle images.Bundle, ew types.EffectiveWorklo
 // runner, so the argv is the workload's command. A firecracker workload is
 // allowed to leave it empty, because a machine's reason to exist is the
 // consoles that attach to it and those bring their own argv.
-func initConfig(bundle images.Bundle, ew types.EffectiveWorkload) InitConfig {
+func initConfig(bundle images.Bundle, ew types.EffectiveWorkload, net *NetworkConfig) InitConfig {
 	wl := ew.Workload
 
 	var argv []string
@@ -325,10 +442,18 @@ func initConfig(bundle images.Bundle, ew types.EffectiveWorkload) InitConfig {
 		argv = append([]string{wl.Command}, wl.Args...)
 	}
 
-	vars := make([]string, 0, len(bundle.Env)+1)
+	vars := make([]string, 0, len(bundle.Env)+2)
 	vars = append(vars, bundle.Env...)
 	if ew.Profile != nil {
 		vars = append(vars, "QUBESOME_PROFILE="+ew.Profile.Name)
+	}
+
+	// The endpoint the ssh drop-in's ProxyCommand reads for itself. It is
+	// in the environment rather than in the drop-in so that the file says
+	// only how to reach a gateway and never which one, which is the split
+	// the bwrap runner makes for the same pair of files.
+	if net != nil && net.Proxy != "" {
+		vars = append(vars, gateway.ProxyEnv+"="+net.Proxy)
 	}
 
 	var dataMount string
@@ -342,6 +467,7 @@ func initConfig(bundle images.Bundle, ew types.EffectiveWorkload) InitConfig {
 		Cwd:       bundle.Cwd,
 		Hostname:  ew.Name,
 		DataMount: dataMount,
+		Network:   net,
 	}
 }
 

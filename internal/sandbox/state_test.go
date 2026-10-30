@@ -71,3 +71,92 @@ func TestParseStartTime(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint64(987654), got)
 }
+
+func TestStateCarriesTheGatewayAddress(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sandbox.json")
+	require.NoError(t, WriteStateAddr(path, os.Getpid(), "10.111.0.2", 4026531837))
+
+	s, err := ReadState(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.Getpid(), s.PID)
+	assert.Equal(t, "10.111.0.2", s.Address)
+	assert.Equal(t, uint64(4026531837), s.Session)
+}
+
+// A sandbox with no gateway records no address, and the field is left out
+// rather than written empty, so a record from before there was one and a
+// record of a workload that has none are the same bytes.
+func TestStateWithoutAnAddressOmitsIt(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sandbox.json")
+	require.NoError(t, WriteState(path, os.Getpid()))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "address")
+}
+
+func TestParentPIDOfSelf(t *testing.T) {
+	t.Parallel()
+
+	got, err := ParentPID(os.Getpid())
+	require.NoError(t, err)
+	assert.Equal(t, os.Getppid(), got)
+}
+
+func TestParseParentPID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		line    string
+		want    int
+		wantErr bool
+	}{
+		{name: "plain", line: "42 (qubesome) S 7 42 42 0", want: 7},
+		{name: "command name with a paren and spaces", line: "42 (a) b (c) S 9 42", want: 9},
+		{name: "no command name", line: "42 qubesome S 7", wantErr: true},
+		{name: "truncated", line: "42 (qubesome) S", wantErr: true},
+		{name: "not a number", line: "42 (qubesome) S x", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := parseParentPID(tc.line)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// A reaper removes only the record of the sandbox it waited on. One that
+// names another pid was written by a launch that came after it.
+func TestRemoveStateOf(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sandbox-app-work.json")
+	require.NoError(t, WriteState(path, os.Getpid()))
+
+	removed, err := RemoveStateOf(path, os.Getpid()+1)
+	require.NoError(t, err)
+	assert.False(t, removed)
+	assert.FileExists(t, path)
+
+	removed, err = RemoveStateOf(path, os.Getpid())
+	require.NoError(t, err)
+	assert.True(t, removed)
+	assert.NoFileExists(t, path)
+
+	removed, err = RemoveStateOf(path, os.Getpid())
+	require.NoError(t, err)
+	assert.False(t, removed)
+}

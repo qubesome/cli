@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net"
 	"net/netip"
 	"path/filepath"
@@ -346,4 +347,32 @@ func (gw *testGateway) mapped() map[string]string {
 	}
 
 	return out
+}
+
+// The gateway's own refusal names the workload and the fact, and leaves
+// the reader looking for a file. The name it wants is the effective one,
+// the workload and the profile joined, which is not what is written at
+// the top of the workload's own config, and the policy is a file the
+// gateway knows nothing about. Both are the launch's to add.
+func TestARefusedRegistrationNamesThePolicyFile(t *testing.T) {
+	t.Parallel()
+
+	a := &Attach{policy: "/home/user/dotfiles/qubesome/gateway.yml"}
+
+	err := a.refused("chrome-personal", errors.New(`workload "chrome-personal" is not in the loaded policy`))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "/home/user/dotfiles/qubesome/gateway.yml")
+	assert.Contains(t, err.Error(), `"chrome-personal"`)
+	assert.Contains(t, err.Error(), "is not in the loaded policy", "the gateway's own message must survive")
+}
+
+// With no policy path resolved there is nothing to add, and an error with
+// a sentence saying so would be worse than the error on its own.
+func TestARefusedRegistrationWithNoPolicyPathIsLeftAlone(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("boom")
+
+	assert.Equal(t, cause, (&Attach{}).refused("chrome-personal", cause))
 }

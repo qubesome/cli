@@ -371,8 +371,26 @@ const netAdmin = "NET_ADMIN"
 // A configuration with no gateway block is unaffected: a named network
 // there means an empty namespace, and CAP_NET_ADMIN over one of those
 // reaches nothing.
+//
+// A microVM is unaffected for a different reason, and it is the reason
+// this refusal could be lifted for one at all. Its guest holds every
+// capability over a kernel that is shared with nothing, so capsAdd says
+// nothing about what it may do to its own interface: it can renumber it
+// whatever the configuration says. What holds its address down instead is
+// the guard on its tap, an nft table in the namespace its VMM runs in,
+// which the machine cannot reach. So the capability stops being a hole in
+// a shared design and becomes an ordinary thing to hold inside your own
+// kernel, which is what a workload wanting to bring up a tunnel needs.
+//
+// The guest already holds it, so there is nothing to ask for. capsAdd on a
+// microVM is refused by ValidateMicroVM, which says why, and this check
+// stands aside so that the refusal a user sees is that one.
 func (c *Config) ValidateGatewayAccess(ew EffectiveWorkload) error {
 	if c == nil || c.Gateway == nil {
+		return nil
+	}
+
+	if ew.Workload.Runner == firecrackerRunner {
 		return nil
 	}
 

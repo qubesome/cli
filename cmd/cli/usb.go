@@ -13,9 +13,12 @@ import (
 
 func usbCommand() *cli.Command {
 	cmd := &cli.Command{
-		Name:   "usb",
-		Hidden: true,
-		Usage:  "lists USB devices detected on the host",
+		Name: "usb",
+		// Not hidden. Its own description, and the doc comment on
+		// HostAccess.USBDevices, both tell the reader to run it to find
+		// the identifier to write into a workload. A command the
+		// documentation names has to be a command the help lists.
+		Usage: "lists USB devices detected on the host",
 		Description: `Lists the USB devices detected on the host, showing the
 vendor:product identifier, product name and the /dev paths that would be made
 available to a workload. Use the vendor:product identifier in a workload's

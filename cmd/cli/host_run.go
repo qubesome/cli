@@ -106,7 +106,7 @@ qubesome host-run -profile <profile> firefox     - Run firefox on the host and d
 		},
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:        "profile",
+				Name:        profileFlag,
 				Usage:       "Required when multiple profiles are active",
 				Destination: &targetProfile,
 			},

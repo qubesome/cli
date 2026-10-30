@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -45,7 +46,7 @@ func TestRunnerWorkloadNameStaysInTheWorkloadsDir(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false)
+			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false, false)
 			require.ErrorIs(t, err, ErrWorkloadConfigNotFound)
 		})
 	}
@@ -95,10 +96,39 @@ func TestRunnerSelection(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, tc.runner, false)
+			err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, tc.runner, false, false)
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
+}
+
+// The runner a workload is validated against is the one it will run
+// under. A --runner given on the command line replaces the configured one
+// before any check that depends on it, or a check would be answered for a
+// runner the workload is not about to use.
+//
+// runner registers the config root with the expandable env vars, which is
+// package level state, so this test does not run in parallel.
+func TestRunnerValidatesAgainstTheOverriddenRunner(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "work", "workloads")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app.yaml"),
+		[]byte("image: example.com/app\nsingleInstance: true\nhostAccess:\n  network: work\n  capsAdd: [NET_ADMIN]\n"), 0o600))
+
+	cfg := &types.Config{
+		RootDir: root,
+		Gateway: &types.GatewayConfig{Subnet: "10.111.0.0/24"},
+		Profiles: map[string]types.Profile{
+			"work": {
+				Name: "work", Path: "work", WindowManager: "exec awesome",
+				HostAccess: types.HostAccess{Network: "work", CapsAdd: []string{"NET_ADMIN"}},
+			},
+		},
+	}
+
+	err := runner(WorkloadInfo{Name: "app", Profile: "work", Config: cfg}, "firecracker", false, false)
+	require.ErrorContains(t, err, "capsAdd cannot be granted to a firecracker workload")
 }
 
 // Whether attachVM names a workload that exists, and one that is a
@@ -170,8 +200,25 @@ func TestRunnerRefusesAnAttachVMThatNamesNoMachine(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false)
+			err := runner(WorkloadInfo{Name: tc.workload, Profile: "work", Config: cfg}, "", false, false)
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
+}
+
+// A second launch of a single instance workload is handed to the sandbox
+// already running, which keeps every access a limited launch goes without.
+func TestRefuseHandOver(t *testing.T) {
+	t.Parallel()
+
+	running := filepath.Join(t.TempDir(), "sandbox-app-work.json")
+	require.NoError(t, sandbox.WriteState(running, os.Getpid()))
+	absent := filepath.Join(t.TempDir(), "sandbox-app-work.json")
+
+	single := types.EffectiveWorkload{Workload: types.Workload{Name: "app", SingleInstance: true}}
+	many := types.EffectiveWorkload{Workload: types.Workload{Name: "app"}}
+
+	require.ErrorContains(t, refuseHandOver(single, running), `workload "app" is already running with its full access`)
+	require.NoError(t, refuseHandOver(single, absent))
+	require.NoError(t, refuseHandOver(many, running))
 }

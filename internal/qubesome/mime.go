@@ -39,7 +39,7 @@ func (q *Qubesome) HandleMime(in *WorkloadInfo, args []string, runnerOverride st
 			return fmt.Errorf("cannot handle schemeless mime type: default mime handler is not set")
 		}
 
-		return q.runner(q.defaultWorkload(in, args), runnerOverride, false)
+		return q.runner(q.defaultWorkload(in, args), runnerOverride, false, false)
 	}
 
 	if m, ok := in.Config.MimeHandlers[u.Scheme]; ok {
@@ -51,7 +51,7 @@ func (q *Qubesome) HandleMime(in *WorkloadInfo, args []string, runnerOverride st
 		}
 
 		q.overrideWithProfile(in, &wi)
-		return q.runner(wi, runnerOverride, false)
+		return q.runner(wi, runnerOverride, false, false)
 	}
 
 	if in.Config.DefaultMimeHandler == nil {
@@ -61,7 +61,7 @@ func (q *Qubesome) HandleMime(in *WorkloadInfo, args []string, runnerOverride st
 	slog.Debug("no scheme specific handler: falling back to default mime handler")
 
 	// falls back to default
-	return q.runner(q.defaultWorkload(in, args), runnerOverride, false)
+	return q.runner(q.defaultWorkload(in, args), runnerOverride, false, false)
 }
 
 func (q *Qubesome) overrideWithProfile(in *WorkloadInfo, wi *WorkloadInfo) {
