@@ -234,7 +234,7 @@ func runOnHost(in machine, statePath string) error {
 		return fmt.Errorf("failed to record microVM state: %w", err)
 	}
 
-	go reap(cmd, statePath, in.Params.RootFsPath, nil, "")
+	go reap(cmd, cmd.Process.Pid, statePath, in.Params.RootFsPath, nil, "")
 
 	return nil
 }
@@ -285,7 +285,7 @@ func runOnGateway(ew types.EffectiveWorkload, in machine, att *gateway.Attach, s
 		return l.Stop(fmt.Errorf("failed to record microVM state: %w", err))
 	}
 
-	go reap(l.Cmd(), statePath, in.Params.RootFsPath, att, ew.Name)
+	go reap(l.Cmd(), l.RecordedPID(), statePath, in.Params.RootFsPath, att, ew.Name)
 
 	return nil
 }
@@ -346,18 +346,25 @@ func vmAttach(pid int, att vmAttacher, name string, release func() error) error 
 // stale one as not running. The root filesystem is removed here for a
 // reason of its own: it is an unpacked image's worth of disk, one per
 // machine, and the next boot builds a fresh one from the bundle.
-func reap(cmd *execabs.Cmd, statePath, rootfs string, att *gateway.Attach, name string) {
+//
+// The record and the gateway name are only touched while the record still
+// names pid, for the reason bwrap.reap gives.
+func reap(cmd *execabs.Cmd, pid int, statePath, rootfs string, att *gateway.Attach, name string) {
 	if err := cmd.Wait(); err != nil {
 		slog.Debug("the microVM exited", "path", statePath, "error", err)
 	}
 
 	remove(rootfs, "microVM root filesystem")
-	remove(statePath, "microVM state")
+
+	owned, err := sandbox.RemoveStateOf(statePath, pid)
+	if err != nil {
+		slog.Warn("failed to remove the microVM state", "path", statePath, "error", err)
+	}
 
 	// Best effort, for the reason Attach.Unregister gives: a qubesome run
 	// at a terminal exits before its machine does, so this often never
 	// runs at all.
-	if att != nil {
+	if att != nil && owned {
 		att.Unregister(name)
 	}
 }

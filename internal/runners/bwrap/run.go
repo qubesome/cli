@@ -166,7 +166,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 		return l.Stop(fmt.Errorf("failed to record sandbox state: %w", err))
 	}
 
-	go reap(l.Cmd(), statePath, att, ew.Name)
+	go reap(l.Cmd(), l.RecordedPID(), statePath, att, ew.Name)
 
 	return nil
 }
@@ -238,16 +238,22 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload) error 
 //
 // The unregister is best effort for the same reason. See Attach.Unregister
 // for why a message that never arrives leaks nothing worth chasing.
-func reap(cmd *execabs.Cmd, statePath string, att *gateway.Attach, name string) {
+//
+// Both are left alone once the record names another pid, or none. A
+// sandbox killed by qubesome workloads had its record removed and its name
+// unregistered by the kill, and a restart may already have registered the
+// name again for the sandbox that replaced it.
+func reap(cmd *execabs.Cmd, pid int, statePath string, att *gateway.Attach, name string) {
 	if err := cmd.Wait(); err != nil {
 		slog.Debug("workload sandbox exited", "path", statePath, "error", err)
 	}
 
-	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	owned, err := sandbox.RemoveStateOf(statePath, pid)
+	if err != nil {
 		slog.Warn("failed to remove sandbox state", "path", statePath, "error", err)
 	}
 
-	if att != nil {
+	if att != nil && owned {
 		att.Unregister(name)
 	}
 }

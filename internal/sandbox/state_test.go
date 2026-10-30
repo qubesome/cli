@@ -137,3 +137,26 @@ func TestParseParentPID(t *testing.T) {
 		})
 	}
 }
+
+// A reaper removes only the record of the sandbox it waited on. One that
+// names another pid was written by a launch that came after it.
+func TestRemoveStateOf(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sandbox-app-work.json")
+	require.NoError(t, WriteState(path, os.Getpid()))
+
+	removed, err := RemoveStateOf(path, os.Getpid()+1)
+	require.NoError(t, err)
+	assert.False(t, removed)
+	assert.FileExists(t, path)
+
+	removed, err = RemoveStateOf(path, os.Getpid())
+	require.NoError(t, err)
+	assert.True(t, removed)
+	assert.NoFileExists(t, path)
+
+	removed, err = RemoveStateOf(path, os.Getpid())
+	require.NoError(t, err)
+	assert.False(t, removed)
+}

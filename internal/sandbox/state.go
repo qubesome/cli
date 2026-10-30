@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -116,6 +117,33 @@ func ReadState(path string) (State, error) {
 	}
 
 	return s, nil
+}
+
+// RemoveStateOf removes the record at path if it still names pid, and
+// reports whether it did.
+//
+// A record that names another pid belongs to a launch that came after the
+// one asking, and one that is gone was removed by whoever took the sandbox
+// down. Neither is the asker's to remove, and neither is the gateway
+// mapping under the same name.
+func RemoveStateOf(path string, pid int) (bool, error) {
+	s, err := ReadState(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	if s.PID != pid {
+		return false, nil
+	}
+
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("failed to remove sandbox state %q: %w", path, err)
+	}
+
+	return true, nil
 }
 
 // Alive reports whether the sandbox recorded at path is still running.
