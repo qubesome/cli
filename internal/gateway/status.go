@@ -158,10 +158,10 @@ func (g Gateway) Inspect(s session.Session, cfg *types.Config, ready func() erro
 
 	g.inspectConfig(&st, cfg)
 
-	// A failure leaves held at zero, which no record names, so a session
-	// with no holder reports nothing wired to it.
-	held, _ := s.UsernsID()
-	st.Wired = wiredWorkloads(cfg, held)
+	// A failure leaves both at zero, which no record names, so a session
+	// with no holder or no gateway reports nothing wired to it.
+	held, instance, _ := (Gateway{StatePath: g.StatePath, Session: s}).identity()
+	st.Wired = wiredWorkloads(cfg, held, instance)
 
 	if st.Running && ready != nil {
 		if err := ready(); err != nil {
@@ -173,20 +173,21 @@ func (g Gateway) Inspect(s session.Session, cfg *types.Config, ready func() erro
 }
 
 // wiredWorkloads reads every sandbox record that names a gateway address
-// and was wired under the session held names.
+// and was wired to the gateway held and instance name.
 //
 // The records are the source rather than the gateway, for Inspect's
 // reason. A record with no address belongs to a workload that was launched
 // without one, and it is left out: there is nothing about it a gateway
 // status would say. A record of another session is left out as well. Its
 // workload is still running when the holder that wired it was killed, and
-// it is wired to a gateway that is not this one.
+// it is wired to a gateway that is not this one. So is a workload wired to
+// a gateway that was stopped and replaced within this session.
 //
 // Nothing here fails. A directory that cannot be read and a record that
 // does not parse are both a workload this cannot report, and a status that
 // refused to print because one file was malformed would be useless in
 // exactly the situation it is run in.
-func wiredWorkloads(cfg *types.Config, held uint64) []WiredWorkload {
+func wiredWorkloads(cfg *types.Config, held, instance uint64) []WiredWorkload {
 	if cfg == nil {
 		return nil
 	}
@@ -207,7 +208,7 @@ func wiredWorkloads(cfg *types.Config, held uint64) []WiredWorkload {
 		sort.Strings(paths)
 
 		for _, path := range paths {
-			if w, ok := wiredRecord(profile, path, held); ok {
+			if w, ok := wiredRecord(profile, path, held, instance); ok {
 				out = append(out, w)
 			}
 		}
@@ -217,10 +218,10 @@ func wiredWorkloads(cfg *types.Config, held uint64) []WiredWorkload {
 }
 
 // wiredRecord reads one sandbox record, and reports whether it is a
-// workload wired under the session held names.
-func wiredRecord(profile, path string, held uint64) (WiredWorkload, bool) {
+// workload wired to the gateway held and instance name.
+func wiredRecord(profile, path string, held, instance uint64) (WiredWorkload, bool) {
 	rec, err := sandbox.ReadState(path)
-	if err != nil || rec.Address == "" || held == 0 || rec.Session != held {
+	if err != nil || !wiredTo(rec, held, instance) {
 		return WiredWorkload{}, false
 	}
 

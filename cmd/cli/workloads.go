@@ -221,13 +221,20 @@ func refuseInside() error {
 // what would otherwise do it, as the workload exits, and a launch typed at
 // a terminal has long since returned. A gateway that still maps the name
 // refuses the next launch of it.
+//
+// Only a workload wired to the gateway now running is unregistered, and
+// that is decided before the kill, while its record is still there to
+// say so. One wired to a gateway that has gone is mapped by nothing
+// running, and the name may by now be another workload's.
 func killWorkload(ctx context.Context, w io.Writer, r workloads.Record) error {
+	wired := r.Address != "" && gateway.Current().Outlived(r.Path, r.Name) == nil
+
 	if err := workloads.Kill(r); err != nil {
 		return fmt.Errorf("failed to kill %s in profile %s: %w", r.Workload, r.Profile, err)
 	}
 
-	if r.Address != "" {
-		unregister(ctx, r.Name)
+	if wired {
+		unregister(ctx, r.Name, r.Address)
 	}
 
 	if r.Running {
@@ -241,14 +248,14 @@ func killWorkload(ctx context.Context, w io.Writer, r workloads.Record) error {
 
 // unregister tells the session gateway a workload has gone. A gateway that
 // is not running maps nothing, so failing to reach one is not a failure.
-func unregister(ctx context.Context, name string) {
+func unregister(ctx context.Context, name, addr string) {
 	c, err := gateway.Current().Client()
 	if err != nil {
 		slog.Debug("could not reach the gateway to unregister a workload", "workload", name, "error", err)
 		return
 	}
 
-	if err := c.Unregister(ctx, name); err != nil {
+	if err := c.Unregister(ctx, name, addr); err != nil {
 		slog.Debug("failed to unregister a workload", "workload", name, "error", err)
 	}
 }

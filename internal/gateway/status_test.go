@@ -331,43 +331,52 @@ func TestStatusWithNothingWiredSaysNothing(t *testing.T) {
 func TestWiredWorkloadsSkipsRecordsWithNoAddress(t *testing.T) {
 	t.Parallel()
 
-	assert.Empty(t, wiredWorkloads(nil, 1))
+	assert.Empty(t, wiredWorkloads(nil, 1, 1))
 }
 
-// A workload left running by a session that has gone is still recorded
-// with an address, and it is not wired to anything this session's gateway
-// knows about. Only the records of the session being reported on count.
-func TestWiredRecordKeepsOnlyThisSession(t *testing.T) {
+// A workload left running by a session that has gone, or by a gateway that
+// was stopped and replaced, is still recorded with an address, and it is
+// not wired to anything the gateway now running knows about. Only the
+// records of that gateway count.
+func TestWiredRecordKeepsOnlyThisGateway(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	const held = 4026531837
+	const (
+		held     = 4026531837
+		instance = 12345
+	)
 
-	write := func(name, addr string, session uint64) string {
+	write := func(name, addr string, session, gateway uint64) string {
 		path := filepath.Join(dir, "sandbox-"+name+".json")
-		require.NoError(t, sandbox.WriteStateAddr(path, os.Getpid(), addr, session))
+		_, err := sandbox.WriteStateWired(path, os.Getpid(), sandbox.Wiring{Address: addr, Session: session, Gateway: gateway})
+		require.NoError(t, err)
 		return path
 	}
 
 	tests := []struct {
-		name   string
-		path   string
-		held   uint64
-		wantOK bool
+		name     string
+		path     string
+		held     uint64
+		instance uint64
+		wantOK   bool
 	}{
-		{name: "this session", path: write("dev", "10.111.0.2", held), held: held, wantOK: true},
-		{name: "a session that has gone", path: write("old", "10.111.0.3", 1), held: held},
-		{name: "recorded with no session", path: write("legacy", "10.111.0.4", 0), held: held},
-		{name: "no address", path: write("plain", "", held), held: held},
-		{name: "no session is held", path: write("orphan", "10.111.0.5", held), held: 0},
-		{name: "no record", path: filepath.Join(dir, "sandbox-absent.json"), held: held},
+		{name: "this gateway", path: write("dev", "10.111.0.2", held, instance), held: held, instance: instance, wantOK: true},
+		{name: "a session that has gone", path: write("old", "10.111.0.3", 1, instance), held: held, instance: instance},
+		{name: "a gateway that was replaced", path: write("stopped", "10.111.0.3", held, 1), held: held, instance: instance},
+		{name: "recorded with no session", path: write("legacy", "10.111.0.4", 0, instance), held: held, instance: instance},
+		{name: "recorded with no gateway", path: write("older", "10.111.0.4", held, 0), held: held, instance: instance},
+		{name: "no address", path: write("plain", "", held, instance), held: held, instance: instance},
+		{name: "no session is held", path: write("orphan", "10.111.0.5", held, instance), instance: instance},
+		{name: "no gateway is running", path: write("lonely", "10.111.0.5", held, instance), held: held},
+		{name: "no record", path: filepath.Join(dir, "sandbox-absent.json"), held: held, instance: instance},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			w, ok := wiredRecord("personal", tc.path, tc.held)
+			w, ok := wiredRecord("personal", tc.path, tc.held, tc.instance)
 			require.Equal(t, tc.wantOK, ok)
 			if ok {
 				assert.Equal(t, "personal", w.Profile)

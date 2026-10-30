@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strconv"
 
+	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 )
 
@@ -33,11 +34,12 @@ type Attach struct {
 	policy string
 
 	// Session is the session user namespace the gateway was started in,
-	// as the inode the kernel names it by. A workload's record carries it
-	// so that a status can tell the workloads of this session from those
-	// a session that has gone left running. It is zero when it could not
-	// be read.
+	// as the inode the kernel names it by, and Gateway is the gateway's own
+	// start time. A workload's record carries both, so that a later launch
+	// and a status can tell a workload wired to this gateway from one a
+	// session or a gateway that has gone left running.
 	Session uint64
+	Gateway uint64
 }
 
 // Attached prepares the gateway side of a launch, and returns nil when the
@@ -108,14 +110,24 @@ func Attached(cfg *types.Config, network string, identities ...types.EffectiveWo
 		policy = ""
 	}
 
-	// Not an error either, for the same reason. It is only ever read by a
-	// status, and Up has just made sure a holder is running.
-	session, err := g.Session.UsernsID()
+	// These are errors. A record wired with neither would read later as a
+	// workload whose gateway has gone, and Up has just made sure both a
+	// holder and a gateway are running, so failing to name them is
+	// something having gone wrong between the two.
+	session, instance, err := g.identity()
 	if err != nil {
-		slog.Debug("[gateway] cannot read the session user namespace", "error", err)
+		return nil, err
 	}
 
-	return &Attach{gateway: g, config: *cfg.Gateway, Addr: addr, policy: policy, Session: session}, nil
+	return &Attach{
+		gateway: g, config: *cfg.Gateway, Addr: addr, policy: policy,
+		Session: session, Gateway: instance,
+	}, nil
+}
+
+// Wiring is what a workload's record says it was wired to.
+func (a *Attach) Wiring() sandbox.Wiring {
+	return sandbox.Wiring{Address: a.Addr.String(), Session: a.Session, Gateway: a.Gateway}
 }
 
 // ProxyAddr returns the endpoint a workload asks for a tunnel on.
@@ -204,7 +216,7 @@ func (a *Attach) Unregister(name string) {
 		return
 	}
 
-	if err := c.Unregister(context.Background(), name); err != nil {
+	if err := c.Unregister(context.Background(), name, a.Addr.String()); err != nil {
 		slog.Debug("failed to unregister a workload", "workload", name, "error", err)
 	}
 }

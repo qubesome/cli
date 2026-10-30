@@ -16,7 +16,6 @@ import (
 	"github.com/qubesome/cli/internal/images"
 	"github.com/qubesome/cli/internal/runners/util/launch"
 	"github.com/qubesome/cli/internal/sandbox"
-	"github.com/qubesome/cli/internal/session"
 	"github.com/qubesome/cli/internal/types"
 	"golang.org/x/sys/execabs"
 )
@@ -162,7 +161,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 	// types.ValidateMicroVM refuses singleInstance: false at config
 	// load, so every firecracker workload reaches this.
 	if sandbox.Alive(statePath) {
-		if err := session.Current().Outlived(statePath, ew.Name); err != nil {
+		if err := gateway.Current().Outlived(statePath, ew.Name); err != nil {
 			return err
 		}
 
@@ -221,7 +220,8 @@ func runOnHost(in machine, statePath string) error {
 		return fmt.Errorf("failed to start the microVM: %w", err)
 	}
 
-	if err := sandbox.WriteState(statePath, cmd.Process.Pid); err != nil {
+	rec, err := sandbox.WriteStateWired(statePath, cmd.Process.Pid, sandbox.Wiring{})
+	if err != nil {
 		// The state file is how a second launch finds this machine and
 		// how a console knows there is one, so a machine that cannot be
 		// recorded must not be left holding its memory reservation under
@@ -234,7 +234,7 @@ func runOnHost(in machine, statePath string) error {
 		return fmt.Errorf("failed to record microVM state: %w", err)
 	}
 
-	go reap(cmd, cmd.Process.Pid, statePath, in.Params.RootFsPath, nil, "")
+	go reap(cmd, rec, statePath, in.Params.RootFsPath, nil, "")
 
 	return nil
 }
@@ -279,13 +279,14 @@ func runOnGateway(ew types.EffectiveWorkload, in machine, att *gateway.Attach, s
 		return l.Stop(err)
 	}
 
-	if err := sandbox.WriteStateAddr(statePath, l.RecordedPID(), att.Addr.String(), att.Session); err != nil {
+	rec, err := sandbox.WriteStateWired(statePath, l.RecordedPID(), att.Wiring())
+	if err != nil {
 		att.Unregister(ew.Name)
 
 		return l.Stop(fmt.Errorf("failed to record microVM state: %w", err))
 	}
 
-	go reap(l.Cmd(), l.RecordedPID(), statePath, in.Params.RootFsPath, att, ew.Name)
+	go reap(l.Cmd(), rec, statePath, in.Params.RootFsPath, att, ew.Name)
 
 	return nil
 }
@@ -347,16 +348,16 @@ func vmAttach(pid int, att vmAttacher, name string, release func() error) error 
 // reason of its own: it is an unpacked image's worth of disk, one per
 // machine, and the next boot builds a fresh one from the bundle.
 //
-// The record and the gateway name are only touched while the record still
-// names pid, for the reason bwrap.reap gives.
-func reap(cmd *execabs.Cmd, pid int, statePath, rootfs string, att *gateway.Attach, name string) {
+// The record and the gateway name are only touched while the record is
+// still rec, the one this launch wrote, for the reason bwrap.reap gives.
+func reap(cmd *execabs.Cmd, rec sandbox.State, statePath, rootfs string, att *gateway.Attach, name string) {
 	if err := cmd.Wait(); err != nil {
 		slog.Debug("the microVM exited", "path", statePath, "error", err)
 	}
 
 	remove(rootfs, "microVM root filesystem")
 
-	owned, err := sandbox.RemoveStateOf(statePath, pid)
+	owned, err := sandbox.RemoveStateOf(statePath, rec)
 	if err != nil {
 		slog.Warn("failed to remove the microVM state", "path", statePath, "error", err)
 	}

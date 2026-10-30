@@ -19,7 +19,6 @@ import (
 	"github.com/qubesome/cli/internal/runners/util/mime"
 	"github.com/qubesome/cli/internal/runners/util/usb"
 	"github.com/qubesome/cli/internal/sandbox"
-	"github.com/qubesome/cli/internal/session"
 	"github.com/qubesome/cli/internal/types"
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/env"
@@ -148,14 +147,13 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 	// identity to the gateway, and this is the only place it is written
 	// down, so a diagnostic asking what a running sandbox is on the gateway
 	// has somewhere to read it.
-	var addr string
-	var session uint64
+	var wiring sandbox.Wiring
 	if att != nil {
-		addr = att.Addr.String()
-		session = att.Session
+		wiring = att.Wiring()
 	}
 
-	if err := sandbox.WriteStateAddr(statePath, l.RecordedPID(), addr, session); err != nil {
+	rec, err := sandbox.WriteStateWired(statePath, l.RecordedPID(), wiring)
+	if err != nil {
 		// The state file is how a second launch of a single instance
 		// workload finds this one, so a sandbox that cannot be recorded
 		// must not keep running under a name nothing can reach.
@@ -166,7 +164,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 		return l.Stop(fmt.Errorf("failed to record sandbox state: %w", err))
 	}
 
-	go reap(l.Cmd(), l.RecordedPID(), statePath, att, ew.Name)
+	go reap(l.Cmd(), rec, statePath, att, ew.Name)
 
 	return nil
 }
@@ -239,16 +237,16 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload) error 
 // The unregister is best effort for the same reason. See Attach.Unregister
 // for why a message that never arrives leaks nothing worth chasing.
 //
-// Both are left alone once the record names another pid, or none. A
+// Both are left alone once the record is not the one this launch wrote. A
 // sandbox killed by qubesome workloads had its record removed and its name
 // unregistered by the kill, and a restart may already have registered the
 // name again for the sandbox that replaced it.
-func reap(cmd *execabs.Cmd, pid int, statePath string, att *gateway.Attach, name string) {
+func reap(cmd *execabs.Cmd, rec sandbox.State, statePath string, att *gateway.Attach, name string) {
 	if err := cmd.Wait(); err != nil {
 		slog.Debug("workload sandbox exited", "path", statePath, "error", err)
 	}
 
-	owned, err := sandbox.RemoveStateOf(statePath, pid)
+	owned, err := sandbox.RemoveStateOf(statePath, rec)
 	if err != nil {
 		slog.Warn("failed to remove sandbox state", "path", statePath, "error", err)
 	}
@@ -284,7 +282,7 @@ func handOver(ew types.EffectiveWorkload, statePath string) (bool, error) {
 		return false, nil
 	}
 
-	if err := session.Current().Outlived(statePath, ew.Name); err != nil {
+	if err := gateway.Current().Outlived(statePath, ew.Name); err != nil {
 		return true, err
 	}
 

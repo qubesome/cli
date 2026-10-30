@@ -41,28 +41,51 @@ type State struct {
 	// keeps a note a third process could read, so a diagnostic asking what
 	// a running sandbox is on the gateway has only this record to go on.
 	Address string `json:"address,omitempty"`
+
+	// Gateway is the start time of the gateway process the sandbox was
+	// wired to, and zero for one given no address.
+	//
+	// The session alone does not say which gateway that was. qubesome
+	// gateway stop takes the gateway down while the holder stays, and the
+	// next launch starts another under the same session with its own
+	// addresses. A sandbox wired to the first is reachable from neither.
+	Gateway uint64 `json:"gateway,omitempty"`
+}
+
+// Wiring is what a sandbox was wired to on the gateway. It is the zero
+// value for a sandbox given no address.
+type Wiring struct {
+	Address string
+	Session uint64
+	Gateway uint64
 }
 
 // WriteState records a running sandbox at path.
 func WriteState(path string, pid int) error {
-	return WriteStateAddr(path, pid, "", 0)
+	_, err := WriteStateWired(path, pid, Wiring{})
+	return err
 }
 
-// WriteStateAddr records a running sandbox, the gateway address it was
-// given and the session user namespace it was wired under. addr is empty
-// and session is zero for a sandbox that was given no address.
+// WriteStateWired records a running sandbox and what it was wired to, and
+// returns the record it wrote.
 //
-// The session is recorded beside the address because the address alone
-// does not say whose gateway it is on. A sandbox outlives the session it
-// was wired under when the holder is killed, and its record still names
-// an address a later session's gateway knows nothing about.
-func WriteStateAddr(path string, pid int, addr string, session uint64) error {
+// The session and the gateway are recorded beside the address because the
+// address alone does not say whose gateway it is on. A sandbox outlives
+// the session it was wired under when the holder is killed, and the
+// gateway it was wired to when that is stopped, and its record still names
+// an address a later gateway knows nothing about.
+//
+// The record is returned so that whatever cleans up after the sandbox can
+// tell it from one a later launch writes to the same path.
+func WriteStateWired(path string, pid int, w Wiring) (State, error) {
 	st, err := startTime(pid)
 	if err != nil {
-		return err
+		return State{}, err
 	}
 
-	return writeState(path, State{PID: pid, StartTime: st, Address: addr, Session: session})
+	s := State{PID: pid, StartTime: st, Address: w.Address, Session: w.Session, Gateway: w.Gateway}
+
+	return s, writeState(path, s)
 }
 
 // WriteStateSession records a running sandbox and the session user
@@ -119,14 +142,17 @@ func ReadState(path string) (State, error) {
 	return s, nil
 }
 
-// RemoveStateOf removes the record at path if it still names pid, and
-// reports whether it did.
+// RemoveStateOf removes the record at path if it is still the one own
+// describes, which is the record a launch wrote, and reports whether it
+// did.
 //
-// A record that names another pid belongs to a launch that came after the
-// one asking, and one that is gone was removed by whoever took the sandbox
-// down. Neither is the asker's to remove, and neither is the gateway
-// mapping under the same name.
-func RemoveStateOf(path string, pid int) (bool, error) {
+// A record that names another process belongs to a launch that came after
+// the one asking, and one that is gone was removed by whoever took the
+// sandbox down. Neither is the asker's to remove, and neither is the
+// gateway mapping under the same name. The start time is compared with
+// the pid because a pid can be given to the next launch's sandbox as soon
+// as the last one is reaped.
+func RemoveStateOf(path string, own State) (bool, error) {
 	s, err := ReadState(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
@@ -135,7 +161,7 @@ func RemoveStateOf(path string, pid int) (bool, error) {
 		return false, err
 	}
 
-	if s.PID != pid {
+	if s.PID != own.PID || s.StartTime != own.StartTime {
 		return false, nil
 	}
 

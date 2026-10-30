@@ -113,8 +113,13 @@ func (*RegisterReply) Descriptor() ([]byte, []int) {
 }
 
 type UnregisterRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// The address the workload held. A gateway that has since mapped the name
+	// to another address keeps that mapping, so a late unregister of a
+	// workload that was replaced cannot remove its replacement. Empty from a
+	// client that predates it, which unregisters by name alone.
+	Address       string `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -152,6 +157,13 @@ func (*UnregisterRequest) Descriptor() ([]byte, []int) {
 func (x *UnregisterRequest) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *UnregisterRequest) GetAddress() string {
+	if x != nil {
+		return x.Address
 	}
 	return ""
 }
@@ -378,9 +390,10 @@ const file_pkg_control_proto_control_proto_rawDesc = "" +
 	"\x0fRegisterRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\"\x0f\n" +
-	"\rRegisterReply\"'\n" +
+	"\rRegisterReply\"A\n" +
 	"\x11UnregisterRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\x11\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aaddress\x18\x02 \x01(\tR\aaddress\"\x11\n" +
 	"\x0fUnregisterReply\"\x0e\n" +
 	"\fReadyRequest\"\f\n" +
 	"\n" +

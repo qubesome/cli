@@ -171,7 +171,10 @@ func Kill(r Record) error {
 		}
 	}
 
-	if err := os.Remove(r.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	// The record read above and not any record at the path. Once the
+	// sandbox is gone a launch of the same workload can start and write
+	// its own, which is not this kill's to remove.
+	if _, err := sandbox.RemoveStateOf(r.Path, st); err != nil {
 		return fmt.Errorf("failed to remove the workload record %q: %w", r.Path, err)
 	}
 
