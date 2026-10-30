@@ -92,6 +92,13 @@ type Env interface {
 	// records a working launch leaves.
 	MicroVMWiring(cfg types.GatewayConfig, sandboxPID int) (gateway.VMWiring, error)
 
+	// GatewayOutlived reports why the sandbox recorded at path is wired to
+	// a gateway that is no longer the session's, or nil when it is wired
+	// to the one running now. A namespace wired to a gateway that has gone
+	// still reads as a healthy bridge and guard, which is why this is
+	// asked before the wiring is.
+	GatewayOutlived(path, name string) error
+
 	// GatewayReady asks the session's gateway over its control socket
 	// whether its resolver, proxy and netfilter ruleset are all up.
 	//
@@ -185,6 +192,10 @@ func (e *OSEnv) SandboxRecord(path string) (sandbox.State, error) {
 
 func (e *OSEnv) MicroVMWiring(cfg types.GatewayConfig, sandboxPID int) (gateway.VMWiring, error) {
 	return gateway.Current().InspectVM(cfg, sandboxPID)
+}
+
+func (e *OSEnv) GatewayOutlived(path, name string) error {
+	return gateway.Current().Outlived(path, name)
 }
 
 // GatewayReady reaches the running gateway over the control channel the

@@ -41,6 +41,9 @@ type fakeEnv struct {
 	records   map[string]sandbox.State
 	wiring    gateway.VMWiring
 	wiringErr error
+
+	// outlived is what GatewayOutlived answers for every record.
+	outlived error
 }
 
 type fakeOutput struct {
@@ -566,4 +569,8 @@ func (f *fakeEnv) SandboxRecord(path string) (sandbox.State, error) {
 
 func (f *fakeEnv) MicroVMWiring(types.GatewayConfig, int) (gateway.VMWiring, error) {
 	return f.wiring, f.wiringErr
+}
+
+func (f *fakeEnv) GatewayOutlived(string, string) error {
+	return f.outlived
 }
