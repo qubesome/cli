@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,4 +97,27 @@ func TestUnregisterReachesOnlyTheGatewayItWasWiredTo(t *testing.T) {
 	current := sandbox.Wiring{Address: testAddress, Session: session, Gateway: instance}
 	g.Unregister(t.Context(), current, testWorkload)
 	assert.Empty(t, gw.mapped())
+}
+
+func TestRegisterRefusesAGatewayStartedSinceTheAddressWasAllocated(t *testing.T) {
+	g := newSessionGateway(t)
+
+	creds := newCreds(t)
+	require.NoError(t, g.writeCreds(creds))
+	gw := newGateway(closedChan(), testWorkload)
+	listenOn(t, gw, creds, g.Socket)
+	runningGateway(t, g)
+
+	session, instance, err := g.identity()
+	require.NoError(t, err)
+
+	addr := netip.MustParseAddr(testAddress)
+
+	replaced := &Attach{gateway: g, Addr: addr, Session: session, Gateway: instance + 1}
+	require.ErrorContains(t, replaced.Register(testWorkload), "restarted")
+	assert.Empty(t, gw.mapped())
+
+	current := &Attach{gateway: g, Addr: addr, Session: session, Gateway: instance}
+	require.NoError(t, current.Register(testWorkload))
+	assert.Len(t, gw.mapped(), 1)
 }

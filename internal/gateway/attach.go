@@ -164,7 +164,28 @@ func (a *Attach) Wire(pid int) error {
 // its loaded policy does not mention rather than handing an address to a
 // workload it has no rules for, so a workload missing from the gateway's
 // config stops here rather than reaching the network unclassified.
+//
+// It is refused when the gateway running now is not the one the address
+// was allocated from. A gateway started since then has counted its
+// addresses from the start again, so this one may already be another
+// workload's, and the workload's record would name a gateway that has
+// gone. The check and the registration are made under the gateway's
+// lock, so no restart lands between them.
 func (a *Attach) Register(name string) error {
+	lock, err := acquire(a.gateway.LockPath)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	session, instance, err := a.gateway.identity()
+	if err != nil {
+		return err
+	}
+	if session != a.Session || instance != a.Gateway {
+		return fmt.Errorf("the session gateway restarted while %s was being launched, so the address it was given may be another workload's", name)
+	}
+
 	c, err := a.gateway.Client()
 	if err != nil {
 		return err
