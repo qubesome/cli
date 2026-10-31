@@ -1,9 +1,11 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -173,4 +175,46 @@ func TestRemoveStateOf(t *testing.T) {
 	removed, err = RemoveStateOf(path, own)
 	require.NoError(t, err)
 	assert.False(t, removed)
+}
+
+// A launch writing its record holds the record's lock, so a removal that
+// already read the old record cannot unlink the new one. The test holds
+// the lock as that launch would, and writes the replacement under it.
+func TestRemoveStateOfWaitsForAWriteInProgress(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sandbox-app-work.json")
+	own, err := WriteStateWired(path, os.Getpid(), Wiring{})
+	require.NoError(t, err)
+
+	lock, err := lockState(path)
+	require.NoError(t, err)
+
+	type result struct {
+		removed bool
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		removed, err := RemoveStateOf(path, own)
+		done <- result{removed, err}
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("the removal did not wait for the write in progress")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	replacement := own
+	replacement.StartTime++
+	data, err := json.Marshal(replacement)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	require.NoError(t, lock.Close())
+
+	got := <-done
+	require.NoError(t, got.err)
+	assert.False(t, got.removed)
+	assert.FileExists(t, path)
 }

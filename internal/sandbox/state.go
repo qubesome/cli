@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/qubesome/cli/internal/files"
+	"golang.org/x/sys/unix"
 )
 
 // State records a running sandbox.
@@ -109,6 +110,12 @@ func writeState(path string, s State) error {
 		return fmt.Errorf("failed to marshal sandbox state: %w", err)
 	}
 
+	lock, err := lockState(path)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
 	if err := os.WriteFile(path, data, files.FileMode); err != nil {
 		return fmt.Errorf("failed to write sandbox state %q: %w", path, err)
 	}
@@ -121,6 +128,27 @@ func unmarshalState(data []byte, s *State) error {
 		return fmt.Errorf("failed to parse sandbox state: %w", err)
 	}
 	return nil
+}
+
+// lockState takes the lock that serialises the writes and the removals of
+// the record at path, and returns the file that holds it.
+//
+// It is a file beside the record and not the record itself, because a
+// removal unlinks the record, and a lock on an unlinked file is one the
+// next writer does not see. The lock file is left in place for the same
+// reason. Its name does not match what the record listings look for.
+func lockState(path string) (*os.File, error) {
+	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, files.FileMode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open the lock of sandbox state %q: %w", path, err)
+	}
+
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("failed to lock sandbox state %q: %w", path, err)
+	}
+
+	return f, nil
 }
 
 // ReadState returns the sandbox recorded at path.
@@ -152,7 +180,17 @@ func ReadState(path string) (State, error) {
 // gateway mapping under the same name. The start time is compared with
 // the pid because a pid can be given to the next launch's sandbox as soon
 // as the last one is reaped.
+//
+// The read and the removal are made under the record's lock, which every
+// write of a record also takes. A launch writing its own record between
+// the two would otherwise have it removed.
 func RemoveStateOf(path string, own State) (bool, error) {
+	lock, err := lockState(path)
+	if err != nil {
+		return false, err
+	}
+	defer lock.Close()
+
 	s, err := ReadState(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
