@@ -138,7 +138,7 @@ func unmarshalState(data []byte, s *State) error {
 // next writer does not see. The lock file is left in place for the same
 // reason. Its name does not match what the record listings look for.
 func lockState(path string) (*os.File, error) {
-	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, files.FileMode)
+	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDONLY, files.FileMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open the lock of sandbox state %q: %w", path, err)
 	}
