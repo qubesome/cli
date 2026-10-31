@@ -199,9 +199,13 @@ func listenOn(t *testing.T, gw *testGateway, creds *mtls.Credentials, socket str
 		served <- s.Serve(lis)
 	}()
 
+	// A test that is refused before it calls the gateway can stop it
+	// before Serve has started, which Serve reports as ErrServerStopped.
 	t.Cleanup(func() {
 		s.Stop()
-		require.NoError(t, <-served)
+		if err := <-served; !errors.Is(err, grpc.ErrServerStopped) {
+			require.NoError(t, err)
+		}
 	})
 
 	return socket
