@@ -169,11 +169,13 @@ the gateway to verify the upstream server's certificate.
 On Linux, the host backend reads the login Secret Service collection using
 the attributes `service` and `username` (`account` in the policy). For
 example, with libsecret's `secret-tool`, create the entry on the host using
-its hidden prompt ([secret-tool options](https://github.com/GNOME/libsecret/blob/main/tool/secret-tool.c)):
+its hidden prompt ([secret-tool options](https://github.com/GNOME/libsecret/blob/main/tool/secret-tool.c)).
+`secret-tool` takes a collection by its full object path, or the `default`
+alias, which is not always the login collection:
 
 ```sh
-secret-tool store --collection=login --label='Qubesome work GitHub' \
-  service qubesome/work/github username token
+secret-tool store --collection=/org/freedesktop/secrets/collection/login \
+  --label='Qubesome work GitHub' service qubesome/work/github username token
 ```
 
 The CLI reads only the entries named by injection rules and sends their
