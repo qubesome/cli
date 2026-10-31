@@ -64,6 +64,22 @@ func keyringValues(data []byte, get func(string, string) (string, error)) (map[s
 func (g Gateway) policySourcePath() string { return filepath.Join(g.Dir, "gateway-policy-source") }
 func (g Gateway) policyDir() string        { return filepath.Join(g.Dir, "gateway-policy") }
 
+// recordPolicySource notes which policy file the gateway now running was
+// started from.
+//
+// It is made absolute first. A profile started with -local . names its
+// config, and so its policy, relative to the directory it was started
+// from, and a later reload run from anywhere else would read whichever
+// file that relative path names there.
+func (g Gateway) recordPolicySource(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("failed to resolve the gateway policy %q: %w", path, err)
+	}
+
+	return os.WriteFile(g.policySourcePath(), []byte(abs), files.FileMode)
+}
+
 // Refresh reloads the policy and host-store values without restarting workloads.
 func (g Gateway) Refresh() error {
 	if _, err := g.SandboxPID(); err != nil {

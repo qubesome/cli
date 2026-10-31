@@ -179,3 +179,24 @@ func TestReloadKeepsAGatewayWithNoSourceWorkingForAPlainPolicy(t *testing.T) {
 	require.NoError(t, Gateway{Dir: dir}.reloadWith(c, false, launch))
 	assert.Equal(t, 1, gw.reloaded())
 }
+
+// A profile started with -local . names its policy relative to the
+// directory it was started from. A reload from anywhere else must read the
+// same file.
+func TestPolicySourceIsRecordedAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile("gateway.yml", []byte(plainPolicy), 0o600))
+
+	g := Gateway{Dir: t.TempDir(), ConfigPath: filepath.Join(t.TempDir(), "gateway-config")}
+	require.NoError(t, g.recordPolicySource("gateway.yml"))
+	g.recordConfig("qubesome.config")
+
+	source, err := os.ReadFile(g.policySourcePath())
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "gateway.yml"), string(source))
+
+	config, ok := g.RecordedConfig()
+	require.True(t, ok)
+	assert.Equal(t, filepath.Join(dir, "qubesome.config"), config)
+}

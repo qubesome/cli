@@ -457,6 +457,11 @@ func (g Gateway) recordConfig(source string) {
 		return
 	}
 
+	// Absolute, for the reason recordPolicySource gives.
+	if abs, err := filepath.Abs(source); err == nil {
+		source = abs
+	}
+
 	if err := os.WriteFile(g.ConfigPath, []byte(source+"\n"), files.FileMode); err != nil {
 		slog.Warn("failed to record which config the gateway was started from",
 			"path", g.ConfigPath, "config", source, "error", err)
@@ -542,7 +547,7 @@ func (g Gateway) start(cfg types.GatewayConfig, root string) error {
 	if err := g.stagePolicy(data); err != nil {
 		return err
 	}
-	if err := os.WriteFile(g.policySourcePath(), []byte(configPath), files.FileMode); err != nil {
+	if err := g.recordPolicySource(configPath); err != nil {
 		return err
 	}
 
