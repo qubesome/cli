@@ -222,6 +222,18 @@ func guardJSON(counter, chain bool, policy string, pinned int) []byte {
 	return []byte(`{"nftables":[` + strings.Join(entries, ",") + `]}`)
 }
 
+// alteredGuard is the guard as loaded with one piece of it replaced. It
+// fails the test that built it if the piece is not there to replace, so a
+// case cannot pass by altering nothing.
+func alteredGuard(old, replacement string) []byte {
+	data := string(guardJSON(true, true, "drop", 2))
+	if !strings.Contains(data, old) {
+		panic("alteredGuard: " + old + " is not in the guard")
+	}
+
+	return []byte(strings.Replace(data, old, replacement, 1))
+}
+
 func TestParseGuardReadsTheSpoofedCount(t *testing.T) {
 	t.Parallel()
 
@@ -249,6 +261,17 @@ func TestParseGuardRefusesATableThatIsNotTheGuard(t *testing.T) {
 		{name: "nothing pinned", data: guardJSON(true, true, "drop", 0), addr: "10.111.0.2"},
 		{name: "pinned to another guest", data: guardJSON(true, true, "drop", 2), addr: "10.111.0.3"},
 		{name: "not nft output", data: []byte("not json"), addr: "10.111.0.2"},
+		{name: "a pin that matches every other source", data: alteredGuard(`"op":"==","left":{"payload":{"protocol":"ip"`,
+			`"op":"!=","left":{"payload":{"protocol":"ip"`), addr: "10.111.0.2"},
+		{name: "the IP pinned twice in place of the ARP", data: alteredGuard(`"protocol":"arp","field":"saddr ip"`,
+			`"protocol":"ip","field":"saddr"`), addr: "10.111.0.2"},
+		{name: "an accept ahead of the pins", data: alteredGuard(`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":5,`,
+			`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":9,"expr":[{"accept":null}]}},`+
+				`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":5,`), addr: "10.111.0.2"},
+		{name: "a pin that drops", data: alteredGuard(`"right":"10.111.0.2"}},{"accept":null}]}}`+
+			`,{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":6`,
+			`"right":"10.111.0.2"}},{"drop":null}]}}`+
+				`,{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":6`), addr: "10.111.0.2"},
 	}
 
 	for _, tc := range tests {

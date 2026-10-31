@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -465,11 +466,15 @@ func parseVMWiring(data []byte) (VMWiring, error) {
 //
 // A table is only taken for the guard when it is still the guard that was
 // loaded: the spoofed counter, an ingress chain on the prerouting hook
-// dropping by default, and rules pinning both the IP and the ARP frames
-// of the tap to this guest's address and MAC. Any of those missing is
-// refused rather than reported as a guard that has seen nothing, which is
-// what zero says. The rules are matched by the values they name and not
-// by the shape nft prints them in, which changes between releases.
+// dropping by default, and the rules guardRuleset writes, in its order.
+// Anything else is refused rather than reported as a guard that has seen
+// nothing, which is what zero says.
+//
+// The rules are compared whole, and not by whether they name the address
+// and the MAC. A pin turned into a != or into a drop, the IP pinned twice
+// in place of the ARP, or an accept added ahead of the pins all still name
+// both, and each lets the guest send as someone else. Counters inside a
+// rule are left out of the comparison, since they decide nothing.
 func parseGuard(data []byte, addr netip.Addr) (uint64, error) {
 	mac, err := GuestMAC(addr)
 	if err != nil {
@@ -488,8 +493,8 @@ func parseGuard(data []byte, addr netip.Addr) (uint64, error) {
 				Policy string `json:"policy"`
 			} `json:"chain"`
 			Rule *struct {
-				Chain string          `json:"chain"`
-				Expr  json.RawMessage `json:"expr"`
+				Chain string                       `json:"chain"`
+				Expr  []map[string]json.RawMessage `json:"expr"`
 			} `json:"rule"`
 		} `json:"nftables"`
 	}
@@ -499,10 +504,10 @@ func parseGuard(data []byte, addr netip.Addr) (uint64, error) {
 	}
 
 	var (
-		packets  uint64
-		counter  bool
-		chain    bool
-		pinnings int
+		packets uint64
+		counter bool
+		chain   bool
+		rules   []guardRule
 	)
 
 	for _, e := range out.Nftables {
@@ -512,10 +517,7 @@ func parseGuard(data []byte, addr netip.Addr) (uint64, error) {
 		case e.Chain != nil && e.Chain.Name == guardChain:
 			chain = e.Chain.Hook == "prerouting" && e.Chain.Policy == "drop"
 		case e.Rule != nil && e.Rule.Chain == guardChain:
-			expr := strings.ToLower(string(e.Rule.Expr))
-			if strings.Contains(expr, `"`+addr.String()+`"`) && strings.Contains(expr, `"`+strings.ToLower(mac)+`"`) {
-				pinnings++
-			}
+			rules = append(rules, readGuardRule(e.Rule.Expr))
 		}
 	}
 
@@ -524,9 +526,99 @@ func parseGuard(data []byte, addr netip.Addr) (uint64, error) {
 		return 0, errors.New("gateway: the guard has no spoofed counter")
 	case !chain:
 		return 0, errors.New("gateway: the guard has no ingress chain dropping by default")
-	case pinnings < 2:
-		return 0, fmt.Errorf("gateway: the guard does not pin both the IP and the ARP of %s to %s", addr, mac)
+	case !slices.EqualFunc(rules, guardRules(addr, mac), guardRule.equal):
+		return 0, fmt.Errorf("gateway: the guard's rules are not the ones that pin the IP and the ARP of %s to %s", addr, mac)
 	}
 
 	return packets, nil
+}
+
+// guardMatch is one comparison in a guard rule, as nft prints it. Left is
+// the field compared, written the way the ruleset names it.
+type guardMatch struct {
+	Op    string
+	Left  string
+	Right string
+}
+
+// guardRule is a guard rule reduced to what it decides: what it matches,
+// and what it does with a frame that matches.
+type guardRule struct {
+	Matches []guardMatch
+	Verdict string
+}
+
+func (r guardRule) equal(o guardRule) bool {
+	return r.Verdict == o.Verdict && slices.Equal(r.Matches, o.Matches)
+}
+
+// guardRules is guardRuleset as nft prints it back.
+func guardRules(addr netip.Addr, mac string) []guardRule {
+	mac = strings.ToLower(mac)
+
+	return []guardRule{
+		{Matches: []guardMatch{{"!=", "meta iifname", vmTap}}, Verdict: "accept"},
+		{Matches: []guardMatch{{"==", "ether saddr", mac}, {"==", "ip saddr", addr.String()}}, Verdict: "accept"},
+		{Matches: []guardMatch{{"==", "ether saddr", mac}, {"==", "arp saddr ip", addr.String()}}, Verdict: "accept"},
+		{},
+	}
+}
+
+// readGuardRule reduces the expressions of a rule nft printed. One it has
+// no reading for is kept as a match nothing expects, so the rule it is in
+// cannot pass for one of the guard's.
+func readGuardRule(exprs []map[string]json.RawMessage) guardRule {
+	var r guardRule
+
+	for _, expr := range exprs {
+		for kind, body := range expr {
+			switch kind {
+			case "counter":
+			case "accept", "drop":
+				r.Verdict = kind
+			case "match":
+				r.Matches = append(r.Matches, readGuardMatch(body))
+			default:
+				r.Matches = append(r.Matches, guardMatch{Op: "unknown " + kind})
+			}
+		}
+	}
+
+	return r
+}
+
+func readGuardMatch(body json.RawMessage) guardMatch {
+	var m struct {
+		Op   string `json:"op"`
+		Left struct {
+			Payload *struct {
+				Protocol string `json:"protocol"`
+				Field    string `json:"field"`
+			} `json:"payload"`
+			Meta *struct {
+				Key string `json:"key"`
+			} `json:"meta"`
+		} `json:"left"`
+		Right json.RawMessage `json:"right"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return guardMatch{Op: "unreadable"}
+	}
+
+	// A right side that is not a plain value, a set say, is left as it was
+	// printed, which no expected rule names.
+	right := string(m.Right)
+	var value string
+	if err := json.Unmarshal(m.Right, &value); err == nil {
+		right = strings.ToLower(value)
+	}
+
+	switch {
+	case m.Left.Payload != nil:
+		return guardMatch{Op: m.Op, Left: m.Left.Payload.Protocol + " " + m.Left.Payload.Field, Right: right}
+	case m.Left.Meta != nil:
+		return guardMatch{Op: m.Op, Left: "meta " + m.Left.Meta.Key, Right: right}
+	}
+
+	return guardMatch{Op: m.Op, Right: right}
 }
