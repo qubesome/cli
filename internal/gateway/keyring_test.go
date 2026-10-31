@@ -94,15 +94,18 @@ const plainPolicy = `workloads:
       allowed: [api.github.com]
 `
 
-func gatewayWithPolicy(t *testing.T, policy string) Gateway {
+// gatewayWithPolicy is a gateway started from plainPolicy, which it has
+// loaded.
+func gatewayWithPolicy(t *testing.T) Gateway {
 	t.Helper()
 
 	dir := t.TempDir()
 	g := Gateway{Dir: dir}
 	source := filepath.Join(dir, "gateway.yml")
-	require.NoError(t, os.WriteFile(source, []byte(policy), 0o600))
+	require.NoError(t, os.WriteFile(source, []byte(plainPolicy), 0o600))
 	require.NoError(t, os.WriteFile(g.policySourcePath(), []byte(source), 0o600))
-	require.NoError(t, g.stagePolicy([]byte(policy)))
+	require.NoError(t, g.stagePolicy([]byte(plainPolicy)))
+	g.recordApplied(policyDigest([]byte(plainPolicy)))
 
 	return g
 }
@@ -115,7 +118,7 @@ func TestReloadToleratesAGatewayThatCannotReload(t *testing.T) {
 	gw.noReload = true
 	c := startGateway(t, gw)
 
-	require.NoError(t, gatewayWithPolicy(t, plainPolicy).reloadWith(c, false, ""))
+	require.NoError(t, gatewayWithPolicy(t).reloadWith(c, false, ""))
 }
 
 // A gateway this launch started has just read its policy, so with no host
@@ -124,7 +127,7 @@ func TestReloadSkipsAGatewayJustStarted(t *testing.T) {
 	gw := newGateway(closedChan(), testWorkload)
 	c := startGateway(t, gw)
 
-	require.NoError(t, gatewayWithPolicy(t, plainPolicy).reloadWith(c, true, ""))
+	require.NoError(t, gatewayWithPolicy(t).reloadWith(c, true, ""))
 	assert.Equal(t, 0, gw.reloaded())
 }
 
@@ -132,7 +135,7 @@ func TestReloadReReadsARunningGatewaysPolicy(t *testing.T) {
 	gw := newGateway(closedChan(), testWorkload)
 	c := startGateway(t, gw)
 
-	require.NoError(t, gatewayWithPolicy(t, plainPolicy).reloadWith(c, false, ""))
+	require.NoError(t, gatewayWithPolicy(t).reloadWith(c, false, ""))
 	assert.Equal(t, 1, gw.reloaded())
 }
 
@@ -143,10 +146,42 @@ func TestReloadReReadsAPolicyEditedWhileTheGatewayStarted(t *testing.T) {
 	gw := newGateway(closedChan(), testWorkload)
 	c := startGateway(t, gw)
 
+	g := gatewayWithPolicy(t)
 	edited := strings.ReplaceAll(plainPolicy, "api.github.com", "api.example.com")
-	g := gatewayWithPolicy(t, edited)
-	require.NoError(t, g.stagePolicy([]byte(plainPolicy)))
+	require.NoError(t, os.WriteFile(filepath.Join(g.Dir, "gateway.yml"), []byte(edited), 0o600))
 
+	require.NoError(t, g.reloadWith(c, true, ""))
+	assert.Equal(t, 1, gw.reloaded())
+}
+
+// Another launch can stage an edited policy and have the gateway refuse
+// it before the launch that started the gateway gets here. The copy on
+// disk is then the edited one, and the gateway is still on the policy it
+// started with.
+func TestReloadReReadsAPolicyAnotherLaunchFailedToApply(t *testing.T) {
+	gw := newGateway(closedChan(), testWorkload)
+	c := startGateway(t, gw)
+
+	g := gatewayWithPolicy(t)
+	edited := strings.ReplaceAll(plainPolicy, "api.github.com", "api.example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(g.Dir, "gateway.yml"), []byte(edited), 0o600))
+	require.NoError(t, g.stagePolicy([]byte(edited)))
+
+	require.NoError(t, g.reloadWith(c, true, ""))
+	assert.Equal(t, 1, gw.reloaded())
+}
+
+// A policy the gateway has reloaded is one it has, so a launch that has
+// just started it has nothing more to ask.
+func TestReloadRecordsThePolicyTheGatewayLoaded(t *testing.T) {
+	gw := newGateway(closedChan(), testWorkload)
+	c := startGateway(t, gw)
+
+	g := gatewayWithPolicy(t)
+	edited := strings.ReplaceAll(plainPolicy, "api.github.com", "api.example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(g.Dir, "gateway.yml"), []byte(edited), 0o600))
+
+	require.NoError(t, g.reloadWith(c, false, ""))
 	require.NoError(t, g.reloadWith(c, true, ""))
 	assert.Equal(t, 1, gw.reloaded())
 }

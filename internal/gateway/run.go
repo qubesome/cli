@@ -223,15 +223,20 @@ func (g Gateway) reload(started bool, policy string) error {
 
 // reloadWith is reload with the lock held and the client at hand.
 func (g Gateway) reloadWith(c *Client, started bool, policy string) error {
-	delivered, changed, err := g.reloadKeyring(c, policy)
-	if delivered || err != nil {
+	delivered, staged, err := g.reloadKeyring(c, policy)
+	if err != nil {
 		return err
 	}
+	if delivered {
+		g.recordApplied(staged)
+		return nil
+	}
 
-	// A gateway reads the staged copy as it starts, and the policy is
-	// staged again above. An edit made in between, while the image was
-	// pulled, is one the gateway has not read.
-	if started && !changed {
+	// A gateway this launch started has the policy staged as it started.
+	// The policy is staged again above, and an edit made in between, while
+	// the image was pulled, is one it has not read. So is an edit another
+	// launch staged and the gateway refused.
+	if started && staged != nil && bytes.Equal(staged, g.applied()) {
 		return nil
 	}
 
@@ -242,6 +247,10 @@ func (g Gateway) reloadWith(c *Client, started bool, policy string) error {
 		}
 
 		return err
+	}
+
+	if staged != nil {
+		g.recordApplied(staged)
 	}
 
 	slog.Debug("[gateway] the session gateway re-read its policy")
@@ -547,6 +556,9 @@ func (g Gateway) start(cfg types.GatewayConfig, root string) error {
 	if err := g.stagePolicy(data); err != nil {
 		return err
 	}
+	// The gateway reads the staged policy as it starts, and no other launch
+	// can stage one before it is ready. See recordApplied.
+	g.recordApplied(policyDigest(data))
 	if err := g.recordPolicySource(configPath); err != nil {
 		return err
 	}

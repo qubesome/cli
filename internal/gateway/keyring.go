@@ -1,10 +1,11 @@
 package gateway
 
 import (
-	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,7 +121,8 @@ var errNoPolicySource = errors.New("the running gateway was started by an older 
 
 // reloadKeyring stages the policy the gateway was started from and delivers
 // the host keyring values it names. It reports whether it delivered any,
-// and whether the policy staged differs from the one that was there.
+// and the digest of the policy it staged, which is nil when it staged
+// none.
 //
 // It is always the original policy, never the configuration of an unrelated
 // launch reusing this session's gateway. The caller holds the gateway lock
@@ -136,42 +138,79 @@ var errNoPolicySource = errors.New("the running gateway was started by an older 
 // a launch whose policy names some is refused rather than run without
 // them. Empty means there is no launch to ask on behalf of, and then any
 // gateway with no source is refused.
-func (g Gateway) reloadKeyring(c *Client, launch string) (delivered, changed bool, err error) {
+func (g Gateway) reloadKeyring(c *Client, launch string) (delivered bool, staged []byte, err error) {
 	source, err := os.ReadFile(g.policySourcePath())
 	if errors.Is(err, os.ErrNotExist) {
-		return false, false, refuseWithoutSource(launch)
+		return false, nil, refuseWithoutSource(launch)
 	}
 	if err != nil {
-		return false, false, err
+		return false, nil, err
 	}
 
 	// The source record is written only by the trusted launcher in its
 	// private session directory. The policy itself may live anywhere.
 	data, err := os.ReadFile(string(source)) //nolint:gosec // trusted host configuration path, not workload input.
 	if err != nil {
-		return false, false, fmt.Errorf("read gateway policy: %w", err)
+		return false, nil, fmt.Errorf("read gateway policy: %w", err)
 	}
 
 	values, err := keyringValues(data, backend.New().Get)
 	if err != nil {
-		return false, false, err
+		return false, nil, err
 	}
-
-	// A file that cannot be read reads as changed, which only costs a
-	// Reload the gateway did not need.
-	staged, err := os.ReadFile(filepath.Join(g.policyDir(), "gateway.yml"))
-	changed = err != nil || !bytes.Equal(staged, data)
 
 	if err := g.stagePolicy(data); err != nil {
-		return false, false, err
+		return false, nil, err
 	}
 
+	staged = policyDigest(data)
 	if len(values) == 0 {
-		return false, changed, nil
+		return false, staged, nil
 	}
 
+	return true, staged, c.ReloadKeyring(values, staged)
+}
+
+func policyDigest(data []byte) []byte {
 	digest := sha256.Sum256(data)
-	return true, changed, c.ReloadKeyring(values, digest[:])
+	return digest[:]
+}
+
+func (g Gateway) appliedPath() string { return filepath.Join(g.Dir, "gateway-policy-applied") }
+
+// recordApplied notes the digest of the policy the gateway has loaded:
+// the one staged as it started, and after that the one each successful
+// reload handed it.
+//
+// It is what a launch that has just started the gateway compares the
+// policy it stages against. The copy on disk is not enough. Another
+// launch can stage an edit the gateway then refuses, and the copy on disk
+// would say the edit is in place while the gateway enforces the policy it
+// had.
+//
+// A failure is not an error. A record that is missing or stale reads as
+// a policy the gateway does not have, which costs one reload it did not
+// need.
+func (g Gateway) recordApplied(digest []byte) {
+	//nolint:gosec // the path is in the private session directory, and what is written is a digest.
+	if err := os.WriteFile(g.appliedPath(), []byte(hex.EncodeToString(digest)), files.FileMode); err != nil {
+		slog.Debug("[gateway] failed to record the policy the gateway loaded", "error", err)
+	}
+}
+
+// applied returns the digest recordApplied last wrote, or nil.
+func (g Gateway) applied() []byte {
+	data, err := os.ReadFile(g.appliedPath())
+	if err != nil {
+		return nil
+	}
+
+	digest, err := hex.DecodeString(string(data))
+	if err != nil {
+		return nil
+	}
+
+	return digest
 }
 
 // refuseWithoutSource decides for a gateway that records no policy source.
