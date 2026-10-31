@@ -20,7 +20,8 @@ func writeRecord(t *testing.T, runDir, profile, workload string, pid int, addr s
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 
 	path := filepath.Join(dir, "sandbox-"+workload+"-"+profile+".json")
-	require.NoError(t, sandbox.WriteStateAddr(path, pid, addr, 0))
+	_, err := sandbox.WriteStateWired(path, pid, sandbox.Wiring{Address: addr})
+	require.NoError(t, err)
 
 	return path
 }

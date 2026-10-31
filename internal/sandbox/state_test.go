@@ -1,9 +1,11 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -76,13 +78,16 @@ func TestStateCarriesTheGatewayAddress(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sandbox.json")
-	require.NoError(t, WriteStateAddr(path, os.Getpid(), "10.111.0.2", 4026531837))
+	written, err := WriteStateWired(path, os.Getpid(), Wiring{Address: "10.111.0.2", Session: 4026531837, Gateway: 12345})
+	require.NoError(t, err)
 
 	s, err := ReadState(path)
 	require.NoError(t, err)
+	assert.Equal(t, written, s)
 	assert.Equal(t, os.Getpid(), s.PID)
 	assert.Equal(t, "10.111.0.2", s.Address)
 	assert.Equal(t, uint64(4026531837), s.Session)
+	assert.Equal(t, uint64(12345), s.Gateway)
 }
 
 // A sandbox with no gateway records no address, and the field is left out
@@ -139,24 +144,77 @@ func TestParseParentPID(t *testing.T) {
 }
 
 // A reaper removes only the record of the sandbox it waited on. One that
-// names another pid was written by a launch that came after it.
+// names another process was written by a launch that came after it, and a
+// pid alone does not say so once it has been given out again.
 func TestRemoveStateOf(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "sandbox-app-work.json")
-	require.NoError(t, WriteState(path, os.Getpid()))
-
-	removed, err := RemoveStateOf(path, os.Getpid()+1)
+	own, err := WriteStateWired(path, os.Getpid(), Wiring{})
 	require.NoError(t, err)
-	assert.False(t, removed)
-	assert.FileExists(t, path)
 
-	removed, err = RemoveStateOf(path, os.Getpid())
+	tests := []struct {
+		name string
+		own  State
+	}{
+		{name: "another pid", own: State{PID: own.PID + 1, StartTime: own.StartTime}},
+		{name: "the same pid given out again", own: State{PID: own.PID, StartTime: own.StartTime + 1}},
+	}
+	for _, tc := range tests {
+		removed, err := RemoveStateOf(path, tc.own)
+		require.NoError(t, err, tc.name)
+		assert.False(t, removed, tc.name)
+		assert.FileExists(t, path, tc.name)
+	}
+
+	removed, err := RemoveStateOf(path, own)
 	require.NoError(t, err)
 	assert.True(t, removed)
 	assert.NoFileExists(t, path)
 
-	removed, err = RemoveStateOf(path, os.Getpid())
+	removed, err = RemoveStateOf(path, own)
 	require.NoError(t, err)
 	assert.False(t, removed)
+}
+
+// A launch writing its record holds the record's lock, so a removal that
+// already read the old record cannot unlink the new one. The test holds
+// the lock as that launch would, and writes the replacement under it.
+func TestRemoveStateOfWaitsForAWriteInProgress(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sandbox-app-work.json")
+	own, err := WriteStateWired(path, os.Getpid(), Wiring{})
+	require.NoError(t, err)
+
+	lock, err := lockState(path)
+	require.NoError(t, err)
+
+	type result struct {
+		removed bool
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		removed, err := RemoveStateOf(path, own)
+		done <- result{removed, err}
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("the removal did not wait for the write in progress")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	replacement := own
+	replacement.StartTime++
+	data, err := json.Marshal(replacement)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	require.NoError(t, lock.Close())
+
+	got := <-done
+	require.NoError(t, got.err)
+	assert.False(t, got.removed)
+	assert.FileExists(t, path)
 }

@@ -24,6 +24,11 @@ message RegisterReply {
 
 message UnregisterRequest {
   string name = 1;
+  // The address the workload held. A gateway that has since mapped the name
+  // to another address keeps that mapping, so a late unregister of a
+  // workload that was replaced cannot remove its replacement. Empty from a
+  // client that predates it, which unregisters by name alone.
+  string address = 2;
 }
 
 message UnregisterReply {

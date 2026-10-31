@@ -191,23 +191,97 @@ func TestVMWiringReadsADownBridgeAsBroken(t *testing.T) {
 	assert.False(t, w.OK())
 }
 
-func TestSpoofedCountReadsTheNamedCounter(t *testing.T) {
+// guardJSON is `nft -j list table bridge qubesome` for the guard loaded for
+// 10.111.0.2, with any of its parts left out.
+func guardJSON(counter, chain bool, policy string, pinned int) []byte {
+	entries := []string{`{"metainfo":{"version":"1.0.9","json_schema_version":1}}`,
+		`{"table":{"family":"bridge","name":"qubesome","handle":1}}`}
+	if counter {
+		entries = append(entries,
+			`{"counter":{"family":"bridge","name":"spoofed","table":"qubesome","handle":2,"packets":7,"bytes":420}}`)
+	}
+	if chain {
+		entries = append(entries,
+			`{"chain":{"family":"bridge","table":"qubesome","name":"ingress","handle":3,"type":"filter","hook":"prerouting","prio":-200,"policy":"`+policy+`"}}`)
+	}
+	entries = append(entries,
+		`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":4,"expr":[`+
+			`{"match":{"op":"!=","left":{"meta":{"key":"iifname"}},"right":"tap0"}},{"accept":null}]}}`)
+	pins := []string{
+		`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":5,"expr":[` +
+			`{"match":{"op":"==","left":{"payload":{"protocol":"ether","field":"saddr"}},"right":"02:00:0a:6f:00:02"}},` +
+			`{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"10.111.0.2"}},{"accept":null}]}}`,
+		`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":6,"expr":[` +
+			`{"match":{"op":"==","left":{"payload":{"protocol":"ether","field":"saddr"}},"right":"02:00:0a:6f:00:02"}},` +
+			`{"match":{"op":"==","left":{"payload":{"protocol":"arp","field":"saddr ip"}},"right":"10.111.0.2"}},{"accept":null}]}}`,
+	}
+	entries = append(entries, pins[:pinned]...)
+	entries = append(entries,
+		`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":7,"expr":[{"counter":"spoofed"}]}}`)
+
+	return []byte(`{"nftables":[` + strings.Join(entries, ",") + `]}`)
+}
+
+// alteredGuard is the guard as loaded with one piece of it replaced. It
+// fails the test that built it if the piece is not there to replace, so a
+// case cannot pass by altering nothing.
+func alteredGuard(old, replacement string) []byte {
+	data := string(guardJSON(true, true, "drop", 2))
+	if !strings.Contains(data, old) {
+		panic("alteredGuard: " + old + " is not in the guard")
+	}
+
+	return []byte(strings.Replace(data, old, replacement, 1))
+}
+
+func TestParseGuardReadsTheSpoofedCount(t *testing.T) {
 	t.Parallel()
 
-	n, err := parseSpoofed([]byte(
-		`{"nftables":[{"metainfo":{"version":"1.0.9"}},` +
-			`{"counter":{"family":"bridge","table":"qubesome","name":"spoofed","packets":7,"bytes":420}}]}`))
+	n, err := parseGuard(guardJSON(true, true, "drop", 2), netip.MustParseAddr("10.111.0.2"))
 	require.NoError(t, err)
 	assert.Equal(t, uint64(7), n)
 }
 
-// A ruleset with no counter of that name is not a guard this understands,
-// and reporting zero would read as a guard that has seen nothing.
-func TestSpoofedCountRefusesARulesetWithoutTheCounter(t *testing.T) {
+// A counter outlives the chain beside it, so a table holding one says
+// nothing about whether anything is still dropped. Only the guard as it
+// was loaded is taken for one, and reporting zero for anything else would
+// read as a guard that has seen nothing.
+func TestParseGuardRefusesATableThatIsNotTheGuard(t *testing.T) {
 	t.Parallel()
 
-	_, err := parseSpoofed([]byte(`{"nftables":[{"metainfo":{"version":"1.0.9"}}]}`))
-	require.Error(t, err)
+	tests := []struct {
+		name string
+		data []byte
+		addr string
+	}{
+		{name: "no counter", data: guardJSON(false, true, "drop", 2), addr: "10.111.0.2"},
+		{name: "no chain", data: guardJSON(true, false, "drop", 2), addr: "10.111.0.2"},
+		{name: "a chain that accepts by default", data: guardJSON(true, true, "accept", 2), addr: "10.111.0.2"},
+		{name: "only the IP pinned", data: guardJSON(true, true, "drop", 1), addr: "10.111.0.2"},
+		{name: "nothing pinned", data: guardJSON(true, true, "drop", 0), addr: "10.111.0.2"},
+		{name: "pinned to another guest", data: guardJSON(true, true, "drop", 2), addr: "10.111.0.3"},
+		{name: "not nft output", data: []byte("not json"), addr: "10.111.0.2"},
+		{name: "a pin that matches every other source", data: alteredGuard(`"op":"==","left":{"payload":{"protocol":"ip"`,
+			`"op":"!=","left":{"payload":{"protocol":"ip"`), addr: "10.111.0.2"},
+		{name: "the IP pinned twice in place of the ARP", data: alteredGuard(`"protocol":"arp","field":"saddr ip"`,
+			`"protocol":"ip","field":"saddr"`), addr: "10.111.0.2"},
+		{name: "an accept ahead of the pins", data: alteredGuard(`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":5,`,
+			`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":9,"expr":[{"accept":null}]}},`+
+				`{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":5,`), addr: "10.111.0.2"},
+		{name: "a pin that drops", data: alteredGuard(`"right":"10.111.0.2"}},{"accept":null}]}}`+
+			`,{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":6`,
+			`"right":"10.111.0.2"}},{"drop":null}]}}`+
+				`,{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":6`), addr: "10.111.0.2"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := parseGuard(tc.data, netip.MustParseAddr(tc.addr))
+			require.Error(t, err)
+		})
+	}
 }
 
 // The tap is the only step of a wire that opens a device rather than only

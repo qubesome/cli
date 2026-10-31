@@ -2,6 +2,8 @@ package doctor
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -90,7 +92,14 @@ type Env interface {
 	// It is asked of the namespace rather than of the records qubesome
 	// wrote, because the failure worth catching here leaves exactly the
 	// records a working launch leaves.
-	MicroVMWiring(cfg types.GatewayConfig, sandboxPID int) (gateway.VMWiring, error)
+	MicroVMWiring(cfg types.GatewayConfig, sandboxPID int, addr string) (gateway.VMWiring, error)
+
+	// GatewayOutlived reports why the sandbox recorded at path is wired to
+	// a gateway that is no longer the session's, or nil when it is wired
+	// to the one running now. A namespace wired to a gateway that has gone
+	// still reads as a healthy bridge and guard, which is why this is
+	// asked before the wiring is.
+	GatewayOutlived(path, name string) error
 
 	// GatewayReady asks the session's gateway over its control socket
 	// whether its resolver, proxy and netfilter ruleset are all up.
@@ -183,8 +192,17 @@ func (e *OSEnv) SandboxRecord(path string) (sandbox.State, error) {
 	return sandbox.ReadState(path)
 }
 
-func (e *OSEnv) MicroVMWiring(cfg types.GatewayConfig, sandboxPID int) (gateway.VMWiring, error) {
-	return gateway.Current().InspectVM(cfg, sandboxPID)
+func (e *OSEnv) MicroVMWiring(cfg types.GatewayConfig, sandboxPID int, addr string) (gateway.VMWiring, error) {
+	a, err := netip.ParseAddr(addr)
+	if err != nil {
+		return gateway.VMWiring{}, fmt.Errorf("the microVM was recorded with an address that is not one, %q: %w", addr, err)
+	}
+
+	return gateway.Current().InspectVM(cfg, sandboxPID, a)
+}
+
+func (e *OSEnv) GatewayOutlived(path, name string) error {
+	return gateway.Current().Outlived(path, name)
 }
 
 // GatewayReady reaches the running gateway over the control channel the

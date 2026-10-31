@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strconv"
 
+	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
 )
 
@@ -33,11 +34,12 @@ type Attach struct {
 	policy string
 
 	// Session is the session user namespace the gateway was started in,
-	// as the inode the kernel names it by. A workload's record carries it
-	// so that a status can tell the workloads of this session from those
-	// a session that has gone left running. It is zero when it could not
-	// be read.
+	// as the inode the kernel names it by, and Gateway is the gateway's own
+	// start time. A workload's record carries both, so that a later launch
+	// and a status can tell a workload wired to this gateway from one a
+	// session or a gateway that has gone left running.
 	Session uint64
+	Gateway uint64
 }
 
 // Attached prepares the gateway side of a launch, and returns nil when the
@@ -108,14 +110,24 @@ func Attached(cfg *types.Config, network string, identities ...types.EffectiveWo
 		policy = ""
 	}
 
-	// Not an error either, for the same reason. It is only ever read by a
-	// status, and Up has just made sure a holder is running.
-	session, err := g.Session.UsernsID()
+	// These are errors. A record wired with neither would read later as a
+	// workload whose gateway has gone, and Up has just made sure both a
+	// holder and a gateway are running, so failing to name them is
+	// something having gone wrong between the two.
+	session, instance, err := g.identity()
 	if err != nil {
-		slog.Debug("[gateway] cannot read the session user namespace", "error", err)
+		return nil, err
 	}
 
-	return &Attach{gateway: g, config: *cfg.Gateway, Addr: addr, policy: policy, Session: session}, nil
+	return &Attach{
+		gateway: g, config: *cfg.Gateway, Addr: addr, policy: policy,
+		Session: session, Gateway: instance,
+	}, nil
+}
+
+// Wiring is what a workload's record says it was wired to.
+func (a *Attach) Wiring() sandbox.Wiring {
+	return sandbox.Wiring{Address: a.Addr.String(), Session: a.Session, Gateway: a.Gateway}
 }
 
 // ProxyAddr returns the endpoint a workload asks for a tunnel on.
@@ -152,7 +164,28 @@ func (a *Attach) Wire(pid int) error {
 // its loaded policy does not mention rather than handing an address to a
 // workload it has no rules for, so a workload missing from the gateway's
 // config stops here rather than reaching the network unclassified.
+//
+// It is refused when the gateway running now is not the one the address
+// was allocated from. A gateway started since then has counted its
+// addresses from the start again, so this one may already be another
+// workload's, and the workload's record would name a gateway that has
+// gone. The check and the registration are made under the gateway's
+// lock, so no restart lands between them.
 func (a *Attach) Register(name string) error {
+	lock, err := acquire(a.gateway.LockPath)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	session, instance, err := a.gateway.identity()
+	if err != nil {
+		return err
+	}
+	if session != a.Session || instance != a.Gateway {
+		return fmt.Errorf("the session gateway restarted while %s was being launched, so the address it was given may be another workload's", name)
+	}
+
 	c, err := a.gateway.Client()
 	if err != nil {
 		return err
@@ -197,16 +230,11 @@ func (a *Attach) refused(name string, err error) error {
 // nothing will be handed again, because allocation only ever counts up
 // within a session. Correctness rests on that non-reuse and not on this
 // arriving, which is why a failure here is reported and nothing more.
+//
+// It reaches only the gateway the workload was wired to. See
+// Gateway.Unregister.
 func (a *Attach) Unregister(name string) {
-	c, err := a.gateway.Client()
-	if err != nil {
-		slog.Debug("could not reach the gateway to unregister a workload", "workload", name, "error", err)
-		return
-	}
-
-	if err := c.Unregister(context.Background(), name); err != nil {
-		slog.Debug("failed to unregister a workload", "workload", name, "error", err)
-	}
+	a.gateway.Unregister(context.Background(), a.Wiring(), name)
 }
 
 // WireVM gives the microVM sandbox at pid a bridged link to the gateway, a
