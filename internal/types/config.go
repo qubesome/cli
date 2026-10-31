@@ -438,8 +438,10 @@ func (c *Config) ValidateGatewayName(ew EffectiveWorkload) error {
 			continue
 		}
 
+		// The other reading is only a collision if a workload could be
+		// called that, so it is held to what Workload.Validate allows.
 		candidate, ok := strings.CutSuffix(ew.Name, "-"+profile)
-		if !ok || candidate == "" || !nameRegex.MatchString(candidate) {
+		if !ok || valid(candidate, "name", 50, false, nameRegex) != nil {
 			continue
 		}
 
