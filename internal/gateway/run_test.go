@@ -70,6 +70,51 @@ func TestAttachedDoesNothingForAWorkloadWithNoNetwork(t *testing.T) {
 	}
 }
 
+func ambiguousIdentity() (*types.Config, types.EffectiveWorkload) {
+	cfg := &types.Config{
+		RootDir: "/nonexistent",
+		Gateway: &types.GatewayConfig{
+			Image:  "ghcr.io/qubesome/gateway:latest",
+			Config: "/gateway.yml",
+			Subnet: testSubnet,
+		},
+		Profiles: map[string]types.Profile{"c": {Name: "c"}, "b-c": {Name: "b-c"}},
+	}
+	p := cfg.Profiles["c"]
+
+	return cfg, (types.Workload{Name: "a-b"}).ApplyProfile(&p)
+}
+
+// A machine attached to a console is booted without the config checks a
+// launch goes through, so the name is checked where every address is
+// handed out. The gateway here could not start, and the error says the
+// name was refused before it was tried.
+func TestAttachedRefusesAnAmbiguousName(t *testing.T) {
+	t.Parallel()
+
+	cfg, ew := ambiguousIdentity()
+
+	_, err := Attached(cfg, "qubesome", ew)
+	require.ErrorContains(t, err, "ambiguous gateway workload name")
+}
+
+// A name is only ambiguous to the gateway, so a launch that takes no
+// address from it is not refused for one. That includes a limited launch.
+func TestAttachedAllowsAnAmbiguousNameWithNoNetwork(t *testing.T) {
+	t.Parallel()
+
+	cfg, ew := ambiguousIdentity()
+
+	att, err := Attached(cfg, "none", ew)
+	require.NoError(t, err)
+	assert.Nil(t, att)
+
+	limited := types.Limited(ew)
+	att, err = Attached(cfg, limited.Workload.HostAccess.Network, limited)
+	require.NoError(t, err)
+	assert.Nil(t, att)
+}
+
 // The rule the whole stage rests on. The gateway here cannot start, because
 // the policy file it names is not there, and the launch has to stop rather
 // than carry on with no policy applied to it.
@@ -98,6 +143,7 @@ func TestAttachedStopsTheLaunchWhenTheGatewayWillNotStart(t *testing.T) {
 // launch that started it read it.
 func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 	g := newSessionGateway(t)
+	cfg, root := reusableConfig(t)
 
 	creds := newCreds(t)
 	require.NoError(t, g.writeCreds(creds))
@@ -106,7 +152,7 @@ func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 
 	runningGateway(t, g)
 
-	require.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
+	require.NoError(t, g.Up(cfg, root, ""))
 
 	assert.Equal(t, 1, gw.reloaded())
 }
@@ -116,6 +162,7 @@ func TestUpDoesNotStartASecondGatewayWhenOneIsRunning(t *testing.T) {
 // start a workload over it.
 func TestUpAcceptsAGatewayThatCannotReload(t *testing.T) {
 	g := newSessionGateway(t)
+	cfg, root := reusableConfig(t)
 
 	creds := newCreds(t)
 	require.NoError(t, g.writeCreds(creds))
@@ -125,7 +172,7 @@ func TestUpAcceptsAGatewayThatCannotReload(t *testing.T) {
 
 	runningGateway(t, g)
 
-	assert.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
+	assert.NoError(t, g.Up(cfg, root, ""))
 }
 
 // A state file outlives the process it names, so a gateway that crashed must
@@ -485,6 +532,22 @@ func unusableConfig() types.GatewayConfig {
 	}
 }
 
+// reusableConfig names a policy that is there and asks for nothing from
+// the host keyring. A gateway that records no policy source is reused
+// only once the launch's own policy says so.
+//
+// A launch that took the start path instead would get as far as the image
+// pull, so a test using it shows the gateway was reused by reloaded and not
+// by an error.
+func reusableConfig(t *testing.T) (types.GatewayConfig, string) {
+	t.Helper()
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "gateway.yml"), []byte(plainPolicy), 0o600))
+
+	return unusableConfig(), root
+}
+
 func prefix(t *testing.T, s string) netip.Prefix {
 	t.Helper()
 
@@ -651,6 +714,7 @@ func TestUpReusesAGatewayFromAReleaseThatRecordedNoSession(t *testing.T) {
 	t.Parallel()
 
 	g := newSessionGateway(t)
+	cfg, root := reusableConfig(t)
 
 	creds := newCreds(t)
 	require.NoError(t, g.writeCreds(creds))
@@ -665,7 +729,7 @@ func TestUpReusesAGatewayFromAReleaseThatRecordedNoSession(t *testing.T) {
 	require.NoError(t, sandbox.WriteState(g.Session.StatePath, os.Getppid()))
 	require.NoError(t, sandbox.WriteState(g.StatePath, os.Getpid()))
 
-	require.NoError(t, g.Up(unusableConfig(), t.TempDir(), ""))
+	require.NoError(t, g.Up(cfg, root, ""))
 
 	assert.Equal(t, 1, gw.reloaded(), "the gateway that was running must have been reused")
 }

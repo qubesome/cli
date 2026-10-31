@@ -144,6 +144,82 @@ xhost +SI:localuser:${USER}
 
 If `xhost` is not present, it can be installed with `sudo zypper install xhost`.
 
+### Gateway injection from the host keyring
+
+In the gateway policy named by `gateway.config`, an `inject` rule can refer
+to an entry in the host keyring:
+
+```yaml
+workloads:
+  code-work: # workload code, profile work
+    inject:
+      - host: api.github.com
+        header: Authorization
+        format: "Bearer %s"
+        valueFrom:
+          keyring:
+            service: qubesome/work/github
+            account: token
+```
+
+Keep the gateway's existing `upstream` and TLS CA configuration. HTTPS
+injection requires the gateway CA to be trusted inside the workload and
+the gateway to verify the upstream server's certificate.
+
+On Linux, the host backend reads the login Secret Service collection using
+the attributes `service` and `username` (`account` in the policy). For
+example, with libsecret's `secret-tool`, create the entry on the host using
+its hidden prompt ([secret-tool options](https://github.com/GNOME/libsecret/blob/main/tool/secret-tool.c)).
+`secret-tool` takes a collection by its full object path, or the `default`
+alias, which is not always the login collection:
+
+```sh
+secret-tool store --collection=/org/freedesktop/secrets/collection/login \
+  --label='Qubesome work GitHub' service qubesome/work/github username token
+```
+
+The CLI reads only the entries named by injection rules and sends their
+values over the authenticated gateway control channel. Values stay in
+gateway memory; they are not written to staging files, environment variables,
+command arguments, or workload mounts. The gateway receives no host keyring
+socket. The service name is organizational; the effective workload's
+injection rules determine which requests may use a token.
+
+Keyring-backed rules match the exact hostname by default. Add
+`includeSubdomains: true` beside `host` to include descendants. Existing
+`valueFrom.file` and `valueFrom.env` rules retain their subdomain matching.
+Only one source may be specified. Empty values and values containing CR,
+LF, or NUL are refused. Requests carrying placeholder authorization headers
+have those headers replaced before forwarding.
+
+Tokens refresh when a workload launch reuses the gateway, or explicitly:
+
+```sh
+qubesome gateway reload
+```
+
+A successful refresh replaces the complete credential snapshot without a
+cache delay. Removed injection grants also stop forwarding on existing
+proxy connections. A missing or locked entry, invalid policy, or failed
+refresh stops the launch/reload and retains the previous complete running
+snapshot; it does not silently fall back to unauthenticated requests. To
+revoke a grant, remove its rule and successfully reload, or stop the gateway.
+
+Both the CLI and gateway image must include host-keyring support. After
+upgrading the image, run `qubesome gateway stop`; the next workload launch
+starts the new image. Older gateways cannot acknowledge keyring delivery,
+so keyring-enabled launches fail rather than assume the token was installed.
+For development across these two repositories, use a Go workspace containing
+both `cli` and `gateway` (for example, `GOWORK=/absolute/path/to/cli/go.work`
+when building the gateway). Before releasing a standalone gateway image,
+update its CLI module dependency to the release containing this protocol.
+
+The gateway is trusted with the supplied tokens across profiles. Keep the
+policy and Qubesome session directory outside workload-writable mounts, and
+do not grant workloads host keyring or control-channel access through broad
+host runtime mounts. Injection grants let a workload exercise a token's
+authority at the configured destination; that destination receives the token.
+
 ### License
 This project is licensed under the Apache 2.0 License. Refer to the [LICENSE](LICENSE)
 file for more information.

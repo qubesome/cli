@@ -58,9 +58,20 @@ type Attach struct {
 // binds only those who asked for a gateway. A workload that asks for no
 // network is not a failure either: it gets nothing, which is the same
 // thing the rule protects.
-func Attached(cfg *types.Config, network string) (*Attach, error) {
+func Attached(cfg *types.Config, network string, identities ...types.EffectiveWorkload) (*Attach, error) {
 	if cfg == nil || cfg.Gateway == nil || !types.GatewayNetwork(network) {
 		return nil, nil //nolint:nilnil // no gateway and no failure is the ordinary case, and there is nothing to return.
+	}
+
+	// Here and not with the rest of the config checks, because every
+	// launch given an address comes through here and not every one goes
+	// through those. A machine booted for a console it is attached to is
+	// one that does not. Before Up, so a name that cannot be told apart
+	// starts no gateway.
+	for _, identity := range identities {
+		if err := cfg.ValidateGatewayName(identity); err != nil {
+			return nil, err
+		}
 	}
 
 	subnet, err := cfg.Gateway.SubnetPrefix()
@@ -71,6 +82,11 @@ func Attached(cfg *types.Config, network string) (*Attach, error) {
 	g := Current()
 	if err := g.Up(*cfg.Gateway, cfg.RootDir, cfg.Source); err != nil {
 		return nil, err
+	}
+	for _, identity := range identities {
+		if err := g.bindIdentity(identity); err != nil {
+			return nil, err
+		}
 	}
 
 	// After Up and not before it. Starting a gateway resets the count, so

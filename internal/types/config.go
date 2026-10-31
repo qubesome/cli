@@ -416,6 +416,42 @@ func (c *Config) ValidateGatewayAccess(ew EffectiveWorkload) error {
 	return nil
 }
 
+// ValidateGatewayName refuses a workload whose policy key could also name
+// a workload in another configured profile.
+//
+// The key is the workload and the profile joined by a hyphen, and hyphens
+// are legal in both. So workload a-b in profile c and workload a in profile
+// b-c are both a-b-c to the gateway, and would share its policy and the
+// credentials it injects. The other workload need not exist yet to be
+// refused for, since creating it later would not ask this again.
+//
+// It is asked only of a launch that is about to be given a gateway
+// address, which is why the gateway's Attached is what calls it. A launch
+// with no network shares nothing with the gateway, whatever it is called.
+func (c *Config) ValidateGatewayName(ew EffectiveWorkload) error {
+	if c == nil || ew.Profile == nil {
+		return nil
+	}
+
+	for profile := range c.Profiles {
+		if profile == ew.Profile.Name {
+			continue
+		}
+
+		// The other reading is only a collision if a workload could be
+		// called that, so it is held to what Workload.Validate allows.
+		candidate, ok := strings.CutSuffix(ew.Name, "-"+profile)
+		if !ok || valid(candidate, "name", 50, false, nameRegex) != nil {
+			continue
+		}
+
+		return fmt.Errorf("ambiguous gateway workload name %q: it also names workload %q in profile %q. "+
+			"Rename the workload or the profile", ew.Name, candidate, profile)
+	}
+
+	return nil
+}
+
 func valid(val, field string, maxLen int, allowEmpty bool, format *regexp.Regexp) error {
 	if val == "" {
 		if allowEmpty {

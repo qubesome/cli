@@ -33,10 +33,10 @@ import (
 // These are the gateway image's own paths rather than qubesome's layout,
 // which is why they are here and not in internal/files.
 const (
-	// inConfigPath is where the policy file is bound inside the sandbox. It
-	// is the image's own default for CONFIG_PATH, so a policy taken from the
-	// config tree lands where the gateway already looks for one.
-	inConfigPath = "/etc/qubesome/gateway.yml"
+	// inConfigPath is the staged policy inside the sandbox, and what
+	// CONFIG_PATH points the gateway at. Its parent directory is the mount,
+	// so a policy replaced by a rename is seen by a running gateway.
+	inConfigPath = "/run/qubesome-policy/gateway.yml"
 
 	// inSecretsDir is the directory the gateway resolves a policy's
 	// valueFrom.file references against, and the root it refuses to read
@@ -162,13 +162,17 @@ func (g Gateway) Up(cfg types.GatewayConfig, root, source string) error {
 		return err
 	}
 
-	// A gateway this launch started has just read the policy file, so there
-	// is nothing to re-read.
-	if started {
-		return nil
+	// Not an error. A gateway that records its policy source never reads
+	// this, and one that does not is refused when it is empty.
+	policy, err := cfg.ConfigPath(root)
+	if err != nil {
+		policy = ""
 	}
 
-	return g.reload()
+	// A gateway this launch started has just read its policy, but not the
+	// host keyring values it names. Those are in neither the policy file
+	// nor the gateway's environment, so they are delivered here.
+	return g.reload(started, policy)
 }
 
 // reload asks a gateway that was already running to re-read its policy file.
@@ -191,10 +195,49 @@ func (g Gateway) Up(cfg types.GatewayConfig, root, source string) error {
 // under the older one means running it with rules it was not meant to have.
 // The one exception is a gateway too old to serve the call at all, which never
 // re-read its policy and is no worse for being asked.
-func (g Gateway) reload() error {
+//
+// started is true for the launch that has just started the gateway. Unless
+// the policy names host keyring values to deliver, or was edited after the
+// gateway read it, there is nothing to ask of a gateway that has only now
+// read its policy.
+//
+// policy is the launch's own policy file. See reloadKeyring for when it is
+// read.
+func (g Gateway) reload(started bool, policy string) error {
+	// Held across the staging of the policy and the call, so that two
+	// launches cannot leave a gateway with one's policy and the other's
+	// keyring values.
+	lock, err := acquire(g.LockPath)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
 	c, err := g.Client()
 	if err != nil {
 		return err
+	}
+
+	return g.reloadWith(c, started, policy)
+}
+
+// reloadWith is reload with the lock held and the client at hand.
+func (g Gateway) reloadWith(c *Client, started bool, policy string) error {
+	delivered, staged, err := g.reloadKeyring(c, policy)
+	if err != nil {
+		return err
+	}
+	if delivered {
+		g.recordApplied(staged)
+		return nil
+	}
+
+	// A gateway this launch started has the policy staged as it started.
+	// The policy is staged again above, and an edit made in between, while
+	// the image was pulled, is one it has not read. So is an edit another
+	// launch staged and the gateway refused.
+	if started && staged != nil && bytes.Equal(staged, g.applied()) {
+		return nil
 	}
 
 	if err := c.Reload(context.Background()); err != nil {
@@ -204,6 +247,10 @@ func (g Gateway) reload() error {
 		}
 
 		return err
+	}
+
+	if staged != nil {
+		g.recordApplied(staged)
 	}
 
 	slog.Debug("[gateway] the session gateway re-read its policy")
@@ -419,6 +466,11 @@ func (g Gateway) recordConfig(source string) {
 		return
 	}
 
+	// Absolute, for the reason recordPolicySource gives.
+	if abs, err := filepath.Abs(source); err == nil {
+		source = abs
+	}
+
 	if err := os.WriteFile(g.ConfigPath, []byte(source+"\n"), files.FileMode); err != nil {
 		slog.Warn("failed to record which config the gateway was started from",
 			"path", g.ConfigPath, "config", source, "error", err)
@@ -497,6 +549,19 @@ func (g Gateway) start(cfg types.GatewayConfig, root string) error {
 	if err := g.prepareDirs(); err != nil {
 		return err
 	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("read gateway policy: %w", err)
+	}
+	if err := g.stagePolicy(data); err != nil {
+		return err
+	}
+	// The gateway reads the staged policy as it starts, and no other launch
+	// can stage one before it is ready. See recordApplied.
+	g.recordApplied(policyDigest(data))
+	if err := g.recordPolicySource(configPath); err != nil {
+		return err
+	}
 
 	// A gateway that was killed leaves its socket behind and a bind to a
 	// path that already exists fails. Nothing else creates this one, and the
@@ -518,7 +583,7 @@ func (g Gateway) start(cfg types.GatewayConfig, root string) error {
 		return fmt.Errorf("failed to get the gateway image %q: %w", cfg.Image, err)
 	}
 
-	return g.launch(bundle, g.spec(bundle, configPath, creds))
+	return g.launch(bundle, g.spec(bundle, creds))
 }
 
 // prepareDirs creates the host directories the sandbox is given.
@@ -1086,7 +1151,7 @@ func (h helper) bwrapArgs(usernsFD int) ([]string, error) {
 const separator = "--"
 
 // spec renders the gateway into the sandbox it runs in.
-func (g Gateway) spec(bundle images.Bundle, configPath string, creds *mtls.Credentials) sandbox.Spec {
+func (g Gateway) spec(bundle images.Bundle, creds *mtls.Credentials) sandbox.Spec {
 	return sandbox.Spec{
 		Rootfs:   bundle.Rootfs,
 		Hostname: gatewayHostname,
@@ -1126,7 +1191,7 @@ func (g Gateway) spec(bundle images.Bundle, configPath string, creds *mtls.Crede
 		CapsAdd: []string{"CAP_NET_ADMIN"},
 
 		Mounts: []sandbox.Mount{
-			{Src: configPath, Dst: inConfigPath, ReadOnly: true},
+			{Src: g.policyDir(), Dst: filepath.Dir(inConfigPath), ReadOnly: true},
 			{Src: g.SecretsDir, Dst: inSecretsDir, ReadOnly: true},
 			// The directory and not the socket: the socket does not exist
 			// yet, the gateway creates it. Writable for the same reason.
