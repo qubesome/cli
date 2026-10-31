@@ -40,6 +40,17 @@ func TestOutlived(t *testing.T) {
 	require.NoError(t, g.Outlived(record("ungated", sandbox.Wiring{}), "ungated"))
 	require.NoError(t, g.Outlived(filepath.Join(dir, "sandbox-absent.json"), "absent"))
 
+	// Records written before the gateway was named in them. The session
+	// alone still says whether the gateway running in it is theirs, and one
+	// that names neither was never refused.
+	sessionOnly := current
+	sessionOnly.Gateway = 0
+	require.NoError(t, g.Outlived(record("upgraded", sessionOnly), "upgraded"))
+	require.NoError(t, g.Outlived(record("ancient", sandbox.Wiring{Address: "10.111.0.2"}), "ancient"))
+
+	sessionOnly.Session++
+	require.ErrorContains(t, g.Outlived(record("upgraded-ended", sessionOnly), "upgraded-ended"), "has since gone")
+
 	ended := current
 	ended.Session++
 	require.ErrorContains(t, g.Outlived(record("ended", ended), "ended"),

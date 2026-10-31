@@ -360,12 +360,15 @@ func TestWiredRecordKeepsOnlyThisGateway(t *testing.T) {
 		held     uint64
 		instance uint64
 		wantOK   bool
+		wantName string
+		wantAddr string
 	}{
-		{name: "this gateway", path: write("dev", "10.111.0.2", held, instance), held: held, instance: instance, wantOK: true},
+		{name: "this gateway", path: write("dev", "10.111.0.2", held, instance), held: held, instance: instance, wantOK: true, wantName: "dev", wantAddr: "10.111.0.2"},
 		{name: "a session that has gone", path: write("old", "10.111.0.3", 1, instance), held: held, instance: instance},
 		{name: "a gateway that was replaced", path: write("stopped", "10.111.0.3", held, 1), held: held, instance: instance},
 		{name: "recorded with no session", path: write("legacy", "10.111.0.4", 0, instance), held: held, instance: instance},
-		{name: "recorded with no gateway", path: write("older", "10.111.0.4", held, 0), held: held, instance: instance},
+		{name: "recorded by a release that named the session only", path: write("older", "10.111.0.4", held, 0), held: held, instance: instance, wantOK: true, wantName: "older", wantAddr: "10.111.0.4"},
+		{name: "recorded with no gateway in a session that has gone", path: write("oldest", "10.111.0.4", 1, 0), held: held, instance: instance},
 		{name: "no address", path: write("plain", "", held, instance), held: held, instance: instance},
 		{name: "no session is held", path: write("orphan", "10.111.0.5", held, instance), instance: instance},
 		{name: "no gateway is running", path: write("lonely", "10.111.0.5", held, instance), held: held},
@@ -380,8 +383,8 @@ func TestWiredRecordKeepsOnlyThisGateway(t *testing.T) {
 			require.Equal(t, tc.wantOK, ok)
 			if ok {
 				assert.Equal(t, "personal", w.Profile)
-				assert.Equal(t, "dev", w.Name)
-				assert.Equal(t, "10.111.0.2", w.Address)
+				assert.Equal(t, tc.wantName, w.Name)
+				assert.Equal(t, tc.wantAddr, w.Address)
 				assert.True(t, w.Running)
 			}
 		})

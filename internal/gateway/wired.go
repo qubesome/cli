@@ -30,9 +30,19 @@ func (g Gateway) identity() (session, instance uint64, err error) {
 // wiredTo reports whether a sandbox record is of a workload wired to the
 // gateway session and instance name. A record with any part missing is
 // not, and neither is one asked about when no gateway is running.
+//
+// The one exception is a record that names the session and no gateway.
+// That is every record a release from before the gateway was named
+// wrote, and it is taken to be wired to the gateway running in its
+// session, as that release took it. Reading it as wired to a gateway
+// that has gone would refuse every workload running across an upgrade,
+// and leave its name mapped once it was killed.
 func wiredTo(rec sandbox.State, session, instance uint64) bool {
-	return rec.Address != "" && session != 0 && instance != 0 &&
-		rec.Session == session && rec.Gateway == instance
+	if rec.Address == "" || session == 0 || instance == 0 || rec.Session != session {
+		return false
+	}
+
+	return rec.Gateway == instance || rec.Gateway == 0
 }
 
 // Outlived refuses a sandbox recorded at path that is still running wired
@@ -51,7 +61,10 @@ func (g Gateway) Outlived(path, name string) error {
 	if r, err := sandbox.ReadState(path); err == nil {
 		rec = r
 	}
-	if rec.Address == "" {
+	// A record that names neither is from a release that recorded no
+	// wiring at all. Those were never refused, and nothing in the record
+	// says they should be now.
+	if rec.Address == "" || (rec.Session == 0 && rec.Gateway == 0) {
 		return nil
 	}
 
