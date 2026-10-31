@@ -209,16 +209,11 @@ func (a *Attach) refused(name string, err error) error {
 // nothing will be handed again, because allocation only ever counts up
 // within a session. Correctness rests on that non-reuse and not on this
 // arriving, which is why a failure here is reported and nothing more.
+//
+// It reaches only the gateway the workload was wired to. See
+// Gateway.Unregister.
 func (a *Attach) Unregister(name string) {
-	c, err := a.gateway.Client()
-	if err != nil {
-		slog.Debug("could not reach the gateway to unregister a workload", "workload", name, "error", err)
-		return
-	}
-
-	if err := c.Unregister(context.Background(), name, a.Addr.String()); err != nil {
-		slog.Debug("failed to unregister a workload", "workload", name, "error", err)
-	}
+	a.gateway.Unregister(context.Background(), a.Wiring(), name)
 }
 
 // WireVM gives the microVM sandbox at pid a bridged link to the gateway, a

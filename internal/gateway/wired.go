@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/qubesome/cli/internal/sandbox"
 )
@@ -76,4 +78,47 @@ func (g Gateway) Outlived(path, name string) error {
 	}
 
 	return fmt.Errorf("%s is still running wired to a gateway that has since gone, so it has no egress: stop it and launch it again", name)
+}
+
+// Unregister drops the mapping of name to the address w records, if the
+// gateway running now is the one w was wired to.
+//
+// A gateway that is restarted counts addresses from the start again, so a
+// workload of the new one can come to hold the name and the address a
+// workload of the old one held. A cleanup of the old one arriving after
+// that would remove the new one's mapping, so it reaches only the gateway
+// it was wired to. The lock is the one a start and a stop take, held from
+// the check to the call, so the gateway cannot be replaced in between.
+//
+// It is best effort, for the reason Attach.Unregister gives.
+func (g Gateway) Unregister(ctx context.Context, w sandbox.Wiring, name string) {
+	if err := g.unregister(ctx, w, name); err != nil {
+		slog.Debug("failed to unregister a workload", "workload", name, "error", err)
+	}
+}
+
+func (g Gateway) unregister(ctx context.Context, w sandbox.Wiring, name string) error {
+	lock, err := acquire(g.LockPath)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	session, instance, err := g.identity()
+	if err != nil {
+		return err
+	}
+
+	rec := sandbox.State{Address: w.Address, Session: w.Session, Gateway: w.Gateway}
+	if !wiredTo(rec, session, instance) {
+		slog.Debug("not unregistering a workload wired to a gateway that has gone", "workload", name)
+		return nil
+	}
+
+	c, err := g.Client()
+	if err != nil {
+		return err
+	}
+
+	return c.Unregister(ctx, name, w.Address)
 }

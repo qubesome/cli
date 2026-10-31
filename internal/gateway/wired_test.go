@@ -7,6 +7,7 @@ import (
 
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/session"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,4 +68,32 @@ func TestOutlived(t *testing.T) {
 	stopped := g
 	stopped.StatePath = filepath.Join(dir, "absent-gateway.json")
 	require.ErrorContains(t, stopped.Outlived(record("orphan", current), "orphan"), "has since gone")
+}
+
+// A gateway restarted counts addresses from the start again, so a
+// workload of the new one can hold the name and address a workload of the
+// old one held. The old one's cleanup, arriving late, must leave it alone.
+func TestUnregisterReachesOnlyTheGatewayItWasWiredTo(t *testing.T) {
+	g := newSessionGateway(t)
+
+	creds := newCreds(t)
+	require.NoError(t, g.writeCreds(creds))
+	gw := newGateway(closedChan(), testWorkload)
+	listenOn(t, gw, creds, g.Socket)
+	runningGateway(t, g)
+
+	session, instance, err := g.identity()
+	require.NoError(t, err)
+
+	c, err := g.Client()
+	require.NoError(t, err)
+	require.NoError(t, c.Register(t.Context(), testWorkload, testAddress))
+
+	replaced := sandbox.Wiring{Address: testAddress, Session: session, Gateway: instance + 1}
+	g.Unregister(t.Context(), replaced, testWorkload)
+	assert.Len(t, gw.mapped(), 1)
+
+	current := sandbox.Wiring{Address: testAddress, Session: session, Gateway: instance}
+	g.Unregister(t.Context(), current, testWorkload)
+	assert.Empty(t, gw.mapped())
 }
