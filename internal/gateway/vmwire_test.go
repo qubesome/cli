@@ -272,6 +272,9 @@ func TestParseGuardRefusesATableThatIsNotTheGuard(t *testing.T) {
 			`,{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":6`,
 			`"right":"10.111.0.2"}},{"drop":null}]}}`+
 				`,{"rule":{"family":"bridge","table":"qubesome","chain":"ingress","handle":6`), addr: "10.111.0.2"},
+		{name: "another interface let through unchecked", data: alteredGuard(`"right":"tap0"`, `"right":"TAP0"`), addr: "10.111.0.2"},
+		{name: "drops counted somewhere other than spoofed", data: alteredGuard(`"expr":[{"counter":"spoofed"}]`,
+			`"expr":[{"counter":{"packets":0,"bytes":0}}]`), addr: "10.111.0.2"},
 	}
 
 	for _, tc := range tests {

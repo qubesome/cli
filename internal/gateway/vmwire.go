@@ -163,6 +163,10 @@ const (
 	// guardChain is the guard's one chain, named so that doctor can find
 	// it in the table it reads back.
 	guardChain = "ingress"
+
+	// guardCounter is the counter the guard's last rule counts every frame
+	// it drops in, which is the number doctor reports.
+	guardCounter = "spoofed"
 )
 
 // guardRuleset is the whole of what pins a guest's identity.
@@ -193,17 +197,17 @@ func guardRuleset(addr netip.Addr) (string, error) {
 	}
 
 	return fmt.Sprintf(`table bridge %s {
-  counter spoofed {}
+  counter %s {}
 
   chain %s {
     type filter hook prerouting priority filter; policy drop;
     iifname != %q accept
     ether saddr %s ip saddr %s accept
     ether saddr %s arp saddr ip %s accept
-    counter name spoofed
+    counter name %s
   }
 }
-`, guardTable, guardChain, vmTap, mac, addr, mac, addr), nil
+`, guardTable, guardCounter, guardChain, vmTap, mac, addr, mac, addr, guardCounter), nil
 }
 
 // WireVM gives a microVM's sandbox a link to the session's gateway.
@@ -512,7 +516,7 @@ func parseGuard(data []byte, addr netip.Addr) (uint64, error) {
 
 	for _, e := range out.Nftables {
 		switch {
-		case e.Counter != nil && e.Counter.Name == "spoofed":
+		case e.Counter != nil && e.Counter.Name == guardCounter:
 			packets, counter = e.Counter.Packets, true
 		case e.Chain != nil && e.Chain.Name == guardChain:
 			chain = e.Chain.Hook == "prerouting" && e.Chain.Policy == "drop"
@@ -542,14 +546,16 @@ type guardMatch struct {
 }
 
 // guardRule is a guard rule reduced to what it decides: what it matches,
-// and what it does with a frame that matches.
+// what it does with a frame that matches, and the named counter it
+// counts that frame in.
 type guardRule struct {
 	Matches []guardMatch
 	Verdict string
+	Counter string
 }
 
 func (r guardRule) equal(o guardRule) bool {
-	return r.Verdict == o.Verdict && slices.Equal(r.Matches, o.Matches)
+	return r.Verdict == o.Verdict && r.Counter == o.Counter && slices.Equal(r.Matches, o.Matches)
 }
 
 // guardRules is guardRuleset as nft prints it back.
@@ -560,7 +566,7 @@ func guardRules(addr netip.Addr, mac string) []guardRule {
 		{Matches: []guardMatch{{"!=", "meta iifname", vmTap}}, Verdict: "accept"},
 		{Matches: []guardMatch{{"==", "ether saddr", mac}, {"==", "ip saddr", addr.String()}}, Verdict: "accept"},
 		{Matches: []guardMatch{{"==", "ether saddr", mac}, {"==", "arp saddr ip", addr.String()}}, Verdict: "accept"},
-		{},
+		{Counter: guardCounter},
 	}
 }
 
@@ -574,6 +580,13 @@ func readGuardRule(exprs []map[string]json.RawMessage) guardRule {
 		for kind, body := range expr {
 			switch kind {
 			case "counter":
+				// A named counter is printed as its name, and an anonymous
+				// one as its counts. Only the name says where a drop is
+				// reported, so the counts are left out.
+				var name string
+				if err := json.Unmarshal(body, &name); err == nil {
+					r.Counter = name
+				}
 			case "accept", "drop":
 				r.Verdict = kind
 			case "match":
@@ -610,15 +623,23 @@ func readGuardMatch(body json.RawMessage) guardMatch {
 	right := string(m.Right)
 	var value string
 	if err := json.Unmarshal(m.Right, &value); err == nil {
-		right = strings.ToLower(value)
+		right = value
 	}
 
+	var left string
 	switch {
 	case m.Left.Payload != nil:
-		return guardMatch{Op: m.Op, Left: m.Left.Payload.Protocol + " " + m.Left.Payload.Field, Right: right}
+		left = m.Left.Payload.Protocol + " " + m.Left.Payload.Field
 	case m.Left.Meta != nil:
-		return guardMatch{Op: m.Op, Left: "meta " + m.Left.Meta.Key, Right: right}
+		left = "meta " + m.Left.Meta.Key
 	}
 
-	return guardMatch{Op: m.Op, Right: right}
+	// Only a hardware address is compared without its case, because that
+	// is all its case is. An interface name is matched by the kernel as it
+	// is spelled, so another spelling is another interface.
+	if left == "ether saddr" {
+		right = strings.ToLower(right)
+	}
+
+	return guardMatch{Op: m.Op, Left: left, Right: right}
 }
