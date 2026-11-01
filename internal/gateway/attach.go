@@ -94,7 +94,13 @@ func Attached(cfg *types.Config, network string, identities ...types.EffectiveWo
 	// After Up and not before it. Starting a gateway resets the count, so
 	// an address handed out first would be one the new gateway is about to
 	// give away again.
-	addr, err := g.Allocate(subnet)
+	//
+	// The gateway's name is read with the address and not after it. A
+	// record wired with neither would read later as a workload whose
+	// gateway has gone, and Up has just made sure both a holder and a
+	// gateway are running, so failing to name them is something having
+	// gone wrong between the two.
+	addr, session, instance, err := g.allocateWired(subnet)
 	if err != nil {
 		return nil, err
 	}
@@ -108,15 +114,6 @@ func Attached(cfg *types.Config, network string, identities ...types.EffectiveWo
 		slog.Debug("[gateway] cannot resolve the gateway policy path", "error", err)
 
 		policy = ""
-	}
-
-	// These are errors. A record wired with neither would read later as a
-	// workload whose gateway has gone, and Up has just made sure both a
-	// holder and a gateway are running, so failing to name them is
-	// something having gone wrong between the two.
-	session, instance, err := g.identity()
-	if err != nil {
-		return nil, err
 	}
 
 	return &Attach{

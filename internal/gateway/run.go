@@ -1352,6 +1352,44 @@ func GatewayAddr(subnet netip.Prefix) (netip.Addr, error) {
 // open file description rather than by the process, so this serialises two
 // launches inside one process as well as two processes.
 func (g Gateway) Allocate(subnet netip.Prefix) (netip.Addr, error) {
+	lock, err := acquire(g.LockPath)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	defer lock.Close()
+
+	return g.allocate(subnet)
+}
+
+// allocateWired is Allocate, also naming the gateway the address was
+// allocated from.
+//
+// The address and the name are read under one hold of the gateway's lock.
+// A gateway started between the two would reset the count, and the
+// address would then be named as one of the new gateway's, which may hand
+// it out again.
+func (g Gateway) allocateWired(subnet netip.Prefix) (addr netip.Addr, session, instance uint64, err error) {
+	lock, err := acquire(g.LockPath)
+	if err != nil {
+		return netip.Addr{}, 0, 0, err
+	}
+	defer lock.Close()
+
+	session, instance, err = g.identity()
+	if err != nil {
+		return netip.Addr{}, 0, 0, err
+	}
+
+	addr, err = g.allocate(subnet)
+	if err != nil {
+		return netip.Addr{}, 0, 0, err
+	}
+
+	return addr, session, instance, nil
+}
+
+// allocate is Allocate for a caller already holding the gateway's lock.
+func (g Gateway) allocate(subnet netip.Prefix) (netip.Addr, error) {
 	// Both are already true of a subnet that came through
 	// types.GatewayConfig.SubnetPrefix. They are checked again because the
 	// arithmetic below is wrong rather than merely unhelpful without them.
@@ -1361,12 +1399,6 @@ func (g Gateway) Allocate(subnet netip.Prefix) (netip.Addr, error) {
 	if subnet.Bits() > 30 {
 		return netip.Addr{}, fmt.Errorf("the gateway subnet %s has no host addresses", subnet)
 	}
-
-	lock, err := acquire(g.LockPath)
-	if err != nil {
-		return netip.Addr{}, err
-	}
-	defer lock.Close()
 
 	a, err := g.readAlloc(subnet)
 	if err != nil {

@@ -121,3 +121,32 @@ func TestRegisterRefusesAGatewayStartedSinceTheAddressWasAllocated(t *testing.T)
 	require.NoError(t, current.Register(testWorkload))
 	assert.Len(t, gw.mapped(), 1)
 }
+
+func TestAllocateWiredNamesTheGatewayTheAddressCameFrom(t *testing.T) {
+	g := newSessionGateway(t)
+	runningGateway(t, g)
+
+	addr, session, instance, err := g.allocateWired(prefix(t, testSubnet))
+	require.NoError(t, err)
+	assert.Equal(t, "10.111.0.2", addr.String())
+
+	wantSession, wantInstance, err := g.identity()
+	require.NoError(t, err)
+	assert.Equal(t, wantSession, session)
+	assert.Equal(t, wantInstance, instance)
+}
+
+func TestAllocateWiredHandsNothingOutWithNoGatewayRunning(t *testing.T) {
+	t.Parallel()
+
+	g := newSessionGateway(t)
+	subnet := prefix(t, testSubnet)
+
+	addr, _, _, err := g.allocateWired(subnet)
+	require.ErrorContains(t, err, "no holder is running")
+	assert.False(t, addr.IsValid())
+
+	addr, err = g.Allocate(subnet)
+	require.NoError(t, err)
+	assert.Equal(t, "10.111.0.2", addr.String())
+}
