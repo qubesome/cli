@@ -419,29 +419,3 @@ func (n *Namespace) Enter(args []string) []string {
 
 	return append(out, args...)
 }
-
-// Outlived refuses a sandbox recorded at path that is still running from a
-// session that has ended.
-//
-// Its wiring was to the gateway of that session, which a later launch has
-// replaced, and nothing can wire it to the new one while it runs. Handing
-// it a second launch, or reporting it as already up, would leave a
-// workload with no egress and nothing saying why. A record wired to no
-// gateway depends on no session and is never refused.
-func (s Session) Outlived(path, name string) error {
-	// An unreadable record is one Alive has already read as not running,
-	// so it is treated as a record wired to no gateway.
-	var recorded uint64
-	if rec, err := sandbox.ReadState(path); err == nil {
-		recorded = rec.Session
-	}
-	if recorded == 0 {
-		return nil
-	}
-
-	if id, err := s.UsernsID(); err == nil && id == recorded {
-		return nil
-	}
-
-	return fmt.Errorf("%s is still running from a session that has ended, so its gateway is gone: stop it and launch it again", name)
-}

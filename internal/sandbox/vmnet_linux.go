@@ -24,6 +24,24 @@ const (
 	guestResolvConf = "/etc/resolv.conf"
 )
 
+// bringUpLoopback brings the guest's lo up.
+//
+// A kernel starts it down, and on a machine it is this init and not an
+// init system that is there to bring it up. It is apart from the gateway's
+// configuration because a machine with no gateway needs localhost too.
+func bringUpLoopback() error {
+	lo, err := netlink.LinkByName("lo")
+	if err != nil {
+		return fmt.Errorf("sandbox: the guest has no loopback interface: %w", err)
+	}
+
+	if err := netlink.LinkSetUp(lo); err != nil {
+		return fmt.Errorf("sandbox: failed to bring the guest's loopback up: %w", err)
+	}
+
+	return nil
+}
+
 // configureGuestNetwork gives the guest the address the gateway allocated
 // for it.
 //

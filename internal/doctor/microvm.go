@@ -13,7 +13,7 @@ import (
 // because the failure worth catching here leaves exactly the records a
 // working launch leaves. See wiringCheck.
 func microVMChecks(env Env, cfg *types.GatewayConfig, sandboxPID int, addr string) []Check {
-	w, err := env.MicroVMWiring(*cfg, sandboxPID)
+	w, err := env.MicroVMWiring(*cfg, sandboxPID, addr)
 	if err != nil {
 		return []Check{{
 			Name:   "microvm wiring",

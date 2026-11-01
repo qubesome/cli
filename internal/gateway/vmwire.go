@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -158,6 +159,14 @@ const (
 	// doctor can ask for it back, and so that loading it a second time
 	// replaces it rather than appending to it.
 	guardTable = "qubesome"
+
+	// guardChain is the guard's one chain, named so that doctor can find
+	// it in the table it reads back.
+	guardChain = "ingress"
+
+	// guardCounter is the counter the guard's last rule counts every frame
+	// it drops in, which is the number doctor reports.
+	guardCounter = "spoofed"
 )
 
 // guardRuleset is the whole of what pins a guest's identity.
@@ -188,17 +197,17 @@ func guardRuleset(addr netip.Addr) (string, error) {
 	}
 
 	return fmt.Sprintf(`table bridge %s {
-  counter spoofed {}
+  counter %s {}
 
-  chain ingress {
+  chain %s {
     type filter hook prerouting priority filter; policy drop;
     iifname != %q accept
     ether saddr %s ip saddr %s accept
     ether saddr %s arp saddr ip %s accept
-    counter name spoofed
+    counter name %s
   }
 }
-`, guardTable, vmTap, mac, addr, mac, addr), nil
+`, guardTable, guardCounter, guardChain, vmTap, mac, addr, mac, addr, guardCounter), nil
 }
 
 // WireVM gives a microVM's sandbox a link to the session's gateway.
@@ -343,8 +352,9 @@ type VMWiring struct {
 	VethEnslaved bool
 	TapEnslaved  bool
 
-	// Guarded says the nft table is loaded, and Spoofed is what its
-	// counter has seen. A non-zero count is a guest that tried to send
+	// Guarded says the guard is still the one that was loaded, its chain
+	// and its rules as well as its table, and Spoofed is what its counter
+	// has seen. A non-zero count is a guest that tried to send
 	// under an address that is not its own, and the guard stopping it is
 	// the guard working.
 	Guarded bool
@@ -359,8 +369,9 @@ func (w VMWiring) OK() bool {
 // InspectVM reads a microVM's wiring out of its network namespace.
 //
 // sandboxPID is the VMM sandbox's own init process in the host's pid
-// namespace, which is what the launch recorded.
-func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int) (VMWiring, error) {
+// namespace, which is what the launch recorded, and addr is the address the
+// guard was loaded to pin.
+func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int, addr netip.Addr) (VMWiring, error) {
 	bundle, err := images.PullProfileImage(cfg.Image)
 	if err != nil {
 		return VMWiring{}, fmt.Errorf("failed to get the gateway image %q: %w", cfg.Image, err)
@@ -383,12 +394,15 @@ func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int) (VMWiring, e
 		return VMWiring{}, err
 	}
 
-	counters, err := helper{
+	// The whole table and not only its counter. A counter is an object of
+	// its own and stays when the chain beside it is flushed or replaced, so
+	// it says nothing about whether anything is still being dropped.
+	table, err := helper{
 		Rootfs: bundle.Rootfs,
 		Caps:   wireCaps,
 		Args: []string{
 			nsenterCommand, "--net=" + sandbox.NetnsPath(sandboxPID),
-			nftCommand, "-j", "list", "counters", "table", "bridge", guardTable,
+			nftCommand, "-j", "list", "table", "bridge", guardTable,
 		},
 	}.output()
 	if err != nil {
@@ -403,11 +417,11 @@ func (g Gateway) InspectVM(cfg types.GatewayConfig, sandboxPID int) (VMWiring, e
 		return w, nil
 	}
 
-	n, err := parseSpoofed(counters)
+	n, err := parseGuard(table, addr)
 	if err != nil {
-		// A ruleset that loaded but holds no counter of that name is not
-		// a guard this understands, which is reported the same way: the
-		// wiring stands, and Guarded stays false.
+		// A table that is not the guard this loaded is not a guard this
+		// understands, which is reported the same way: the wiring stands,
+		// and Guarded stays false.
 		slog.Debug("[gateway] the microVM's guard is not one this understands", "pid", sandboxPID, "error", err)
 
 		return w, nil
@@ -451,30 +465,181 @@ func parseVMWiring(data []byte) (VMWiring, error) {
 	return w, nil
 }
 
-// parseSpoofed reads the named counter out of `nft -j list counters`.
+// parseGuard reads the guard back out of `nft -j list table`, and returns
+// what its counter has seen.
 //
-// A ruleset with no counter of that name is refused rather than reported
-// as zero. Zero is what a guard that has seen nothing says, and a guard
-// this does not recognise must not be able to say it.
-func parseSpoofed(data []byte) (uint64, error) {
+// A table is only taken for the guard when it is still the guard that was
+// loaded: the spoofed counter, an ingress chain on the prerouting hook
+// dropping by default, and the rules guardRuleset writes, in its order.
+// Anything else is refused rather than reported as a guard that has seen
+// nothing, which is what zero says.
+//
+// The rules are compared whole, and not by whether they name the address
+// and the MAC. A pin turned into a != or into a drop, the IP pinned twice
+// in place of the ARP, or an accept added ahead of the pins all still name
+// both, and each lets the guest send as someone else. Counters inside a
+// rule are left out of the comparison, since they decide nothing.
+func parseGuard(data []byte, addr netip.Addr) (uint64, error) {
+	mac, err := GuestMAC(addr)
+	if err != nil {
+		return 0, err
+	}
+
 	var out struct {
 		Nftables []struct {
 			Counter *struct {
 				Name    string `json:"name"`
 				Packets uint64 `json:"packets"`
 			} `json:"counter"`
+			Chain *struct {
+				Name   string `json:"name"`
+				Hook   string `json:"hook"`
+				Policy string `json:"policy"`
+			} `json:"chain"`
+			Rule *struct {
+				Chain string                       `json:"chain"`
+				Expr  []map[string]json.RawMessage `json:"expr"`
+			} `json:"rule"`
 		} `json:"nftables"`
 	}
 
 	if err := json.Unmarshal(data, &out); err != nil {
-		return 0, fmt.Errorf("failed to parse the microVM's counters: %w", err)
+		return 0, fmt.Errorf("failed to parse the microVM's guard: %w", err)
 	}
 
+	var (
+		packets uint64
+		counter bool
+		chain   bool
+		rules   []guardRule
+	)
+
 	for _, e := range out.Nftables {
-		if e.Counter != nil && e.Counter.Name == "spoofed" {
-			return e.Counter.Packets, nil
+		switch {
+		case e.Counter != nil && e.Counter.Name == guardCounter:
+			packets, counter = e.Counter.Packets, true
+		case e.Chain != nil && e.Chain.Name == guardChain:
+			chain = e.Chain.Hook == "prerouting" && e.Chain.Policy == "drop"
+		case e.Rule != nil && e.Rule.Chain == guardChain:
+			rules = append(rules, readGuardRule(e.Rule.Expr))
 		}
 	}
 
-	return 0, errors.New("gateway: the guard has no spoofed counter")
+	switch {
+	case !counter:
+		return 0, errors.New("gateway: the guard has no spoofed counter")
+	case !chain:
+		return 0, errors.New("gateway: the guard has no ingress chain dropping by default")
+	case !slices.EqualFunc(rules, guardRules(addr, mac), guardRule.equal):
+		return 0, fmt.Errorf("gateway: the guard's rules are not the ones that pin the IP and the ARP of %s to %s", addr, mac)
+	}
+
+	return packets, nil
+}
+
+// guardMatch is one comparison in a guard rule, as nft prints it. Left is
+// the field compared, written the way the ruleset names it.
+type guardMatch struct {
+	Op    string
+	Left  string
+	Right string
+}
+
+// guardRule is a guard rule reduced to what it decides: what it matches,
+// what it does with a frame that matches, and the named counter it
+// counts that frame in.
+type guardRule struct {
+	Matches []guardMatch
+	Verdict string
+	Counter string
+}
+
+func (r guardRule) equal(o guardRule) bool {
+	return r.Verdict == o.Verdict && r.Counter == o.Counter && slices.Equal(r.Matches, o.Matches)
+}
+
+// guardRules is guardRuleset as nft prints it back.
+func guardRules(addr netip.Addr, mac string) []guardRule {
+	mac = strings.ToLower(mac)
+
+	return []guardRule{
+		{Matches: []guardMatch{{"!=", "meta iifname", vmTap}}, Verdict: "accept"},
+		{Matches: []guardMatch{{"==", "ether saddr", mac}, {"==", "ip saddr", addr.String()}}, Verdict: "accept"},
+		{Matches: []guardMatch{{"==", "ether saddr", mac}, {"==", "arp saddr ip", addr.String()}}, Verdict: "accept"},
+		{Counter: guardCounter},
+	}
+}
+
+// readGuardRule reduces the expressions of a rule nft printed. One it has
+// no reading for is kept as a match nothing expects, so the rule it is in
+// cannot pass for one of the guard's.
+func readGuardRule(exprs []map[string]json.RawMessage) guardRule {
+	var r guardRule
+
+	for _, expr := range exprs {
+		for kind, body := range expr {
+			switch kind {
+			case "counter":
+				// A named counter is printed as its name, and an anonymous
+				// one as its counts. Only the name says where a drop is
+				// reported, so the counts are left out.
+				var name string
+				if err := json.Unmarshal(body, &name); err == nil {
+					r.Counter = name
+				}
+			case "accept", "drop":
+				r.Verdict = kind
+			case "match":
+				r.Matches = append(r.Matches, readGuardMatch(body))
+			default:
+				r.Matches = append(r.Matches, guardMatch{Op: "unknown " + kind})
+			}
+		}
+	}
+
+	return r
+}
+
+func readGuardMatch(body json.RawMessage) guardMatch {
+	var m struct {
+		Op   string `json:"op"`
+		Left struct {
+			Payload *struct {
+				Protocol string `json:"protocol"`
+				Field    string `json:"field"`
+			} `json:"payload"`
+			Meta *struct {
+				Key string `json:"key"`
+			} `json:"meta"`
+		} `json:"left"`
+		Right json.RawMessage `json:"right"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return guardMatch{Op: "unreadable"}
+	}
+
+	// A right side that is not a plain value, a set say, is left as it was
+	// printed, which no expected rule names.
+	right := string(m.Right)
+	var value string
+	if err := json.Unmarshal(m.Right, &value); err == nil {
+		right = value
+	}
+
+	var left string
+	switch {
+	case m.Left.Payload != nil:
+		left = m.Left.Payload.Protocol + " " + m.Left.Payload.Field
+	case m.Left.Meta != nil:
+		left = "meta " + m.Left.Meta.Key
+	}
+
+	// Only a hardware address is compared without its case, because that
+	// is all its case is. An interface name is matched by the kernel as it
+	// is spelled, so another spelling is another interface.
+	if left == "ether saddr" {
+		right = strings.ToLower(right)
+	}
+
+	return guardMatch{Op: m.Op, Left: left, Right: right}
 }

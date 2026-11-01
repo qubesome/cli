@@ -640,6 +640,10 @@ func vmInit() error {
 	// resolver it is meant to reach. That is the ordering guarantee the
 	// bwrap side makes by wiring a sandbox before opening its gate, and it
 	// is kept here rather than left to chance.
+	if err := bringUpLoopback(); err != nil {
+		return err
+	}
+
 	if err := configureGuestNetwork(cfg.Network); err != nil {
 		return err
 	}

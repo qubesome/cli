@@ -147,6 +147,11 @@ func Limited(ew EffectiveWorkload) EffectiveWorkload {
 	ew.Workload.Runner = ""
 	ew.Workload.AttachVM = ""
 
+	// The machine's own block goes too. A workload that is not a machine
+	// and still carries one is refused at validation, which would make the
+	// escape hatch fail for exactly the workloads it was meant to reach.
+	ew.Workload.MicroVM = nil
+
 	return ew
 }
 

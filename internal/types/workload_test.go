@@ -1371,6 +1371,7 @@ func TestLimitedDropsEverythingThatReachesOut(t *testing.T) {
 		Workload: Workload{
 			Runner:   "firecracker",
 			AttachVM: "dev",
+			MicroVM:  &MicroVM{},
 			HostAccess: HostAccess{
 				Network:    "qubesome",
 				Dbus:       true,
@@ -1414,6 +1415,26 @@ func TestLimitedDropsEverythingThatReachesOut(t *testing.T) {
 	// guest is not somewhere the host's profile can be looked at from.
 	assert.Empty(t, got.Workload.Runner)
 	assert.Empty(t, got.Workload.AttachVM)
+	assert.Nil(t, got.Workload.MicroVM)
+}
+
+// A machine run limited runs under bwrap, and a workload that is not a
+// machine is refused while it still carries a machine's block.
+func TestLimitedMachineValidates(t *testing.T) {
+	t.Parallel()
+
+	ew := EffectiveWorkload{
+		Name: "dev-work",
+		Workload: Workload{
+			Name:           "dev",
+			Image:          "example.com/dev",
+			Runner:         "firecracker",
+			SingleInstance: true,
+			MicroVM:        &MicroVM{},
+		},
+	}
+
+	require.NoError(t, ValidateMicroVM(Limited(ew).Workload))
 }
 
 // The paths are what the config being repaired is reached through. A

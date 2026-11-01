@@ -49,9 +49,19 @@ type Record struct {
 	PID     int
 	Address string
 
+	// Session and Gateway say which gateway the address is on. See
+	// sandbox.Wiring.
+	Session uint64
+	Gateway uint64
+
 	// Running is false for a record left behind by a sandbox that has
 	// gone, which is a record and not a workload.
 	Running bool
+}
+
+// Wiring is what the record says the workload was wired to.
+func (r Record) Wiring() sandbox.Wiring {
+	return sandbox.Wiring{Address: r.Address, Session: r.Session, Gateway: r.Gateway}
 }
 
 // List reads every workload record under runDir, ordered by profile and
@@ -83,6 +93,8 @@ func List(runDir string) ([]Record, error) {
 			Path:     path,
 			PID:      st.PID,
 			Address:  st.Address,
+			Session:  st.Session,
+			Gateway:  st.Gateway,
 			Running:  sandbox.Alive(path),
 		})
 	}
@@ -171,7 +183,10 @@ func Kill(r Record) error {
 		}
 	}
 
-	if err := os.Remove(r.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	// The record read above and not any record at the path. Once the
+	// sandbox is gone a launch of the same workload can start and write
+	// its own, which is not this kill's to remove.
+	if _, err := sandbox.RemoveStateOf(r.Path, st); err != nil {
 		return fmt.Errorf("failed to remove the workload record %q: %w", r.Path, err)
 	}
 

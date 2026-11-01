@@ -166,7 +166,11 @@ func (c *Client) Register(ctx context.Context, name, address string) error {
 
 // Unregister tells the gateway the workload named name is gone and its address
 // is to be dropped. A name the gateway does not know is not an error.
-func (c *Client) Unregister(ctx context.Context, name string) error {
+//
+// addr is the address the workload held. A gateway that honours it leaves a
+// name since mapped to another address alone, which is what keeps a late
+// unregister from removing the workload that replaced this one.
+func (c *Client) Unregister(ctx context.Context, name, addr string) error {
 	conn, err := c.dial()
 	if err != nil {
 		return err
@@ -176,8 +180,8 @@ func (c *Client) Unregister(ctx context.Context, name string) error {
 	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
 
-	slog.Debug("[gateway] calling Unregister", "workload", name)
-	_, err = pb.NewGatewayControlClient(conn).Unregister(ctx, &pb.UnregisterRequest{Name: name})
+	slog.Debug("[gateway] calling Unregister", "workload", name, "address", addr)
+	_, err = pb.NewGatewayControlClient(conn).Unregister(ctx, &pb.UnregisterRequest{Name: name, Address: addr})
 	if err != nil {
 		return fmt.Errorf("failed to unregister workload %q: %w", name, err)
 	}

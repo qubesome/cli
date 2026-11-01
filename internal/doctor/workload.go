@@ -65,8 +65,8 @@ func Workload(env Env, cfg *types.Config, profileName, workloadName string) []Ch
 	// Only a running microVM on a configured gateway has a namespace to
 	// read. A workload that is neither is not a failure here, it simply
 	// has nothing to report, so the checks are absent rather than empty.
-	if rec, ok := runningMicroVM(env, cfg, effective, profileName, workloadName); ok {
-		checks = append(checks, microVMChecks(env, cfg.Gateway, rec.PID, rec.Address)...)
+	if rec, path, ok := runningMicroVM(env, cfg, effective, profileName, workloadName); ok {
+		checks = append(checks, wiredMicroVMChecks(env, cfg.Gateway, rec, path, effective.Name)...)
 	}
 
 	return checks
@@ -81,24 +81,42 @@ func Workload(env Env, cfg *types.Config, profileName, workloadName string) []Ch
 // rather than as whatever process has since been given its number.
 func runningMicroVM(env Env, cfg *types.Config, ew types.EffectiveWorkload,
 	profileName, workloadName string,
-) (sandbox.State, bool) {
+) (sandbox.State, string, bool) {
 	if ew.Workload.Runner != firecrackerRunner || cfg == nil || cfg.Gateway == nil {
-		return sandbox.State{}, false
+		return sandbox.State{}, "", false
 	}
 
 	path := filepath.Join(files.ProfileDir(profileName), "sandbox-"+workloadName+"-"+profileName+".json")
 	if !env.SandboxAlive(path) {
-		return sandbox.State{}, false
+		return sandbox.State{}, "", false
 	}
 
 	rec, err := env.SandboxRecord(path)
 	if err != nil || rec.Address == "" {
 		// No address means this machine was launched with no gateway, and
 		// there is no wire to describe.
-		return sandbox.State{}, false
+		return sandbox.State{}, "", false
 	}
 
-	return rec, true
+	return rec, path, true
+}
+
+// wiredMicroVMChecks describes a running microVM's wiring, once it is
+// known to be wired to the gateway now running.
+//
+// A machine left running by a session or a gateway that has gone keeps a
+// bridge, a tap and a guard that all read as healthy, and none of them
+// reach anything. That is reported in their place.
+func wiredMicroVMChecks(env Env, cfg *types.GatewayConfig, rec sandbox.State, path, name string) []Check {
+	if err := env.GatewayOutlived(path, name); err != nil {
+		return []Check{{
+			Name:   "microvm gateway",
+			Status: Fail,
+			Detail: err.Error(),
+		}}
+	}
+
+	return microVMChecks(env, cfg, rec.PID, rec.Address)
 }
 
 // firecrackerRunner is the runner that backs a workload with a microVM.

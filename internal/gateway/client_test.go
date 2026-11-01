@@ -69,9 +69,21 @@ func TestUnregisterDropsTheAddress(t *testing.T) {
 	c := startGateway(t, gw)
 
 	require.NoError(t, c.Register(t.Context(), testWorkload, testAddress))
-	require.NoError(t, c.Unregister(t.Context(), testWorkload))
+	require.NoError(t, c.Unregister(t.Context(), testWorkload, testAddress))
 
 	assert.Empty(t, gw.mapped())
+}
+
+// A workload killed and launched again holds a new address under the same
+// name, and the unregister of the one it replaced arrives late.
+func TestUnregisterOfAnOldAddressKeepsTheNewMapping(t *testing.T) {
+	gw := newGateway(closedChan(), testWorkload)
+	c := startGateway(t, gw)
+
+	require.NoError(t, c.Register(t.Context(), testWorkload, testAddress))
+	require.NoError(t, c.Unregister(t.Context(), testWorkload, "10.111.0.250"))
+
+	assert.Len(t, gw.mapped(), 1)
 }
 
 // A workload that crashed unregisters on a name the gateway may already have
@@ -79,7 +91,7 @@ func TestUnregisterDropsTheAddress(t *testing.T) {
 func TestUnregisterAcceptsAnUnknownWorkload(t *testing.T) {
 	c := startGateway(t, newGateway(closedChan(), testWorkload))
 
-	assert.NoError(t, c.Unregister(t.Context(), "never-registered"))
+	assert.NoError(t, c.Unregister(t.Context(), "never-registered", testAddress))
 }
 
 func TestReadyAnswersOnceTheGatewayIsUp(t *testing.T) {
@@ -300,8 +312,11 @@ func (gw *testGateway) Unregister(_ context.Context, in *pb.UnregisterRequest) (
 	gw.mu.Lock()
 	defer gw.mu.Unlock()
 
+	// The contract the gateway is held to: an address that is not the
+	// one the name is mapped to now leaves the mapping alone. An empty one
+	// comes from a client that predates it.
 	addr, ok := gw.addrOfWl[in.GetName()]
-	if ok {
+	if ok && (in.GetAddress() == "" || in.GetAddress() == addr.String()) {
 		delete(gw.addrOfWl, in.GetName())
 		delete(gw.byAddr, addr)
 	}

@@ -124,7 +124,7 @@ func TestRunningMicroVMIgnoresAMachineWithNoAddress(t *testing.T) {
 
 	ew := types.EffectiveWorkload{Workload: types.Workload{Runner: "firecracker"}}
 
-	_, ok := runningMicroVM(env, gatewayConfig(), ew, "personal", "dev")
+	_, _, ok := runningMicroVM(env, gatewayConfig(), ew, "personal", "dev")
 	assert.False(t, ok)
 }
 
@@ -138,7 +138,7 @@ func TestRunningMicroVMIgnoresASandboxWorkload(t *testing.T) {
 		records: map[string]sandbox.State{path: {PID: 1234, Address: "10.111.0.3"}},
 	}
 
-	_, ok := runningMicroVM(env, gatewayConfig(), types.EffectiveWorkload{}, "personal", "chrome")
+	_, _, ok := runningMicroVM(env, gatewayConfig(), types.EffectiveWorkload{}, "personal", "chrome")
 	assert.False(t, ok)
 }
 
@@ -155,7 +155,7 @@ func TestRunningMicroVMIgnoresADeadRecord(t *testing.T) {
 
 	ew := types.EffectiveWorkload{Workload: types.Workload{Runner: "firecracker"}}
 
-	_, ok := runningMicroVM(env, gatewayConfig(), ew, "personal", "dev")
+	_, _, ok := runningMicroVM(env, gatewayConfig(), ew, "personal", "dev")
 	assert.False(t, ok)
 }
 
@@ -170,8 +170,34 @@ func TestRunningMicroVMFindsAMachineOnTheGateway(t *testing.T) {
 
 	ew := types.EffectiveWorkload{Workload: types.Workload{Runner: "firecracker"}}
 
-	rec, ok := runningMicroVM(env, gatewayConfig(), ew, "personal", "dev")
+	rec, _, ok := runningMicroVM(env, gatewayConfig(), ew, "personal", "dev")
 	require.True(t, ok)
 	assert.Equal(t, 1234, rec.PID)
 	assert.Equal(t, "10.111.0.2", rec.Address)
+}
+
+// A machine left running by a session or a gateway that has gone keeps a
+// bridge and a guard that read as healthy and reach nothing, so it is
+// reported as stranded rather than described.
+func TestWiredMicroVMChecksReportAMachineOnAGatewayThatHasGone(t *testing.T) {
+	t.Parallel()
+
+	env := &fakeEnv{outlived: errors.New("dev-personal is still running wired to a gateway that has since gone")}
+
+	checks := wiredMicroVMChecks(env, gatewayConfig().Gateway, sandbox.State{PID: 1234, Address: "10.111.0.2"},
+		"sandbox-dev-personal.json", "dev-personal")
+
+	require.Len(t, checks, 1)
+	assert.Equal(t, "microvm gateway", checks[0].Name)
+	assert.Equal(t, Fail, checks[0].Status)
+	assert.Contains(t, checks[0].Detail, "has since gone")
+}
+
+func TestWiredMicroVMChecksDescribeAMachineOnThisGateway(t *testing.T) {
+	t.Parallel()
+
+	checks := wiredMicroVMChecks(&fakeEnv{}, gatewayConfig().Gateway, sandbox.State{PID: 1234, Address: "10.111.0.2"},
+		"sandbox-dev-personal.json", "dev-personal")
+
+	assert.Equal(t, microVMChecks(&fakeEnv{}, gatewayConfig().Gateway, 1234, "10.111.0.2"), checks)
 }
