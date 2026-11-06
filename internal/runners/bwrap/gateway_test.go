@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/qubesome/cli/internal/files"
+	"github.com/qubesome/cli/internal/gateway"
 	"github.com/qubesome/cli/internal/runners/util/launch"
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
@@ -262,9 +263,9 @@ func TestAttachOwnInstanceOnly(t *testing.T) {
 	ew := supervised(t, []string{"/bin/sh", "-c", "sleep 5"})
 	ew.Workload.SingleInstance = false
 
-	earlier, err := workloadAgentDir(ew, netip.MustParseAddr("10.111.0.2"))
+	earlier, err := workloadAgentDir(ew, onGateway(1, "10.111.0.2"))
 	require.NoError(t, err)
-	later, err := workloadAgentDir(ew, netip.MustParseAddr("10.111.0.3"))
+	later, err := workloadAgentDir(ew, onGateway(1, "10.111.0.3"))
 	require.NoError(t, err)
 
 	marker := filepath.Join(t.TempDir(), "ran")
@@ -297,8 +298,8 @@ func TestAgentDirIsSharedBySingleInstanceLaunches(t *testing.T) {
 	want, err := files.WorkloadAgentDir(ew.Profile.Name, ew.Workload.Name)
 	require.NoError(t, err)
 
-	for _, addr := range []netip.Addr{{}, netip.MustParseAddr("10.111.0.2")} {
-		got, err := workloadAgentDir(ew, addr)
+	for _, att := range []*gateway.Attach{nil, onGateway(1, "10.111.0.2")} {
+		got, err := workloadAgentDir(ew, att)
 		require.NoError(t, err)
 		assert.Equal(t, want, got)
 		assert.DirExists(t, got)
@@ -307,8 +308,8 @@ func TestAgentDirIsSharedBySingleInstanceLaunches(t *testing.T) {
 
 // Every launch of a workload that is not single instance is a sandbox of
 // its own, and a supervisor socket shared between them is one the next
-// launch unlinks from under the last. The address tells them apart, since
-// no two live sandboxes hold one.
+// launch unlinks from under the last. The gateway and the address tell
+// them apart, since a gateway hands an address out once.
 func TestAgentDirIsPerInstanceOnTheGateway(t *testing.T) {
 	ew := supervised(t, []string{"/bin/true"})
 	ew.Workload.SingleInstance = false
@@ -316,30 +317,29 @@ func TestAgentDirIsPerInstanceOnTheGateway(t *testing.T) {
 	parent, err := files.WorkloadAgentDir(ew.Profile.Name, ew.Workload.Name)
 	require.NoError(t, err)
 
-	first, err := workloadAgentDir(ew, netip.MustParseAddr("10.111.0.2"))
+	first, err := workloadAgentDir(ew, onGateway(1, "10.111.0.2"))
 	require.NoError(t, err)
-	second, err := workloadAgentDir(ew, netip.MustParseAddr("10.111.0.3"))
+	second, err := workloadAgentDir(ew, onGateway(1, "10.111.0.3"))
 	require.NoError(t, err)
 
-	assert.Equal(t, filepath.Join(parent, "10.111.0.2"), first)
-	assert.Equal(t, filepath.Join(parent, "10.111.0.3"), second)
+	assert.Equal(t, filepath.Join(parent, "1", "10.111.0.2"), first)
+	assert.Equal(t, filepath.Join(parent, "1", "10.111.0.3"), second)
 	assert.DirExists(t, first)
 	assert.DirExists(t, second)
 }
 
-// An address is handed out once per gateway, so a directory already named
-// after it was left by a sandbox that is gone, and the reap that would have
-// removed it never ran because the launch was made from a terminal.
+// A gateway is named by its start time since boot, which another boot can
+// repeat. A directory already at the path was then left by a sandbox of an
+// earlier boot, and the reap that would have removed it never ran.
 func TestAgentDirClearsWhatADeadInstanceLeft(t *testing.T) {
 	ew := supervised(t, []string{"/bin/true"})
 	ew.Workload.SingleInstance = false
-	addr := netip.MustParseAddr("10.111.0.2")
 
-	dir, err := workloadAgentDir(ew, addr)
+	dir, err := workloadAgentDir(ew, onGateway(1, "10.111.0.2"))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, files.AgentSocketName), nil, 0o600))
 
-	again, err := workloadAgentDir(ew, addr)
+	again, err := workloadAgentDir(ew, onGateway(1, "10.111.0.2"))
 	require.NoError(t, err)
 
 	assert.Equal(t, dir, again)
@@ -351,10 +351,50 @@ func TestAgentDirIsNotNeededWithoutASupervisor(t *testing.T) {
 	ew := supervised(t, []string{"/bin/true"})
 	ew.Workload.SingleInstance = false
 
-	dir, err := workloadAgentDir(ew, netip.Addr{})
+	dir, err := workloadAgentDir(ew, nil)
 
 	require.NoError(t, err)
 	assert.Empty(t, dir)
+}
+
+// A gateway that is started again hands its addresses out again. The
+// sandbox of an earlier gateway may still be running on one of them, and
+// its reap must not take the directory of the launch that now holds it.
+func TestAgentDirOutlivesTheReapOfAnEarlierGateway(t *testing.T) {
+	ew := supervised(t, []string{"/bin/true"})
+	ew.Workload.SingleInstance = false
+
+	earlier, err := workloadAgentDir(ew, onGateway(1, "10.111.0.2"))
+	require.NoError(t, err)
+	later, err := workloadAgentDir(ew, onGateway(2, "10.111.0.2"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(later, files.AgentSocketName), nil, 0o600))
+
+	cmd := execabs.Command("/bin/true")
+	require.NoError(t, cmd.Start())
+
+	reap(cmd, sandbox.State{}, filepath.Join(t.TempDir(), "state"), nil, ew.Name, earlier)
+
+	assert.FileExists(t, filepath.Join(later, files.AgentSocketName))
+}
+
+// The sandboxes of a gateway that has gone lost their network with it, and
+// a launch made from a terminal is never reaped, so what they left is
+// cleared by the first launch on the gateway that replaced it.
+func TestAgentDirClearsWhatEarlierGatewaysLeft(t *testing.T) {
+	ew := supervised(t, []string{"/bin/true"})
+	ew.Workload.SingleInstance = false
+
+	earlier, err := workloadAgentDir(ew, onGateway(1, "10.111.0.2"))
+	require.NoError(t, err)
+	_, err = workloadAgentDir(ew, onGateway(2, "10.111.0.2"))
+	require.NoError(t, err)
+
+	assert.NoDirExists(t, filepath.Dir(earlier))
+}
+
+func onGateway(gw uint64, addr string) *gateway.Attach {
+	return &gateway.Attach{Addr: netip.MustParseAddr(addr), Gateway: gw}
 }
 
 // assertNeverRan gives the workload the time it would have needed to run had
@@ -375,7 +415,7 @@ func TestReapRemovesTheInstanceAgentDir(t *testing.T) {
 	ew := supervised(t, []string{"/bin/true"})
 	ew.Workload.SingleInstance = false
 
-	dir, err := workloadAgentDir(ew, netip.MustParseAddr("10.111.0.2"))
+	dir, err := workloadAgentDir(ew, onGateway(1, "10.111.0.2"))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, files.AgentSocketName), nil, 0o600))
 
@@ -392,7 +432,7 @@ func TestReapRemovesTheInstanceAgentDir(t *testing.T) {
 func TestReapKeepsTheSharedAgentDir(t *testing.T) {
 	ew := supervised(t, []string{"/bin/true"})
 
-	dir, err := workloadAgentDir(ew, netip.MustParseAddr("10.111.0.2"))
+	dir, err := workloadAgentDir(ew, onGateway(1, "10.111.0.2"))
 	require.NoError(t, err)
 
 	cmd := execabs.Command("/bin/true")

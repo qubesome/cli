@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -98,12 +98,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 		return err
 	}
 
-	var addr netip.Addr
-	if att != nil {
-		addr = att.Addr
-	}
-
-	in, err := resolve(ew, att != nil, addr)
+	in, err := resolve(ew, att)
 	if err != nil {
 		return err
 	}
@@ -248,8 +243,8 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload, socket
 // workloadAgentDir creates the directory a sandbox's supervisor listens in,
 // or returns "" for a sandbox that runs none.
 //
-// addr is the gateway address the sandbox was given, or the zero Addr for
-// one that is not on the gateway.
+// att is the sandbox's place on the gateway, or nil for one that is not on
+// it.
 //
 // A single instance workload has one supervisor for the life of its sandbox,
 // at the path a second launch looks for it on to hand its command over. A
@@ -260,14 +255,20 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload, socket
 // the window before its own is up, taking that answer as its own sandbox
 // being ready and sending its release to a gate long since opened.
 //
-// The directory is named after the address. A gateway hands an address
-// out once, so no two live sandboxes share one, and whatever is already
-// there was left by a sandbox that is gone and is cleared. That bounds what
-// launches from a terminal leave behind, since they exit before their
-// sandbox does and nothing reaps it, to one directory per address.
-func workloadAgentDir(ew types.EffectiveWorkload, addr netip.Addr) (string, error) {
+// The directory is named after the gateway and the address. A gateway
+// hands an address out once, but a gateway started again hands them all
+// out again, and the sandbox of the one before may still be running on
+// the same address. Its reap must not take the directory of the launch
+// that now holds it, so the two are kept apart by the gateway.
+//
+// Launches from a terminal exit before their sandbox does and nothing reaps
+// it, so the directories of a gateway that has gone are cleared here. Their
+// sandboxes lost their network along with it. A directory already at the
+// path was left on an earlier boot, since a gateway is named by its start
+// time since boot, and is cleared as well.
+func workloadAgentDir(ew types.EffectiveWorkload, att *gateway.Attach) (string, error) {
 	wl := ew.Workload
-	if !wl.SingleInstance && !addr.IsValid() {
+	if !wl.SingleInstance && att == nil {
 		return "", nil
 	}
 
@@ -286,15 +287,42 @@ func workloadAgentDir(ew types.EffectiveWorkload, addr netip.Addr) (string, erro
 		return dir, nil
 	}
 
-	dir = filepath.Join(dir, addr.String())
+	gw := strconv.FormatUint(att.Gateway, 10)
+	if err := clearOtherGateways(dir, gw); err != nil {
+		return "", err
+	}
+
+	dir = filepath.Join(dir, gw, att.Addr.String())
 	if err := os.RemoveAll(dir); err != nil {
 		return "", fmt.Errorf("failed to clear workload instance agent dir: %w", err)
 	}
-	if err := os.Mkdir(dir, files.DirMode); err != nil {
+	if err := os.MkdirAll(dir, files.DirMode); err != nil {
 		return "", fmt.Errorf("failed to create workload instance agent dir: %w", err)
 	}
 
 	return dir, nil
+}
+
+// clearOtherGateways removes the instance directories of every gateway but
+// gw from a workload's agent directory. Only directories are removed. A
+// socket there is the supervisor of the workload's single instance sandbox,
+// which may still be running from before the workload stopped being one.
+func clearOtherGateways(dir, gw string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read workload agent dir: %w", err)
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == gw {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return fmt.Errorf("failed to clear the agent dirs of an earlier gateway: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // reap waits for a workload sandbox to exit, clears the state file it was
@@ -418,8 +446,9 @@ func spawn(socket string, argv []string, statePath string) error {
 //
 // Every filesystem lookup, image pull and keyring read happens here, so
 // that buildSpec is a function of its input alone.
-func resolve(ew types.EffectiveWorkload, gw bool, addr netip.Addr) (input, error) {
+func resolve(ew types.EffectiveWorkload, att *gateway.Attach) (input, error) {
 	wl := ew.Workload
+	gw := att != nil
 
 	bundle, err := images.PullProfileImage(wl.Image)
 	if err != nil {
@@ -500,7 +529,7 @@ func resolve(ew types.EffectiveWorkload, gw bool, addr netip.Addr) (input, error
 		in.QubesomeBin = bin
 	}
 
-	in.AgentDir, err = workloadAgentDir(ew, addr)
+	in.AgentDir, err = workloadAgentDir(ew, att)
 	if err != nil {
 		return input{}, err
 	}
