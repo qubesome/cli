@@ -244,7 +244,7 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload, socket
 // or returns "" for a sandbox that runs none.
 //
 // att is the sandbox's place on the gateway, or nil for one that is not on
-// it.
+// it. With att set it is called under att.WhileCurrent.
 //
 // A single instance workload has one supervisor for the life of its sandbox,
 // at the path a second launch looks for it on to hand its command over. A
@@ -529,7 +529,21 @@ func resolve(ew types.EffectiveWorkload, att *gateway.Attach) (input, error) {
 		in.QubesomeBin = bin
 	}
 
-	in.AgentDir, err = workloadAgentDir(ew, att)
+	// Under the gateway's lock and only while it is still the one the
+	// address came from, because the image pull above can take long
+	// enough for it to have been started again. Clearing directories in
+	// the name of the gateway before would take those of the launches on
+	// the one that replaced it.
+	if att != nil {
+		err = att.WhileCurrent(ew.Name, func() error {
+			var err error
+			in.AgentDir, err = workloadAgentDir(ew, att)
+
+			return err
+		})
+	} else {
+		in.AgentDir, err = workloadAgentDir(ew, nil)
+	}
 	if err != nil {
 		return input{}, err
 	}

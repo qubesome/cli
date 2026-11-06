@@ -10,6 +10,7 @@ import (
 	"github.com/qubesome/cli/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 func TestOutlived(t *testing.T) {
@@ -120,6 +121,45 @@ func TestRegisterRefusesAGatewayStartedSinceTheAddressWasAllocated(t *testing.T)
 	current := &Attach{gateway: g, Addr: addr, Session: session, Gateway: instance}
 	require.NoError(t, current.Register(testWorkload))
 	assert.Len(t, gw.mapped(), 1)
+}
+
+// A launch can take long enough between allocating its address and acting
+// on it, pulling its image, for the gateway to be started again in between.
+// What it then does in the name of the old gateway can undo the work of a
+// launch on the new one, so it is refused, and the gateway is kept from
+// being started again until it is done.
+func TestWhileCurrentActsOnlyForTheGatewayTheAddressCameFrom(t *testing.T) {
+	g := newSessionGateway(t)
+	runningGateway(t, g)
+
+	session, instance, err := g.identity()
+	require.NoError(t, err)
+
+	addr := netip.MustParseAddr(testAddress)
+
+	ran := false
+	replaced := &Attach{gateway: g, Addr: addr, Session: session, Gateway: instance + 1}
+	require.ErrorContains(t, replaced.WhileCurrent(testWorkload, func() error {
+		ran = true
+
+		return nil
+	}), "restarted")
+	assert.False(t, ran)
+
+	current := &Attach{gateway: g, Addr: addr, Session: session, Gateway: instance}
+	require.NoError(t, current.WhileCurrent(testWorkload, func() error {
+		ran = true
+
+		f, err := os.Open(g.LockPath)
+		require.NoError(t, err)
+		defer f.Close()
+
+		assert.ErrorIs(t, unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB), unix.EWOULDBLOCK,
+			"the gateway lock was not held")
+
+		return nil
+	}))
+	assert.True(t, ran)
 }
 
 func TestAllocateWiredNamesTheGatewayTheAddressCameFrom(t *testing.T) {

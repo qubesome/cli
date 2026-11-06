@@ -187,9 +187,32 @@ func (a *Attach) Resolve(pid int) error {
 // was allocated from. A gateway started since then has counted its
 // addresses from the start again, so this one may already be another
 // workload's, and the workload's record would name a gateway that has
-// gone. The check and the registration are made under the gateway's
-// lock, so no restart lands between them.
+// gone. See WhileCurrent.
 func (a *Attach) Register(name string) error {
+	return a.WhileCurrent(name, func() error {
+		c, err := a.gateway.Client()
+		if err != nil {
+			return err
+		}
+
+		if err := c.Register(context.Background(), name, a.Addr.String()); err != nil {
+			return a.refused(name, err)
+		}
+
+		return nil
+	})
+}
+
+// WhileCurrent runs fn while the gateway the address was allocated from is
+// the one running, and refuses to run it once that gateway has been
+// replaced. name is the workload being launched, for the message.
+//
+// The check and fn are made under the gateway's lock, which starting a
+// gateway takes as well, so no restart lands between them. A launch can
+// spend long enough between allocating its address and acting on it for
+// one to have happened, and what it does in the name of the old gateway
+// could otherwise undo the work of a launch on the new one.
+func (a *Attach) WhileCurrent(name string, fn func() error) error {
 	lock, err := acquire(a.gateway.LockPath)
 	if err != nil {
 		return err
@@ -204,16 +227,7 @@ func (a *Attach) Register(name string) error {
 		return fmt.Errorf("the session gateway restarted while %s was being launched, so the address it was given may be another workload's", name)
 	}
 
-	c, err := a.gateway.Client()
-	if err != nil {
-		return err
-	}
-
-	if err := c.Register(context.Background(), name, a.Addr.String()); err != nil {
-		return a.refused(name, err)
-	}
-
-	return nil
+	return fn()
 }
 
 // refused says where the answer to a refused registration is.
