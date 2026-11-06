@@ -39,18 +39,32 @@ const (
 	StartupPoll = 50 * time.Millisecond
 )
 
-// Release opens a gated supervisor's gate, waiting for a sandbox that is
-// still starting.
+// Ready waits for a sandbox that is still starting to have its supervisor
+// answering, without releasing it.
 //
-// The wait is there because between the sandbox existing and the supervisor
-// binding its socket there is a bwrap setup and an exec. The sandbox is
-// known to exist by the time this is called, since its pid was read from
-// bwrap, so what is being waited for is only the socket.
+// Between the sandbox existing and the supervisor binding its socket there
+// is a bwrap setup and an exec. The sandbox is known to exist by the time
+// this is called, since its pid was read from bwrap, so what is being
+// waited for is only the socket. Its filesystem is in place once the
+// supervisor answers, which is what makes this the point after which
+// anything may be written into it.
+func Ready(socket string) error {
+	return untilSupervised(func() error { return sandbox.Ready(socket) })
+}
+
+// Release opens a gated supervisor's gate, waiting for a sandbox that is
+// still starting. See Ready for what the wait is for.
 func Release(socket string) error {
+	return untilSupervised(func() error { return sandbox.Release(socket) })
+}
+
+// untilSupervised retries req for as long as no supervisor answers it, up
+// to StartupGrace.
+func untilSupervised(req func() error) error {
 	deadline := time.Now().Add(StartupGrace)
 
 	for {
-		err := sandbox.Release(socket)
+		err := req()
 		if !errors.Is(err, sandbox.ErrNoSupervisor) || time.Now().After(deadline) {
 			return err
 		}

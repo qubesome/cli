@@ -104,13 +104,28 @@ type fakeAttach struct {
 	calls []string
 
 	wireErr     error
+	resolveErr  error
 	registerErr error
+
+	// socket, when set, is asked at the moment of the resolve whether a
+	// supervisor is answering on it, and the answer kept in upAtResolve.
+	socket      string
+	upAtResolve bool
 }
 
 func (f *fakeAttach) Wire(int) error {
 	f.calls = append(f.calls, "wire")
 
 	return f.wireErr
+}
+
+func (f *fakeAttach) Resolve(int) error {
+	f.calls = append(f.calls, "resolve")
+	if f.socket != "" {
+		f.upAtResolve = sandbox.Ready(f.socket) == nil
+	}
+
+	return f.resolveErr
 }
 
 func (f *fakeAttach) Register(string) error {
@@ -155,7 +170,7 @@ func TestAttachWiresAndRegistersBeforeReleasing(t *testing.T) {
 	att := &fakeAttach{}
 	require.NoError(t, attach(l, att, ew))
 
-	assert.Equal(t, []string{"wire", "register"}, att.calls)
+	assert.Equal(t, []string{"wire", "resolve", "register"}, att.calls)
 
 	require.Eventually(t, func() bool {
 		_, err := os.Stat(marker)
@@ -191,7 +206,48 @@ func TestAttachStopsWhenRegisterFails(t *testing.T) {
 	att := &fakeAttach{registerErr: errors.New("unknown workload")}
 
 	require.ErrorContains(t, attach(l, att, ew), "unknown workload")
-	assert.Equal(t, []string{"wire", "register"}, att.calls)
+	assert.Equal(t, []string{"wire", "resolve", "register"}, att.calls)
+
+	assertNeverRan(t, marker)
+}
+
+// bwrap reports the sandbox's pid before it has built the sandbox's
+// filesystem, so the resolver configuration waits for the supervisor, which
+// only runs once that filesystem is in place. Written any earlier, it lands
+// in a root that has no /etc yet.
+func TestAttachResolvesOnceSupervised(t *testing.T) {
+	ew := supervised(t, []string{"/bin/sh", "-c", "sleep 5"})
+
+	dir, err := files.WorkloadAgentDir(ew.Profile.Name, ew.Workload.Name)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, files.DirMode))
+
+	socket, err := files.WorkloadAgentSocket(ew.Profile.Name, ew.Workload.Name)
+	require.NoError(t, err)
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = sandbox.Supervise(socket, []string{"/bin/sh", "-c", "sleep 5"}, true)
+	}()
+
+	att := &fakeAttach{socket: socket}
+	require.NoError(t, attach(launch.ForTest(os.Getpid()), att, ew))
+
+	assert.True(t, att.upAtResolve, "the resolver was written before the sandbox's filesystem was in place")
+}
+
+// A workload whose resolver cannot be pointed at the gateway would come up
+// resolving nothing, so the launch stops and nothing is registered.
+func TestAttachStopsWhenTheResolverCannotBeWritten(t *testing.T) {
+	ew := supervised(t, []string{"/bin/sh", "-c", "sleep 5"})
+	marker := filepath.Join(t.TempDir(), "ran")
+
+	l := gatedLaunch(t, ew, []string{"/bin/sh", "-c", "touch " + marker})
+
+	att := &fakeAttach{resolveErr: errors.New("no /etc")}
+
+	require.ErrorContains(t, attach(l, att, ew), "no /etc")
+	assert.Equal(t, []string{"wire", "resolve"}, att.calls)
 
 	assertNeverRan(t, marker)
 }

@@ -83,6 +83,7 @@ type requestKind byte
 const (
 	requestSpawn requestKind = iota
 	requestRelease
+	requestReady
 )
 
 // Supervise runs argv inside the sandbox and spawns siblings into it on
@@ -263,6 +264,23 @@ func Release(socket string) error {
 	defer conn.Close()
 
 	return exchange(conn, requestRelease, nil, "release")
+}
+
+// Ready asks the supervisor listening on socket whether it is up, and
+// changes nothing about it.
+//
+// The supervisor is the command bwrap runs once the sandbox's filesystem is
+// in place, so an answer from it says that filesystem is finished. That is
+// what the host waits for before writing into the sandbox's root, since
+// bwrap reports the sandbox's pid before it has built any of it.
+func Ready(socket string) error {
+	conn, err := dial(socket)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	return exchange(conn, requestReady, nil, "ready")
 }
 
 func dial(socket string) (net.Conn, error) {
@@ -451,6 +469,8 @@ func (s *supervisor) handle(conn net.Conn) {
 	case requestRelease:
 		slog.Debug("releasing the workload")
 		reply(conn, s.gate.open())
+	case requestReady:
+		reply(conn, nil)
 	default:
 		reply(conn, fmt.Errorf("sandbox: unknown request kind %d", kind))
 	}

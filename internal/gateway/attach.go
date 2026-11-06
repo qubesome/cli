@@ -147,12 +147,33 @@ func (a *Attach) ProxyAddr() (string, error) {
 }
 
 // Wire gives the sandbox at pid a link to the gateway, addressed at both
-// ends and with a resolver pointed at it.
+// ends. Its resolver is pointed at the gateway later, by Resolve.
 //
 // pid is the sandbox's own init process in the host's pid namespace, which
 // is what bwrap reports on its info descriptor.
 func (a *Attach) Wire(pid int) error {
 	return a.gateway.Wire(a.config, a.Addr, pid)
+}
+
+// Resolve points the resolver of the sandbox at pid at the gateway.
+//
+// It is called once the sandbox's filesystem is in place, which is later
+// than Wire. bwrap reports the pid as soon as it has cloned the sandbox and
+// builds the root after that, so a write made as soon as the pid is known
+// can find no /etc to write into. The file lands in the sandbox's tmpfs
+// overlay and goes when the sandbox does, so nothing has to undo it.
+func (a *Attach) Resolve(pid int) error {
+	subnet, err := a.config.SubnetPrefix()
+	if err != nil {
+		return err
+	}
+
+	addr, err := GatewayAddr(subnet)
+	if err != nil {
+		return err
+	}
+
+	return writeResolvConf(pid, addr)
 }
 
 // Register tells the gateway which workload the address belongs to.

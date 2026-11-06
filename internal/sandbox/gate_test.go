@@ -39,6 +39,42 @@ func TestAGatedSupervisorWaitsForItsRelease(t *testing.T) {
 	assert.FileExists(t, marker)
 }
 
+// The host asks whether the supervisor is up before it writes into the
+// sandbox's root, and asking must not be what lets the workload run.
+func TestReadyDoesNotReleaseTheGate(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	socket := filepath.Join(dir, "agent.sock")
+	marker := filepath.Join(dir, "ran")
+
+	done := make(chan error, 1)
+	go func() { done <- Supervise(socket, []string{"/bin/sh", "-c", "touch " + marker}, true) }()
+
+	require.Eventually(t, func() bool {
+		return Ready(socket) == nil
+	}, 5*time.Second, 10*time.Millisecond)
+
+	assert.Never(t, func() bool {
+		_, err := os.Stat(marker)
+
+		return err == nil
+	}, 200*time.Millisecond, 20*time.Millisecond, "the workload ran without a release")
+
+	require.NoError(t, Release(socket))
+	require.NoError(t, <-done)
+
+	assert.FileExists(t, marker)
+}
+
+func TestReadyWithoutASupervisor(t *testing.T) {
+	t.Parallel()
+
+	socket := filepath.Join(t.TempDir(), "agent.sock")
+
+	require.ErrorIs(t, Ready(socket), ErrNoSupervisor)
+}
+
 // A gate that expires kills the sandbox rather than starting the workload
 // unpoliced, which is the same fail-closed rule the gateway's own lifecycle
 // follows. Returning here is what ends the sandbox.

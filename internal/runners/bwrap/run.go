@@ -174,6 +174,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 // be driven without a gateway to talk to.
 type attacher interface {
 	Wire(pid int) error
+	Resolve(pid int) error
 	Register(name string) error
 	Unregister(name string)
 }
@@ -183,10 +184,13 @@ type attacher interface {
 //
 // The order is the point of it. The sandbox exists, so its pid can be read
 // from bwrap and its namespace named. The veth is built and addressed from
-// outside. The gateway is told which workload holds the address, which it
-// refuses if it has no policy for that name. Only then is the gate opened
-// and the workload started, so its first name lookup cannot precede the
-// resolver it is meant to reach.
+// outside. The resolver configuration waits for the supervisor to answer,
+// because bwrap reports the pid before it has built the sandbox's
+// filesystem, and a file written into its root any earlier lands in one
+// that has no /etc yet. The gateway is told which workload holds the
+// address, which it refuses if it has no policy for that name. Only then is
+// the gate opened and the workload started, so its first name lookup cannot
+// precede the resolver it is meant to reach.
 //
 // Every step before the release stops the launch when it fails, and the
 // caller kills the sandbox. Nothing has run inside it yet.
@@ -196,16 +200,24 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload) error 
 		return err
 	}
 
+	socket, err := files.WorkloadAgentSocket(ew.Profile.Name, ew.Workload.Name)
+	if err != nil {
+		return err
+	}
+
 	if err := att.Wire(pid); err != nil {
 		return err
 	}
 
-	if err := att.Register(ew.Name); err != nil {
+	if err := launch.Ready(socket); err != nil {
+		return fmt.Errorf("the sandbox of workload %q did not come up: %w", ew.Name, err)
+	}
+
+	if err := att.Resolve(pid); err != nil {
 		return err
 	}
 
-	socket, err := files.WorkloadAgentSocket(ew.Profile.Name, ew.Workload.Name)
-	if err != nil {
+	if err := att.Register(ew.Name); err != nil {
 		return err
 	}
 
