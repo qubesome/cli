@@ -147,12 +147,33 @@ func (a *Attach) ProxyAddr() (string, error) {
 }
 
 // Wire gives the sandbox at pid a link to the gateway, addressed at both
-// ends and with a resolver pointed at it.
+// ends. Its resolver is pointed at the gateway later, by Resolve.
 //
 // pid is the sandbox's own init process in the host's pid namespace, which
 // is what bwrap reports on its info descriptor.
 func (a *Attach) Wire(pid int) error {
 	return a.gateway.Wire(a.config, a.Addr, pid)
+}
+
+// Resolve points the resolver of the sandbox at pid at the gateway.
+//
+// It is called once the sandbox's filesystem is in place, which is later
+// than Wire. bwrap reports the pid as soon as it has cloned the sandbox and
+// builds the root after that, so a write made as soon as the pid is known
+// can find no /etc to write into. The file lands in the sandbox's tmpfs
+// overlay and goes when the sandbox does, so nothing has to undo it.
+func (a *Attach) Resolve(pid int) error {
+	subnet, err := a.config.SubnetPrefix()
+	if err != nil {
+		return err
+	}
+
+	addr, err := GatewayAddr(subnet)
+	if err != nil {
+		return err
+	}
+
+	return writeResolvConf(pid, addr)
 }
 
 // Register tells the gateway which workload the address belongs to.
@@ -166,9 +187,32 @@ func (a *Attach) Wire(pid int) error {
 // was allocated from. A gateway started since then has counted its
 // addresses from the start again, so this one may already be another
 // workload's, and the workload's record would name a gateway that has
-// gone. The check and the registration are made under the gateway's
-// lock, so no restart lands between them.
+// gone. See WhileCurrent.
 func (a *Attach) Register(name string) error {
+	return a.WhileCurrent(name, func() error {
+		c, err := a.gateway.Client()
+		if err != nil {
+			return err
+		}
+
+		if err := c.Register(context.Background(), name, a.Addr.String()); err != nil {
+			return a.refused(name, err)
+		}
+
+		return nil
+	})
+}
+
+// WhileCurrent runs fn while the gateway the address was allocated from is
+// the one running, and refuses to run it once that gateway has been
+// replaced. name is the workload being launched, for the message.
+//
+// The check and fn are made under the gateway's lock, which starting a
+// gateway takes as well, so no restart lands between them. A launch can
+// spend long enough between allocating its address and acting on it for
+// one to have happened, and what it does in the name of the old gateway
+// could otherwise undo the work of a launch on the new one.
+func (a *Attach) WhileCurrent(name string, fn func() error) error {
 	lock, err := acquire(a.gateway.LockPath)
 	if err != nil {
 		return err
@@ -183,16 +227,7 @@ func (a *Attach) Register(name string) error {
 		return fmt.Errorf("the session gateway restarted while %s was being launched, so the address it was given may be another workload's", name)
 	}
 
-	c, err := a.gateway.Client()
-	if err != nil {
-		return err
-	}
-
-	if err := c.Register(context.Background(), name, a.Addr.String()); err != nil {
-		return a.refused(name, err)
-	}
-
-	return nil
+	return fn()
 }
 
 // refused says where the answer to a refused registration is.

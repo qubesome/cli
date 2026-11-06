@@ -1,9 +1,11 @@
 package sandbox
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +39,66 @@ func TestAGatedSupervisorWaitsForItsRelease(t *testing.T) {
 	require.NoError(t, <-done)
 
 	assert.FileExists(t, marker)
+}
+
+// The host asks whether the supervisor is up before it writes into the
+// sandbox's root, and asking must not be what lets the workload run.
+func TestReadyDoesNotReleaseTheGate(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	socket := filepath.Join(dir, "agent.sock")
+	marker := filepath.Join(dir, "ran")
+
+	done := make(chan error, 1)
+	go func() { done <- Supervise(socket, []string{"/bin/sh", "-c", "touch " + marker}, true) }()
+
+	require.Eventually(t, func() bool {
+		return Ready(socket) == nil
+	}, 5*time.Second, 10*time.Millisecond)
+
+	assert.Never(t, func() bool {
+		_, err := os.Stat(marker)
+
+		return err == nil
+	}, 200*time.Millisecond, 20*time.Millisecond, "the workload ran without a release")
+
+	require.NoError(t, Release(socket))
+	require.NoError(t, <-done)
+
+	assert.FileExists(t, marker)
+}
+
+// The host reaches a supervisor through a directory under the user's home,
+// which can be deeper than a sockaddr_un has room for.
+func TestReadyOnASocketPathTooLongToDial(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), strings.Repeat("d", 60), strings.Repeat("e", 60))
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	socket := filepath.Join(dir, "agent.sock")
+
+	// Listening has the same limit, which the sandbox never meets because
+	// its end of the socket is at a short path of its own.
+	d, err := os.Open(dir)
+	require.NoError(t, err)
+	defer d.Close()
+
+	lc := net.ListenConfig{}
+	ln, err := lc.Listen(t.Context(), "unix", fmt.Sprintf("/proc/self/fd/%d/agent.sock", d.Fd()))
+	require.NoError(t, err)
+
+	go func() { _ = superviseWith(ln, []string{"/bin/sh", "-c", "sleep 5"}, procStarter{}, newGate(true)) }()
+
+	require.NoError(t, Ready(socket))
+}
+
+func TestReadyWithoutASupervisor(t *testing.T) {
+	t.Parallel()
+
+	socket := filepath.Join(t.TempDir(), "agent.sock")
+
+	require.ErrorIs(t, Ready(socket), ErrNoSupervisor)
 }
 
 // A gate that expires kills the sandbox rather than starting the workload

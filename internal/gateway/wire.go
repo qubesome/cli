@@ -59,9 +59,13 @@ var ErrNoGateway = errors.New("gateway: no gateway is running")
 // could renumber itself could claim another workload's policy and another
 // workload's injected credentials.
 //
+// The resolver configuration is not written here. It goes into the
+// sandbox's filesystem, which bwrap may still be building when the pid
+// arrives, while everything here needs only the network namespace, which
+// exists from the moment the sandbox is cloned. See Attach.Resolve.
+//
 // Nothing here has to be undone. The kernel takes a veth with it when the
-// network namespace holding an end goes, and the workload's resolver
-// configuration is written into a tmpfs overlay that goes at the same time.
+// network namespace holding an end goes.
 //
 // addr is the address allocated for this workload and workloadPID is its
 // sandbox, in the host's pid namespace, which is what bwrap reports on its
@@ -93,10 +97,6 @@ func (g Gateway) Wire(cfg types.GatewayConfig, addr netip.Addr, workloadPID int)
 
 	if err := w.configure(w.workloadPID, workloadScript(w)); err != nil {
 		return w.failed("configure the workload end of the veth", w.workloadPID, err)
-	}
-
-	if err := writeResolvConf(w.workloadPID, w.gatewayAddr); err != nil {
-		return err
 	}
 
 	slog.Info("[gateway] wired a workload to the gateway",

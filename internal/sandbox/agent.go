@@ -10,10 +10,12 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"golang.org/x/sys/execabs"
+	"golang.org/x/sys/unix"
 )
 
 // SuperviseCommand is the qubesome subcommand that supervises a workload
@@ -83,6 +85,7 @@ type requestKind byte
 const (
 	requestSpawn requestKind = iota
 	requestRelease
+	requestReady
 )
 
 // Supervise runs argv inside the sandbox and spawns siblings into it on
@@ -265,10 +268,51 @@ func Release(socket string) error {
 	return exchange(conn, requestRelease, nil, "release")
 }
 
+// Ready asks the supervisor listening on socket whether it is up, and
+// changes nothing about it.
+//
+// The supervisor is the command bwrap runs once the sandbox's filesystem is
+// in place, so an answer from it says that filesystem is finished. That is
+// what the host waits for before writing into the sandbox's root, since
+// bwrap reports the sandbox's pid before it has built any of it.
+func Ready(socket string) error {
+	conn, err := dial(socket)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	return exchange(conn, requestReady, nil, "ready")
+}
+
 func dial(socket string) (net.Conn, error) {
+	if len(socket) < sunPathMax {
+		return dialUnix(socket)
+	}
+
+	// The host's end of a supervisor socket is under the user's home,
+	// which can be deep enough for its path not to fit. The directory is
+	// opened and the socket is named through the descriptor instead, which
+	// the kernel resolves like the path it stands for.
+	dir := filepath.Dir(socket)
+
+	fd, err := unix.Open(dir, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrNoSupervisor, &os.PathError{Op: "open", Path: dir, Err: err})
+	}
+	defer unix.Close(fd)
+
+	return dialUnix(fmt.Sprintf("/proc/self/fd/%d/%s", fd, filepath.Base(socket)))
+}
+
+// sunPathMax is the size of the path in a sockaddr_un, which has to hold
+// the NUL after it as well.
+const sunPathMax = 108
+
+func dialUnix(path string) (net.Conn, error) {
 	d := net.Dialer{Timeout: exchangeTimeout}
 
-	conn, err := d.DialContext(context.Background(), "unix", socket)
+	conn, err := d.DialContext(context.Background(), "unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNoSupervisor, err)
 	}
@@ -451,6 +495,8 @@ func (s *supervisor) handle(conn net.Conn) {
 	case requestRelease:
 		slog.Debug("releasing the workload")
 		reply(conn, s.gate.open())
+	case requestReady:
+		reply(conn, nil)
 	default:
 		reply(conn, fmt.Errorf("sandbox: unknown request kind %d", kind))
 	}
