@@ -141,6 +141,13 @@ func pullAll(s *Store, cfg *types.Config) error {
 		}
 	}
 
+	// A refresh is what adds versions, so it also drops the ones that
+	// fell out of the window. A failed prune costs disk and nothing else,
+	// so it does not fail the refresh.
+	if err := s.Prune(); err != nil {
+		slog.Error("cannot prune images", "error", err)
+	}
+
 	return nil
 }
 
@@ -181,13 +188,23 @@ func pullImage(s *Store, ref string) (Bundle, error) {
 }
 
 // refreshImage pulls and unpacks ref whether or not the store already
-// holds it.
+// holds it, and records the version it got so a later prune knows which
+// versions came before it.
 func refreshImage(s *Store, ref string) (Bundle, error) {
 	if err := s.Pull(ref); err != nil {
 		return Bundle{}, err
 	}
 
-	return s.Unpack(ref)
+	b, err := s.Unpack(ref)
+	if err != nil {
+		return Bundle{}, err
+	}
+
+	if err := s.record(ref); err != nil {
+		slog.Error("cannot record image version", "image", ref, "error", err)
+	}
+
+	return b, nil
 }
 
 // HasImage reports whether the store can already provide ref.
