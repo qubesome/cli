@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,7 +98,12 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 		return err
 	}
 
-	in, err := resolve(ew, att != nil)
+	var addr netip.Addr
+	if att != nil {
+		addr = att.Addr
+	}
+
+	in, err := resolve(ew, att != nil, addr)
 	if err != nil {
 		return err
 	}
@@ -132,7 +138,7 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 	}
 
 	if att != nil {
-		if err := attach(l, att, ew); err != nil {
+		if err := attach(l, att, ew, filepath.Join(in.AgentDir, files.AgentSocketName)); err != nil {
 			// Fail closed. The workload has not run yet, because a gated
 			// supervisor is still holding it, so a sandbox taken down here
 			// takes an application that never started with it. Letting it
@@ -164,7 +170,14 @@ func Run(ew types.EffectiveWorkload, cfg *types.Config) error {
 		return l.Stop(fmt.Errorf("failed to record sandbox state: %w", err))
 	}
 
-	go reap(l.Cmd(), rec, statePath, att, ew.Name)
+	// A single instance workload's directory is where the next launch
+	// looks for its supervisor, so only an instance's own one goes.
+	var instanceDir string
+	if !ew.Workload.SingleInstance {
+		instanceDir = in.AgentDir
+	}
+
+	go reap(l.Cmd(), rec, statePath, att, ew.Name, instanceDir)
 
 	return nil
 }
@@ -194,13 +207,11 @@ type attacher interface {
 //
 // Every step before the release stops the launch when it fails, and the
 // caller kills the sandbox. Nothing has run inside it yet.
-func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload) error {
+//
+// socket is this sandbox's own supervisor. See workloadAgentDir for why it
+// is not always the workload's.
+func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload, socket string) error {
 	pid, err := l.ChildPID()
-	if err != nil {
-		return err
-	}
-
-	socket, err := files.WorkloadAgentSocket(ew.Profile.Name, ew.Workload.Name)
 	if err != nil {
 		return err
 	}
@@ -234,6 +245,58 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload) error 
 	return nil
 }
 
+// workloadAgentDir creates the directory a sandbox's supervisor listens in,
+// or returns "" for a sandbox that runs none.
+//
+// addr is the gateway address the sandbox was given, or the zero Addr for
+// one that is not on the gateway.
+//
+// A single instance workload has one supervisor for the life of its sandbox,
+// at the path a second launch looks for it on to hand its command over. A
+// workload that is supervised only because it is on the gateway can run as
+// several sandboxes at once, and each gets a directory of its own under
+// that path. Sharing one would have each new supervisor unlink the socket
+// of the last, and a launch could reach an earlier instance's supervisor in
+// the window before its own is up, taking that answer as its own sandbox
+// being ready and sending its release to a gate long since opened.
+//
+// The directory is named after the address. A gateway hands an address
+// out once, so no two live sandboxes share one, and whatever is already
+// there was left by a sandbox that is gone and is cleared. That bounds what
+// launches from a terminal leave behind, since they exit before their
+// sandbox does and nothing reaps it, to one directory per address.
+func workloadAgentDir(ew types.EffectiveWorkload, addr netip.Addr) (string, error) {
+	wl := ew.Workload
+	if !wl.SingleInstance && !addr.IsValid() {
+		return "", nil
+	}
+
+	dir, err := files.WorkloadAgentDir(ew.Profile.Name, wl.Name)
+	if err != nil {
+		return "", err
+	}
+	// MkdirAll rather than EnsureMappedDir: the parent is the profile's
+	// agent directory, and a workload launch is the only thing that
+	// creates either of them.
+	if err := os.MkdirAll(dir, files.DirMode); err != nil {
+		return "", fmt.Errorf("failed to create workload agent dir: %w", err)
+	}
+
+	if wl.SingleInstance {
+		return dir, nil
+	}
+
+	dir = filepath.Join(dir, addr.String())
+	if err := os.RemoveAll(dir); err != nil {
+		return "", fmt.Errorf("failed to clear workload instance agent dir: %w", err)
+	}
+	if err := os.Mkdir(dir, files.DirMode); err != nil {
+		return "", fmt.Errorf("failed to create workload instance agent dir: %w", err)
+	}
+
+	return dir, nil
+}
+
 // reap waits for a workload sandbox to exit, clears the state file it was
 // recorded in and tells the gateway the address is gone.
 //
@@ -253,7 +316,10 @@ func attach(l *launch.Launcher, att attacher, ew types.EffectiveWorkload) error 
 // sandbox killed by qubesome workloads had its record removed and its name
 // unregistered by the kill, and a restart may already have registered the
 // name again for the sandbox that replaced it.
-func reap(cmd *execabs.Cmd, rec sandbox.State, statePath string, att *gateway.Attach, name string) {
+//
+// instanceDir is the sandbox's own supervisor directory, removed with it, or
+// "" when the directory outlives it. See workloadAgentDir.
+func reap(cmd *execabs.Cmd, rec sandbox.State, statePath string, att *gateway.Attach, name, instanceDir string) {
 	if err := cmd.Wait(); err != nil {
 		slog.Debug("workload sandbox exited", "path", statePath, "error", err)
 	}
@@ -265,6 +331,12 @@ func reap(cmd *execabs.Cmd, rec sandbox.State, statePath string, att *gateway.At
 
 	if att != nil && owned {
 		att.Unregister(name)
+	}
+
+	if instanceDir != "" {
+		if err := os.RemoveAll(instanceDir); err != nil {
+			slog.Warn("failed to remove the workload instance agent dir", "path", instanceDir, "error", err)
+		}
 	}
 }
 
@@ -346,7 +418,7 @@ func spawn(socket string, argv []string, statePath string) error {
 //
 // Every filesystem lookup, image pull and keyring read happens here, so
 // that buildSpec is a function of its input alone.
-func resolve(ew types.EffectiveWorkload, gw bool) (input, error) {
+func resolve(ew types.EffectiveWorkload, gw bool, addr netip.Addr) (input, error) {
 	wl := ew.Workload
 
 	bundle, err := images.PullProfileImage(wl.Image)
@@ -428,18 +500,9 @@ func resolve(ew types.EffectiveWorkload, gw bool) (input, error) {
 		in.QubesomeBin = bin
 	}
 
-	if wl.SingleInstance || gw {
-		agentDir, err := files.WorkloadAgentDir(ew.Profile.Name, wl.Name)
-		if err != nil {
-			return input{}, err
-		}
-		// MkdirAll rather than EnsureMappedDir: the parent is the
-		// profile's agent directory, and a workload launch is the only
-		// thing that creates either of them.
-		if err := os.MkdirAll(agentDir, files.DirMode); err != nil {
-			return input{}, fmt.Errorf("failed to create workload agent dir: %w", err)
-		}
-		in.AgentDir = agentDir
+	in.AgentDir, err = workloadAgentDir(ew, addr)
+	if err != nil {
+		return input{}, err
 	}
 
 	if wl.AttachVM != "" {

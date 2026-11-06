@@ -372,10 +372,10 @@ func WorkloadShmPath(profile, workload string) (string, error) {
 	return filepath.Join(dir, "shm", workload), nil
 }
 
-// agentSocketName is the supervisor's socket, inside the directory a
+// AgentSocketName is the supervisor's socket, inside the directory a
 // workload's sandbox has it bound at. The host and the sandbox build the
 // same path from opposite ends, so they share the name.
-const agentSocketName = "agent.sock"
+const AgentSocketName = "agent.sock"
 
 // WorkloadAgentDir returns the host directory holding the supervisor
 // socket of one workload of a profile.
@@ -404,7 +404,7 @@ func WorkloadAgentSocket(profile, workload string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, agentSocketName), nil
+	return filepath.Join(dir, AgentSocketName), nil
 }
 
 // InWorkloadAgentDir returns the path WorkloadAgentDir is bound at inside
@@ -416,7 +416,7 @@ func InWorkloadAgentDir() string {
 // InWorkloadAgentSocket returns the path the supervisor listens on inside
 // the workload's sandbox.
 func InWorkloadAgentSocket() string {
-	return filepath.Join(InWorkloadAgentDir(), agentSocketName)
+	return filepath.Join(InWorkloadAgentDir(), AgentSocketName)
 }
 
 const (
