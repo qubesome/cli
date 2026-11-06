@@ -1,9 +1,11 @@
 package sandbox
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +67,30 @@ func TestReadyDoesNotReleaseTheGate(t *testing.T) {
 	require.NoError(t, <-done)
 
 	assert.FileExists(t, marker)
+}
+
+// The host reaches a supervisor through a directory under the user's home,
+// which can be deeper than a sockaddr_un has room for.
+func TestReadyOnASocketPathTooLongToDial(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), strings.Repeat("d", 60), strings.Repeat("e", 60))
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	socket := filepath.Join(dir, "agent.sock")
+
+	// Listening has the same limit, which the sandbox never meets because
+	// its end of the socket is at a short path of its own.
+	d, err := os.Open(dir)
+	require.NoError(t, err)
+	defer d.Close()
+
+	lc := net.ListenConfig{}
+	ln, err := lc.Listen(t.Context(), "unix", fmt.Sprintf("/proc/self/fd/%d/agent.sock", d.Fd()))
+	require.NoError(t, err)
+
+	go func() { _ = superviseWith(ln, []string{"/bin/sh", "-c", "sleep 5"}, procStarter{}, newGate(true)) }()
+
+	require.NoError(t, Ready(socket))
 }
 
 func TestReadyWithoutASupervisor(t *testing.T) {

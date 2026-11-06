@@ -10,10 +10,12 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"golang.org/x/sys/execabs"
+	"golang.org/x/sys/unix"
 )
 
 // SuperviseCommand is the qubesome subcommand that supervises a workload
@@ -284,9 +286,33 @@ func Ready(socket string) error {
 }
 
 func dial(socket string) (net.Conn, error) {
+	if len(socket) < sunPathMax {
+		return dialUnix(socket)
+	}
+
+	// The host's end of a supervisor socket is under the user's home,
+	// which can be deep enough for its path not to fit. The directory is
+	// opened and the socket is named through the descriptor instead, which
+	// the kernel resolves like the path it stands for.
+	dir := filepath.Dir(socket)
+
+	fd, err := unix.Open(dir, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrNoSupervisor, &os.PathError{Op: "open", Path: dir, Err: err})
+	}
+	defer unix.Close(fd)
+
+	return dialUnix(fmt.Sprintf("/proc/self/fd/%d/%s", fd, filepath.Base(socket)))
+}
+
+// sunPathMax is the size of the path in a sockaddr_un, which has to hold
+// the NUL after it as well.
+const sunPathMax = 108
+
+func dialUnix(path string) (net.Conn, error) {
 	d := net.Dialer{Timeout: exchangeTimeout}
 
-	conn, err := d.DialContext(context.Background(), "unix", socket)
+	conn, err := d.DialContext(context.Background(), "unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNoSupervisor, err)
 	}
