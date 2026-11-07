@@ -217,9 +217,9 @@ func (w Workload) ApplyProfile(p *Profile) EffectiveWorkload {
 	} else {
 		caps := make([]string, 0)
 
-		for _, cap := range w.HostAccess.CapsAdd {
-			if slices.Contains(p.CapsAdd, cap) {
-				caps = append(caps, cap)
+		for _, c := range w.HostAccess.CapsAdd {
+			if slices.Contains(p.CapsAdd, c) {
+				caps = append(caps, c)
 			}
 		}
 		e.Workload.HostAccess.CapsAdd = caps
