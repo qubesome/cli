@@ -443,8 +443,8 @@ func diffMessage(w types.Workload, ew types.EffectiveWorkload) string {
 	if len(w.HostAccess.CapsAdd) > 0 &&
 		!reflect.DeepEqual(w.HostAccess.CapsAdd, ew.Workload.HostAccess.CapsAdd) {
 		msg = msg + "- CapsAdd:<br/>"
-		for _, cap := range w.HostAccess.CapsAdd {
-			msg = msg + "  - " + cap + "<br/>"
+		for _, c := range w.HostAccess.CapsAdd {
+			msg = msg + "  - " + c + "<br/>"
 		}
 	}
 	return msg
