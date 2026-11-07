@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,9 +104,30 @@ func (s *Store) Digest(ref string) (string, error) {
 		return "", fmt.Errorf("failed to resolve layout for %q: %w", ref, err)
 	}
 
+	key := storeKey(ref)
+	digest, err := currentDigest(layout, key)
+	if err != nil {
+		return "", err
+	}
+	if digest == "" {
+		return "", fmt.Errorf("image %q is not in the store: no manifest named %q", ref, key)
+	}
+
+	return digest, nil
+}
+
+// currentDigest returns the digest the index in layout records for key.
+//
+// A layout with no index, or an index without key, holds no version and
+// answers with an empty digest. An index that cannot be read or parsed is
+// an error, because no answer can be given for it.
+func currentDigest(layout, key string) (string, error) {
 	path := filepath.Join(layout, "index.json")
 
 	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to read image index %q: %w", path, err)
 	}
@@ -119,14 +142,13 @@ func (s *Store) Digest(ref string) (string, error) {
 		return "", fmt.Errorf("failed to parse image index %q: %w", path, err)
 	}
 
-	want := storeKey(ref)
 	for _, m := range index.Manifests {
-		if m.Annotations[refNameAnnotation] == want {
+		if m.Annotations[refNameAnnotation] == key {
 			return m.Digest, nil
 		}
 	}
 
-	return "", fmt.Errorf("image %q is not in the store: no manifest named %q", ref, want)
+	return "", nil
 }
 
 // Resolve returns the bundle for an image the store already holds, without
@@ -154,12 +176,22 @@ func (s *Store) Resolve(ref string) (Bundle, error) {
 // file it is read from is on disk and it names a directory, so it is
 // checked as a single path component before it does.
 func (s *Store) bundleDir(digest string) (string, error) {
+	name, err := s.bundleName(digest)
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(s.Root, "unpacked", name), nil
+}
+
+// bundleName returns the name of the directory a digest is unpacked to.
+func (s *Store) bundleName(digest string) (string, error) {
 	name := strings.ReplaceAll(digest, ":", "-")
 	if err := files.ValidateName("image digest", name); err != nil {
 		return "", err
 	}
 
-	return filepath.Join(s.Root, "unpacked", name), nil
+	return name, nil
 }
 
 const (

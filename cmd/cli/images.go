@@ -45,6 +45,16 @@ func imagesCommand() *cli.Command {
 					)
 				},
 			},
+			{
+				// Takes no profile. It keeps the current and the previous
+				// version of every image in the store, whichever config
+				// names it, which is the same window refresh prunes to.
+				Name:  "prune",
+				Usage: "remove image versions older than the previous one",
+				Action: func(context.Context, *cli.Command) error {
+					return images.Prune()
+				},
+			},
 		},
 	}
 	return cmd

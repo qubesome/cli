@@ -124,14 +124,16 @@ func TestPullAllRefreshesAWarmStore(t *testing.T) {
 	s := newTestStore(t)
 	cfg := newWarmConfig(t, s)
 
-	var ran []string
-	s.cmdRunner = func(bin string, _ []string) error {
-		ran = append(ran, filepath.Base(bin))
+	var pulled []string
+	s.cmdRunner = func(bin string, args []string) error {
+		if filepath.Base(bin) == "skopeo" {
+			pulled = append(pulled, args[1])
+		}
 		return nil
 	}
 
 	require.NoError(t, pullAll(s, cfg))
-	assert.Len(t, ran, 2, "expected a pull per image: %v", ran)
+	assert.Len(t, pulled, 2, "expected a pull per image: %v", pulled)
 }
 
 func TestMissingImagesReportsWhatTheStoreLacks(t *testing.T) {
