@@ -13,7 +13,7 @@ import (
 	"github.com/qubesome/cli/internal/files"
 	"github.com/qubesome/cli/internal/keyring/backend"
 	"github.com/qubesome/cli/pkg/control"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // keyringValues reads only references in inject rules. The gateway remains

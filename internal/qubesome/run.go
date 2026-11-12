@@ -23,7 +23,7 @@ import (
 	"github.com/qubesome/cli/internal/util/dbus"
 	"github.com/qubesome/cli/internal/util/drive"
 	"github.com/qubesome/cli/internal/util/env"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // firecrackerRunner is the runner that backs a workload with a microVM.
