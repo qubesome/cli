@@ -14,7 +14,7 @@ import (
 	"github.com/qubesome/cli/internal/profiles"
 	"github.com/qubesome/cli/internal/sandbox"
 	"github.com/qubesome/cli/internal/types"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Workload diagnoses one workload of a profile.
