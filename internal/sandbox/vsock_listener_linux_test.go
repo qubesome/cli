@@ -66,7 +66,7 @@ func TestVSOCKListenerServesTheSameExchange(t *testing.T) {
 
 	assert.Equal(t, "vsock", ln.Addr().Network())
 
-	s := &supervisor{}
+	s := &supervisor{starter: procStarter{}}
 	go s.serve(ln)
 
 	conn, err := dialVSOCKLocal(t, port)
