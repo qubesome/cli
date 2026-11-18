@@ -38,7 +38,7 @@ import (
 	"github.com/qubesome/cli/internal/util/xauth"
 	"github.com/qubesome/cli/internal/util/xkb"
 	"github.com/qubesome/cli/pkg/inception"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	"golang.org/x/sys/execabs"
 	"golang.org/x/term"
 )

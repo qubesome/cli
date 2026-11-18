@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // ErrNoGPU is returned when no render node is found on the host.
