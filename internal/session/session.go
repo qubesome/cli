@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"strconv"
@@ -411,7 +412,12 @@ func (n *Namespace) Close() error {
 func (n *Namespace) Enter(args []string) []string {
 	const prefix = 7
 
-	out := make([]string, 0, prefix+len(args))
+	capHint := 0
+	if len(args) <= math.MaxInt-prefix {
+		capHint = prefix + len(args)
+	}
+
+	out := make([]string, 0, capHint)
 	out = append(out,
 		"--userns", strconv.Itoa(n.fd),
 		"--dev-bind", "/", "/",
